@@ -591,6 +591,7 @@ fn launcherStatusToTerm(raw_status: u32) std.process.Child.Term {
 }
 
 test "launcher wait status classifies terminal results before stops" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqual(
         std.process.Child.Term{ .exited = 23 },
         launcherStatusToTerm(23 << 8),
@@ -6402,6 +6403,7 @@ test "write payload encoding preserves text paste keys and controls" {
 }
 
 test "terminal outcomes preserve exact exit and signal status" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqual(
         contracts.ReturnOutcome{ .exited = 23 },
         outcomeFromTerm(.{ .exited = 23 }).?,
@@ -6725,6 +6727,7 @@ test "recovered session owns the saved workspace scope" {
 }
 
 test "terminal state does not release live work before backend cleanup" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var fixture = try TestDurableFixture.init(alloc);
     defer fixture.deinit();
@@ -7372,6 +7375,7 @@ test "malformed raw fallback durably replaces an invalid checkpoint with corrupt
 
 test "shutdownSessionsOnly signals live sessions and leaves them allocated" {
     if (!isSupported()) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var fixture = try TestDurableFixture.init(alloc);
     defer fixture.deinit();

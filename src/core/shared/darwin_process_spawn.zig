@@ -465,6 +465,7 @@ test "Darwin spawn resolves argv through parent PATH and replaces the child envi
 }
 
 test "Darwin explicit inherited descriptor avoids low user descriptors" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
     const io = try darwin_io();
     for ([_]std.posix.fd_t{
         0,
@@ -507,6 +508,7 @@ test "Darwin explicit inherited descriptor avoids low user descriptors" {
 }
 
 test "Darwin inherited descriptor survives Bash script execution" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
     const io = try darwin_io();
     const pipe = try create_pipe(false);
     defer close_pipe(pipe);
@@ -636,6 +638,7 @@ test "Darwin spawn preserves inherit ignore file and close stdio modes" {
 }
 
 test "Darwin spawn reports launch errors and preserves wait and kill" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
     const io = try darwin_io();
     const missing_before = try child_pid_snapshot();
     try std.testing.expectError(error.FileNotFound, std.process.spawn(io, .{
@@ -768,6 +771,7 @@ test "parallel Darwin spawns isolate descriptors and each output reaches EOF" {
 }
 
 test "Darwin spawn partial setup failure closes every parent descriptor" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
     const io = try darwin_io();
     const before = open_fd_snapshot();
     const children_before = try child_pid_snapshot();

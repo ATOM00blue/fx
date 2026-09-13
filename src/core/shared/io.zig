@@ -63,6 +63,7 @@ pub fn openDirAbsoluteNoFollow(path: []const u8, options: std.Io.Dir.OpenOptions
 }
 
 test "Darwin process I/O replaces only processSpawn with stable storage" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
     const original = std.testing.io;
     const selected = process_io_for(.macos, original);
     const selected_again = process_io_for(.macos, original);
@@ -1115,6 +1116,7 @@ test "cloneEnvironMap owns an independent copy of map environment state" {
 }
 
 test "cloneEnvironMap copies installed block environment state" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const previous_map = global_environ;
     const previous_block = global_environ_block;
     const previous_raw = global_raw_environ;
@@ -1249,6 +1251,7 @@ test "writeFileAtomic replaces file content and leaves no temp file behind" {
 }
 
 test "writeFileAtomic preserves existing file permissions" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1454,6 +1457,7 @@ test "durable replace reports post-rename sync failure as indeterminate" {
 }
 
 test "private durable file mode is exactly 0600" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1467,6 +1471,7 @@ test "private durable file mode is exactly 0600" {
 }
 
 test "private durable directory mode is exactly 0700" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -1480,6 +1485,7 @@ test "private durable directory mode is exactly 0700" {
 }
 
 test "caller-owned directory can create a verified private child" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 

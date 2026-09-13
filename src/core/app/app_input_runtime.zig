@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const question_prompt = @import("../agent/question_prompt.zig");
 const app_auth_runtime = @import("app_auth_runtime.zig");
 const app_permission_runtime = @import("app_permission_runtime.zig");
@@ -4174,6 +4175,7 @@ test "app_input_runtime Escape closes an idle skills menu before empty-composer 
 }
 
 test "sign-in code entry bypasses composer paste and zeroes on cancellation" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();

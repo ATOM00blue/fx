@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const approval_persistence = @import("approval_persistence.zig");
 const authority = @import("authority.zig");
 const auto_classifier_context = @import("../permissions/auto_classifier_context.zig");
@@ -11359,6 +11360,7 @@ fn runProcessMutationPair(
 
 test "competing processes converge while recovering one pending relationship transaction" {
     if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);

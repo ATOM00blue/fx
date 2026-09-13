@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const debug_trace = @import("../shared/debug_trace.zig");
 const io_mod = @import("../shared/io.zig");
 const list_window = @import("../shared/list_window.zig");
@@ -3103,6 +3104,7 @@ test "linked metadata outside authority is rejected before descriptor open" {
 }
 
 test "linked metadata FIFO is rejected before descriptor open" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const MarkOpen = struct {
         called: bool = false,
 

@@ -1314,6 +1314,7 @@ test "lazy runtime has no allocation or worker before first admission" {
 
 test "stalled request cancellation emits only the targeted cancel" {
     if (!host.isSupported()) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var handles: [2]std.c.fd_t = undefined;
     if (std.c.socketpair(
         std.c.AF.UNIX,

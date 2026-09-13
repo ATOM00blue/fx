@@ -8806,6 +8806,7 @@ test "cancellation persistence failure preserves the lease for a clean retry" {
 }
 
 test "human owner takeover proof is narrow and excludes agent writes" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var fixture = try TestStoreFixture.init(alloc, test_options());
     defer fixture.deinit();

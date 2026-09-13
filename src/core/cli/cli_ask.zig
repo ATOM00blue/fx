@@ -125,6 +125,14 @@ const headless_interrupt = if (std_builtin.os.tag == .windows) struct {
         cancel_requested.store(true, .seq_cst);
     }
 
+    /// Test-facing entry point with the same shape as the POSIX signal
+    /// handler so signal-delivery tests compile on Windows, where delivery
+    /// happens through the console-control handler instead.
+    fn handle(signal: std.posix.SIG) callconv(.c) void {
+        _ = signal;
+        requestInterrupt();
+    }
+
     fn exitCode() u8 {
         return headless_interrupt_exit_code;
     }
@@ -5558,6 +5566,7 @@ test "headless ask rejects concurrent and nested interrupt scopes without overwr
 
 test "headless ask restores the exact previous SIGINT handler" {
     if (comptime !supports_headless_interrupt) return error.SkipZigTest;
+    if (std_builtin.os.tag == .windows) return error.SkipZigTest;
 
     const previous_action: std.posix.Sigaction = .{
         .handler = .{ .handler = testPreviousSigintHandler },
@@ -5581,6 +5590,7 @@ test "headless ask restores the exact previous SIGINT handler" {
 
 test "headless ask redelivers consumed SIGINT after restoring the previous handler" {
     if (comptime !supports_headless_interrupt) return error.SkipZigTest;
+    if (std_builtin.os.tag == .windows) return error.SkipZigTest;
 
     const previous_action: std.posix.Sigaction = .{
         .handler = .{ .handler = testPreviousSigintHandler },
@@ -5605,6 +5615,7 @@ test "headless ask redelivers consumed SIGINT after restoring the previous handl
 
 test "headless ask returns nonzero when the restored SIGINT handler returns" {
     if (comptime !supports_headless_interrupt) return error.SkipZigTest;
+    if (std_builtin.os.tag == .windows) return error.SkipZigTest;
 
     const previous_action: std.posix.Sigaction = .{
         .handler = .{ .handler = testPreviousSigintHandler },
@@ -5642,6 +5653,7 @@ test "headless ask returns nonzero when the restored SIGINT handler returns" {
 
 test "headless ask startup cancellation prevents later hooks" {
     if (comptime !supports_headless_interrupt) return error.SkipZigTest;
+    if (std_builtin.os.tag == .windows) return error.SkipZigTest;
 
     const previous_action: std.posix.Sigaction = .{
         .handler = .{ .handler = testPreviousSigintHandler },
@@ -5718,6 +5730,7 @@ test "headless ask resets signal-visible cancellation state for each scope" {
 
 test "headless ask preserves signal ordering during install and teardown" {
     if (comptime !supports_headless_interrupt) return error.SkipZigTest;
+    if (std_builtin.os.tag == .windows) return error.SkipZigTest;
 
     const previous_action: std.posix.Sigaction = .{
         .handler = .{ .handler = testPreviousSigintHandler },
@@ -5746,6 +5759,7 @@ test "headless ask preserves signal ordering during install and teardown" {
 
 test "headless ask cross-thread SIGINT teardown and reuse target only the active scope" {
     if (comptime !supports_headless_interrupt) return error.SkipZigTest;
+    if (std_builtin.os.tag == .windows) return error.SkipZigTest;
 
     const previous_action: std.posix.Sigaction = .{
         .handler = .{ .handler = testPreviousSigintHandler },
@@ -5786,6 +5800,7 @@ test "headless ask cross-thread SIGINT teardown and reuse target only the active
 
 test "disabled headless ask scope leaves the interactive SIGINT handler untouched" {
     if (comptime !supports_headless_interrupt) return error.SkipZigTest;
+    if (std_builtin.os.tag == .windows) return error.SkipZigTest;
 
     const previous_action: std.posix.Sigaction = .{
         .handler = .{ .handler = testPreviousSigintHandler },

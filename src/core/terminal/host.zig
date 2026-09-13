@@ -1573,6 +1573,7 @@ test "host identity capture and reconciliation use the injected provider" {
 
 test "endpoint paths honor the native sockaddr capacity" {
     if (!isSupported()) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const path_limit = comptime nativeEndpointPathLimit(builtin.os.tag).?;
     var maximum: [path_limit - 1]u8 = @splat('x');
     var oversized: [path_limit]u8 = @splat('x');
@@ -1683,6 +1684,7 @@ test "endpoint selection allocation and unsupported targets fail closed" {
 
 test "runtime transport directories reject symlinks non-private modes and foreign owners" {
     if (!isSupported()) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 

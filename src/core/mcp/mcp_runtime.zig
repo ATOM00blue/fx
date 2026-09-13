@@ -16148,6 +16148,7 @@ fn testProcessIsZombie(pid: std.posix.pid_t) bool {
 }
 
 test "connectServer completes NDJSON handshake against a real stdio server" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     const shell_server =
         \\trap '' TERM

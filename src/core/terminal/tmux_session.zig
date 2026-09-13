@@ -2357,6 +2357,7 @@ fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
 extern "c" fn tcsetpgrp(fd: c_int, pgrp: std.posix.pid_t) c_int;
 
 test "tmux launcher wait status classifies terminal results before stops" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqual(
         std.process.Child.Term{ .exited = 23 },
         launcherStatusToTerm(23 << 8),
@@ -2426,6 +2427,7 @@ test "tmux marker arrival deadlines follow authenticated phase transitions" {
 
 test "tmux peer deadline bounds accept receive partial frames and cancellation" {
     if (!supported()) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     const socket_path = try std.fmt.allocPrint(
         alloc,
@@ -2498,6 +2500,7 @@ test "tmux peer deadline bounds accept receive partial frames and cancellation" 
 }
 
 test "checked tmux cleanup requires saved process absence without a socket" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     const MatchStub = struct {
         result: process_supervisor.TokenMatch,

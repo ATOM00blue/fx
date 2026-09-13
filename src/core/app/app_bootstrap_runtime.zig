@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const app_lifecycle = @import("app_lifecycle.zig");
 const provider_runtime = @import("provider_runtime.zig");
 const app_input_runtime = @import("app_input_runtime.zig");
@@ -860,7 +861,11 @@ fn readTraceForTest(alloc: Allocator, path: []const u8) ![]u8 {
     return io_mod.readFileToEnd(alloc, &file, 8192);
 }
 
-fn resizeHandlerForTest(_: std.posix.SIG) callconv(.c) void {}
+/// Matches app_lifecycle.ResizeHandler: Windows and wasi deliver resize
+/// notifications without a signal argument, POSIX handlers receive the SIG.
+fn resizeHandlerForTest(
+    _: if (builtin.os.tag == .windows or builtin.os.tag == .wasi) void else std.posix.SIG,
+) callconv(.c) void {}
 
 test "app_bootstrap_runtime transfers startup state and starts a fresh session" {
     const alloc = std.testing.allocator;

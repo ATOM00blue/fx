@@ -7292,6 +7292,7 @@ test "provider and admission failures release resources and persist typed work s
 }
 
 test "process-held session lock preserves queue until explicit exactly-once retry" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
@@ -7504,6 +7505,7 @@ fn waitExternalExecutionProcess(pid: std.c.pid_t) !u8 {
 
 test "recovery skips execution owned by another live process" {
     if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
