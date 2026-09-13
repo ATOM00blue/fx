@@ -69,6 +69,15 @@ jobs:
           $status = & .\zig-out\bin\${{ matrix.platform.binary }} status --json
           if ($LASTEXITCODE -ne 0 -or -not $status) { exit 1 }
 
+      - name: Upload Windows binary
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: x1-windows-x86_64-${{ matrix.optimize }}-${{ github.sha }}
+          path: zig-out/bin/x1.exe
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Smoke test fresh binary
         shell: bash
         if: runner.os != 'Windows'
