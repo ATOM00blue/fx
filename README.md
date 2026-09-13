@@ -1,74 +1,63 @@
 ```
  ⠀⠀⠀⠀⠀⠀⣠⣾⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀
  ⠀⠀⠀⠀⠀⢰⣿⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- ⠀⠀⠀⣠⣶⣿⣿⣷⣶⡶⣶⣶⣆⠀⠀⠀⣴⣶⣶⠆
- ⠀⠀⠀⠉⢹⣿⣿⠉⠉⠀⠘⢿⣿⣧⣀⣾⣿⡿⠃⠀             Tiny, open, embeddable, native coding agent.
- ⠀⠀⠀⠀⣼⣿⡏⠀⠀⠀⠀⠀⠻⣿⣿⣿⠟⠀⠀⠀
- ⠀⠀⠀⢀⣿⣿⠃⠀⠀⠀⠀⢠⣦⠘⢿⣿⣷⡀⠀⠀             curl -fsSL https://fx.sh/setup.sh | bash
- ⠀⠀⠀⣸⣿⡟⠀⠀⠀⠀⣰⣿⣿⠗⠀⠻⣿⣿⣄⠀
- ⠀⠀⠀⣿⣿⠇⠀⠀⠀⠾⠿⠿⠋⠀⠀⠀⠘⠿⠿⠦             ⚠ Status: Experimental. Use at your own risk.
+ ⠀⠀⠀⣠⣶⣿⣿⣷⣶⡶⣶⣶⣆⠀⠀⠀⣴⣶⣶⠆             X1 — fast, native coding agent.
+ ⠀⠀⠀⠉⢹⣿⣿⠉⠉⠀⠘⢿⣿⣧⣀⣾⣿⡿⠃⠀
+ ⠀⠀⠀⠀⣼⣿⡏⠀⠀⠀⠀⠀⠻⣿⣿⣿⠟⠀⠀⠀             curl -fsSL https://layerx1.com/setup.sh | bash
+ ⠀⠀⠀⢀⣿⣿⠃⠀⠀⠀⠀⢠⣦⠘⢿⣿⣷⡀⠀⠀
+ ⠀⠀⠀⣸⣿⡟⠀⠀⠀⠀⣰⣿⣿⠗⠀⠻⣿⣿⣄⠀             ⚠ Status: Experimental. Use at your own risk.
+ ⠀⠀⠀⣿⣿⠇⠀⠀⠀⠾⠿⠿⠋⠀⠀⠀⠘⠿⠿⠦
   ⠀⣸⣿⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
  ⣿⣿⣿⠟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ```
 
-fx is a coding agent harness and CLI written in Zig, optimized for research and embeddability as part of larger systems.
+x1 is a coding agent harness and CLI written in Zig, optimized for research and embeddability as part of larger systems.
 
-It focuses on minimalism and performance across the board, from system prompt design to its tools, feature set, and 7.8 MiB binary.
+It focuses on minimalism and performance across the board, from system prompt design to its tools, feature set, and small binary.
 
 For end users, its CLI output style and form factor aim to be closer to a Unix shell than a heavy "IDE in the terminal" TUI.
 
-It's open source (Apache-2.0), model-agnostic, and suitable for both local and cloud inference.
+It's open source (Apache-2.0) and runs on the X1 platform.
+
+Windows x86_64 is a native target with the same core workflow as macOS and Linux: LayerX1 login, model inference, file tools, sessions, and terminal rendering. Commands run through PowerShell (pwsh, then Windows PowerShell) or `cmd.exe`, with Job Objects keeping timeouts and cleanup from orphaning child processes. Background processes, clipboard, notification sounds, resize handling, and self-upgrade work natively; creation-time process identity tokens protect against PID reuse the way the POSIX boot-id tokens do. The tmux-backed interactive terminal sessions (`terminal.start`) remain macOS/Linux-only until a ConPTY backend lands.
 
 ## Install
 
-```bash
-curl -fsSL https://fx.sh/setup.sh | bash
-```
-
-## Run fx
-
-Sign in with Vercel AI Gateway:
+macOS and Linux:
 
 ```bash
-fx login
+curl -fsSL https://layerx1.com/setup.sh | bash
 ```
 
-Or use an eligible ChatGPT subscription through OpenAI Codex OAuth:
+Windows PowerShell:
+
+```powershell
+irm https://layerx1.com/setup.ps1 | iex
+```
+
+## Run x1
+
+Sign in with your X1 account:
 
 ```bash
-fx login codex
-fx
+x1 login
+x1
 ```
 
-Or use an eligible Grok subscription through xAI OAuth:
+Inside x1, `/model` or `/models` loads the current LayerX1 catalog and lets you choose a model and its supported reasoning effort. Use `/credits` for plan and balance details, `/usage` for local token and spend history, and `/logout` to remove the subscription session.
 
-```bash
-fx login grok
-fx
-```
+The X1 route uses subscription access directly and never sends its OAuth token to third parties. The session is stored privately under `~/.x1/` and refreshed when needed. `/credits` shows your plan, remaining balance, and usage.
 
-`fx login codex` and `fx login grok` select that provider and a model from its authenticated catalog. Inside fx, open `/setup` and choose **Model provider** to move between Gateway, Codex, and Grok. `/model` lists the active provider's fetched models. Subscription model IDs are the raw IDs returned by each authenticated catalog. Use `/logout codex` or `/logout grok` to remove that subscription session without affecting other providers; choosing it again from **Model provider** starts sign-in.
-
-The OpenAI Codex route uses ChatGPT subscription access directly and never sends its OAuth token to Vercel AI Gateway. The session is stored privately at `~/.fx/chatgpt-auth.json` and refreshed when needed. On supported Codex models, `/fast` requests OpenAI's priority service tier and consumes ChatGPT credits at the higher Fast mode rate.
-
-The Grok route uses subscription access directly at xAI and never sends its OAuth token to Vercel AI Gateway or OpenAI. Its session is stored privately at `~/.fx/grok-auth.json`, refreshed when needed, and used only with the authenticated xAI catalog and Responses API.
-
-To use an AI Gateway API key instead:
-
-```bash
-fx setup
-```
-
-Run fx from a project:
+Run x1 from a project:
 
 ```bash
 cd your_project
-fx
+x1
 ```
 
 The current directory becomes the primary workspace. Enter a prompt, or run `/help` to browse interactive commands.
 
-The status line hides the workspace path and Git branch by default. Enable the `Status line workspace` option in `/settings`, run `/statusline workspace`, or set it in `~/.fx/settings.json`:
+The status line hides the workspace path and Git branch by default. Enable the `Status line workspace` option in `/settings`, run `/statusline workspace`, or set it in `~/.x1/settings.json`:
 
 ```json
 {
@@ -78,67 +67,70 @@ The status line hides the workspace path and Git branch by default. Enable the `
 }
 ```
 
-List saved sessions with `fx sessions`. Resume the latest session for the current workspace, or select an exact session ID, through the same command group:
+List saved sessions with `x1 sessions`. Resume the latest session for the current workspace, or select an exact session ID, through the same command group:
 
 ```bash
-fx session resume last
-fx session resume --id <id>
+x1 session resume last
+x1 session resume --id <id>
 ```
 
-Each interactive session names its terminal tab. The title prefers the session name, falls back to the workspace name, and keeps the active model as secondary context. Renaming or resuming a session updates the tab, and exiting clears the fx-owned title. Noninteractive commands do not emit terminal-title controls.
+Each interactive session names its terminal tab. The title prefers the session name, falls back to the workspace name, and keeps the active model as secondary context. Renaming or resuming a session updates the tab, and exiting clears the x1-owned title. Noninteractive commands do not emit terminal-title controls.
 
-Run `/feedback` to open the feedback form at `fx.sh/feedback`. It does not create a diagnostic or change the clipboard.
+Run `/trace` to create a private Markdown diagnostic with logs, session context, runtime state, permissions, and recent activity. On macOS, x1 copies the `.md` file to the clipboard; on other platforms, it saves the file and prints its path. Review and redact the trace before sharing it.
 
-Run `/trace` to create a private Markdown diagnostic with logs, session context, runtime state, permissions, and recent activity. On macOS, fx copies the `.md` file to the clipboard; on other platforms, it saves the file and prints its path. Review and redact the trace before sharing it.
-
-Use `fx ask` for a single request:
+Use `x1 ask` for a single request:
 
 ```bash
-fx ask "explain the changes in this repository"
+x1 ask "explain the changes in this repository"
 ```
 
 With `--json`, `output` contains accumulated assistant Markdown across the request, while `final_output` contains only a completed final assistant response and is `""` for interrupted, failed, background, or otherwise absent final responses.
 
-Foreground terminal commands run with an explicit finite deadline. fx uses durable terminal sessions for services, watchers, GUI applications, and other long-lived work, and keeps captured foreground output available through an opaque bounded-read handle for the active session or `--no-save` process.
+Foreground terminal commands run with an explicit finite deadline. x1 uses durable terminal sessions for services, watchers, GUI applications, and other long-lived work, and keeps captured foreground output available through an opaque bounded-read handle for the active session or `--no-save` process.
 
-fx starts in `auto` permission mode. Routine understood development actions run directly. Each unresolved action receives one narrow safety review based on the current user request and the exact pending action. A clear result authorizes only that action. A caution or unavailable review holds the action and returns advice to the agent without opening a permission prompt or ending the turn. See [Permissions](https://fx.sh/docs/configure-fx/permissions) for other modes and persistent rules.
+x1 starts in `auto` permission mode. Routine understood development actions run directly. Each unresolved action receives one narrow safety review based on the current user request and the exact pending action. A clear result authorizes only that action. A caution or unavailable review holds the action and returns advice to the agent without opening a permission prompt or ending the turn.
 
 JSON and quiet requests stay noninteractive by default. Add `--prompt-permissions` to allow configured approval prompts when stdin is a TTY. Automatic safety review never opens that prompt. Prompt text is written to stderr, so JSON stdout stays parseable and quiet stdout stays empty. Piped or redirected stdin remains noninteractive and fails instead of waiting for approval.
 
 Inside a saved session, `/permissions remember <allow|deny> <tool-name> <arguments-json>` stores an exact confirmed rule without running the action. `/permissions` lists stable rule IDs, and `/permissions revoke <rule-id>` removes a stored rule even when its original workspace or file state has changed.
 
-## Embed fx
+## Embed x1
 
-fx builds as a native binary or WebAssembly. Applications embedding fx can provide network transport, session storage, configuration, permission handling, and terminal I/O.
+x1 builds as a native binary or WebAssembly. Applications embedding x1 can provide network transport, session storage, configuration, permission handling, and terminal I/O.
 
 | Surface | Use |
 | --- | --- |
-| `fx acp` | Connect the native agent to editors and other Agent Client Protocol clients. |
-| `createFxAgent()` | Embed the agent core in a JavaScript host with `fx-core.wasm`. |
-| `createFxTerminal()` | Embed the interactive terminal with `fx-term.wasm`. |
+| `x1 acp` | Connect the native agent to editors and other Agent Client Protocol clients. |
+| `createX1Agent()` | Embed the agent core in a JavaScript host with `x1-core.wasm`. |
+| `createX1Terminal()` | Embed the interactive terminal with `x1-term.wasm`. |
 
-The WebAssembly SDK is experimental. See the [WebAssembly SDK](sdk/README.md) and [ACP documentation](https://fx.sh/docs/using-fx/acp).
+The WebAssembly SDK is experimental. See the [WebAssembly SDK](sdk/README.md).
 
-## Extend fx
+## Extend x1
 
-Add reusable instructions with [skills](https://fx.sh/docs/capabilities/skills), connect external tools through [MCP](https://fx.sh/docs/capabilities/mcp), or delegate independent work to [subagents](https://fx.sh/docs/capabilities/subagents). Inside fx, `/mcp add <name> <command> [args...]` saves a local server and `/mcp add --transport http <name> <url>` saves a remote Streamable HTTP server. Project instruction files may link within their scope, and read-only workspace or compatibility skill directories and their primary `SKILL.md` files may link within their owning workspace or home; managed skills, secondary resources, and escaping links remain no-follow. Skills installed via symlinks that resolve outside home or workspace (e.g. Nix store paths) are loaded when their resolved target is inside a directory listed in the `FX_SKILL_SYMLINK_AUTHORITIES` environment variable (colon-separated absolute paths). `fx status` and `fx doctor` report an invalid trusted MCP profile without starting its servers.
-
-## Documentation
-
-Read the [fx documentation](https://fx.sh/docs).
+Add reusable instructions with skills, connect external tools through MCP, or delegate independent work to subagents. Inside x1, `/mcp add <name> <command> [args...]` saves a local server and `/mcp add --transport http <name> <url>` saves a remote Streamable HTTP server. Project instruction files may link within their scope, and read-only workspace or compatibility skill directories and their primary `SKILL.md` files may link within their owning workspace or home; managed skills, secondary resources, and escaping links remain no-follow. Skills installed via symlinks that resolve outside home or workspace (e.g. Nix store paths) are loaded when their resolved target is inside a directory listed in the `X1_SKILL_SYMLINK_AUTHORITIES` environment variable (colon-separated absolute paths). `x1 status` and `x1 doctor` report an invalid trusted MCP profile without starting its servers.
 
 ## Build from source
 
-Building fx requires [Zig 0.16.0+](https://ziglang.org/download/):
+Building x1 requires [Zig 0.16.0+](https://ziglang.org/download/):
 
 ```bash
-git clone https://github.com/vercel-labs/fx.git
-cd fx
+git clone <x1 repository>
+cd x1
 zig build -Doptimize=ReleaseSafe
-./zig-out/bin/fx
+./zig-out/bin/x1
 ```
 
 Run the test suite with `zig build test`. See [CONTRIBUTING.md](CONTRIBUTING.md) for development and contribution guidelines.
+
+## Compatibility exceptions
+
+These formats stay on purpose so existing X1 user state is not stranded:
+
+- Session files remain `~/.x1/layerx1-auth.json`. Older FX/Vercel files at `~/.x1/auth.json` and the unused keychain item `X1_OAUTH_SESSION_V1` are never migrated.
+- Replay recordings keep the `.fxtape` extension.
+- Historical usage records may still store `https://ai-gateway.vercel.sh` as an origin string. New live traffic uses `https://api.layerx1.com`.
+- E2E harnesses may still seed `AI_GATEWAY_API_KEY` and then convert it into a LayerX1 session. The product binary does not read that environment variable.
 
 ## License
 
@@ -146,7 +138,3 @@ Run the test suite with `zig build test`. See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Third-party licenses and attributions are listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Credits
-
-Interface sounds by [cuelume](https://github.com/Danilaa1/cuelume).

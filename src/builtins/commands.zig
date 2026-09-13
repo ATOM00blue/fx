@@ -34,7 +34,7 @@ pub const top_level_specs = [_]TopLevelSpec{
         .summary = "Run one noninteractive request",
         .options = &.{
             .{ .flag = "--auto", .description = "Automatically review unresolved permission requests" },
-            .{ .flag = "--yolo", .description = "Disable fx permission checks" },
+            .{ .flag = "--yolo", .description = "Disable x1 permission checks" },
             .{ .flag = "--image PATH", .description = "Attach an image file; repeat for multiple images" },
             json_option,
             .{ .flag = "--quiet", .description = "Suppress assistant output" },
@@ -89,20 +89,20 @@ pub const top_level_specs = [_]TopLevelSpec{
     .{
         .kind = .login,
         .token = "login",
-        .usage = "login [vercel|codex|grok]",
-        .summary = "Sign in to Vercel or a selected provider",
+        .usage = "login",
+        .summary = "Sign in to your LayerX1 account",
     },
     .{
         .kind = .logout,
         .token = "logout",
-        .usage = "logout [vercel|codex|grok]",
-        .summary = "Sign out of Vercel or a selected provider session",
+        .usage = "logout [x1]",
+        .summary = "Sign out of your LayerX1 account",
     },
     .{
         .kind = .setup,
         .token = "setup",
         .usage = "setup",
-        .summary = "Configure an AI Gateway API key",
+        .summary = "Manage your LayerX1 login",
     },
     .{
         .kind = .status,
@@ -121,7 +121,7 @@ pub const top_level_specs = [_]TopLevelSpec{
             "Modes:",
             "  ask    Prompt before sensitive tool calls",
             "  auto   Apply rules, then review unresolved sensitive tool calls (default)",
-            "  yolo   Disable fx permission checks",
+            "  yolo   Disable x1 permission checks",
             "",
             "Change the mode from the interactive shell with `/permissions [ask|auto|yolo|reset]`,",
             "and manage persistent allow rules with `/allowlist`.",
@@ -137,8 +137,9 @@ pub const top_level_specs = [_]TopLevelSpec{
     .{
         .kind = .provider,
         .token = "provider",
-        .usage = "provider <gateway|codex|grok>",
-        .summary = "Choose the model provider used by fx",
+        .usage = "provider [x1]",
+        .summary = "X1 is the only inference provider",
+        .hidden_from_top_level_help = true,
     },
     .{
         .kind = .doctor,
@@ -160,12 +161,6 @@ pub const top_level_specs = [_]TopLevelSpec{
         .details = &.{
             "With no target, lists the persisted background command history.",
         },
-    },
-    .{
-        .kind = .teams,
-        .token = "teams",
-        .usage = "teams",
-        .summary = "Choose the Vercel team used by AI Gateway",
     },
     .{
         .kind = .session,
@@ -214,28 +209,28 @@ pub const top_level_specs = [_]TopLevelSpec{
         .token = "credits",
         .aliases = &.{"balance"},
         .usage = "credits [--json]",
-        .summary = "Show the AI Gateway credit balance",
+        .summary = "Show your LayerX1 plan, dollar balance, and month usage",
         .options = &.{json_option},
     },
     .{
         .kind = .usage,
         .token = "usage",
         .usage = "usage [--period <24h|7d|30d>] [--json]",
-        .summary = "Show local fx token usage and spend",
+        .summary = "Show local x1 token usage and spend",
         .options = &.{
             .{ .flag = "--period <24h|7d|30d>", .description = "Select a rolling window (default: 30d)" },
             json_option,
         },
         .details = &.{
-            "Reports only usage recorded by fx on this machine.",
-            "This command reads local state and does not query account-wide Gateway reports.",
+            "Reports only usage recorded by x1 on this machine.",
+            "This command reads local state and does not query LayerX1 account usage.",
         },
     },
     .{
         .kind = .upgrade,
         .token = "upgrade",
         .usage = "upgrade [--channel <stable|dev>] [--json]",
-        .summary = "Upgrade 𝒇x on the selected release channel",
+        .summary = "Upgrade X1 on the selected release channel",
         .options = &.{
             .{ .flag = "--channel <stable|dev>", .description = "Select and remember the release channel" },
             json_option,
@@ -292,11 +287,9 @@ pub const top_level_help_groups = [_]TopLevelHelpGroup{
         .{ .kind = .replay, .usage = "replay <tape>" },
     } },
     .{ .entries = &.{
-        .{ .kind = .login, .usage = "login [vercel|codex|grok]" },
-        .{ .kind = .logout, .usage = "logout [vercel|codex|grok]" },
-        .{ .kind = .provider, .usage = "provider <gateway|codex|grok>" },
+        .{ .kind = .login, .usage = "login" },
+        .{ .kind = .logout, .usage = "logout [x1]" },
         .{ .kind = .setup, .usage = "setup" },
-        .{ .kind = .teams, .usage = "teams" },
         .{ .kind = .credits, .usage = "credits|balance" },
         .{ .kind = .usage, .usage = "usage [--period <24h|7d|30d>]" },
     } },
@@ -355,31 +348,31 @@ pub const top_level_flags = [_]TopLevelFlag{
     },
     .{
         .usage = "-v, --version",
-        .description = "Print the 𝒇x version and exit",
+        .description = "Print the X1 version and exit",
     },
 };
 
 pub const top_level_examples = [_]TopLevelExample{
-    .{ .command = "fx", .description = "Start a fresh interactive session" },
-    .{ .command = "fx ask \"Explain the changes in this repository\"", .description = "Run one request and exit" },
-    .{ .command = "fx session resume last", .description = "Continue the latest session for this workspace" },
-    .{ .command = "fx status --json", .description = "Inspect the current configuration as JSON" },
+    .{ .command = "x1", .description = "Start a fresh interactive session" },
+    .{ .command = "x1 ask \"Explain the changes in this repository\"", .description = "Run one request and exit" },
+    .{ .command = "x1 session resume last", .description = "Continue the latest session for this workspace" },
+    .{ .command = "x1 status --json", .description = "Inspect the current configuration as JSON" },
 };
 
 pub const top_level_notes = [_][]const u8{
-    "Run `fx <command> --help` for command-specific options and examples.",
+    "Run `x1 <command> --help` for command-specific options and examples.",
     "Run `/help` inside an interactive session for slash commands.",
 };
 
 pub const top_level_resources = [_]TopLevelResource{
-    .{ .label = "Learn more about 𝒇x:", .value = "https://fx.sh/docs", .link = true },
-    .{ .label = "Report a problem:", .value = "run `/feedback` inside 𝒇x" },
+    .{ .label = "Learn more about X1:", .value = "https://layerx1.com", .link = true },
+    .{ .label = "Report a problem:", .value = "run `/feedback` inside X1" },
 };
 
 pub const top_level_registry = TopLevelRegistry{
     .specs = top_level_specs[0..],
     .description = "Fast, native coding agent for the terminal.",
-    .interactive_hint = "𝒇x starts an interactive session by default. Use `fx ask` to run one noninteractive request.",
+    .interactive_hint = "X1 starts an interactive session by default. Use `x1 ask` to run one noninteractive request.",
     .help_groups = top_level_help_groups[0..],
     .flags = top_level_flags[0..],
     .examples = top_level_examples[0..],
@@ -419,11 +412,11 @@ pub const slash_specs = [_]SlashSpec{
     .{ .kind = .resume_session, .command = "/resume", .help_entry = "/resume", .completion_description = "resume a saved session", .presentation_category = .session },
     .{ .kind = .continue_recovery, .command = "/continue", .help_entry = "/continue", .completion_description = "continue a paused model response", .presentation_category = .session, .requires_prompt_credential = true },
     .{ .kind = .rename_session, .command = "/rename", .help_entry = "/rename <title>", .completion_description = "rename the current session", .presentation_category = .session, .has_args = true, .accepts_payload = true },
-    .{ .kind = .login, .command = "/login", .help_entry = "/login", .completion_description = "choose Vercel or Codex sign-in", .presentation_category = .account },
-    .{ .kind = .logout, .command = "/logout", .help_entry = "/logout [vercel|codex|grok]", .completion_description = "sign out of a provider session", .presentation_category = .account, .has_args = true, .accepts_payload = true },
-    .{ .kind = .setup, .command = "/setup", .help_entry = "/setup", .completion_description = "manage accounts and AI Gateway access", .presentation_category = .account },
+    .{ .kind = .login, .command = "/login", .help_entry = "/login", .completion_description = "sign in to your LayerX1 account", .presentation_category = .account },
+    .{ .kind = .logout, .command = "/logout", .help_entry = "/logout [x1]", .completion_description = "sign out of your LayerX1 account", .presentation_category = .account, .has_args = true, .accepts_payload = true },
+    .{ .kind = .setup, .command = "/setup", .help_entry = "/setup", .completion_description = "manage your LayerX1 login", .presentation_category = .account },
     .{ .kind = .stats, .command = "/stats", .help_entry = "/stats", .completion_description = "show token and turn statistics", .presentation_category = .account },
-    .{ .kind = .usage, .command = "/usage", .aliases = &.{"/cost"}, .help_entry = "/usage (/cost)", .completion_description = "show local fx tokens, models, and spend", .presentation_category = .account },
+    .{ .kind = .usage, .command = "/usage", .aliases = &.{"/cost"}, .help_entry = "/usage (/cost)", .completion_description = "show local x1 tokens, models, and spend", .presentation_category = .account },
     .{ .kind = .status, .command = "/status", .help_entry = "/status", .completion_description = "show runtime configuration", .presentation_category = .general, .show_in_welcome = true },
     .{ .kind = .background, .command = "/background", .help_entry = "/background [open|logs|stop <id|last>]", .completion_description = "inspect background command history", .presentation_category = .agents, .show_in_welcome = true, .has_args = true },
     .{ .kind = .background_stop, .command = "/background stop", .accepts_payload = true },
@@ -431,25 +424,25 @@ pub const slash_specs = [_]SlashSpec{
     .{ .kind = .background_logs, .command = "/background logs", .accepts_payload = true },
     .{ .kind = .image, .command = "/image", .aliases = &.{"/img"}, .help_entry = "/image <path> (/img)", .completion_description = "attach an image by path", .presentation_category = .media, .has_args = true, .accepts_payload = true },
     .{ .kind = .images, .command = "/images", .help_entry = "/images [clear]", .completion_description = "manage pending image attachments", .presentation_category = .media, .has_args = true, .accepts_payload = true },
-    .{ .kind = .model, .command = "/model", .help_entry = "/model <id-or-query>", .completion_description = "choose what model and reasoning effort to use", .presentation_category = .model, .has_args = true, .accepts_payload = true },
-    .{ .kind = .permissions, .command = "/permissions", .help_entry = "/permissions [ask|auto|yolo|reset]", .completion_description = "choose what fx is allowed to do", .presentation_category = .security, .show_in_welcome = true, .has_args = true, .accepts_payload = true },
+    .{ .kind = .model, .command = "/model", .aliases = &.{"/models"}, .help_entry = "/model (/models) <id-or-query>", .completion_description = "choose a live LayerX1 model and reasoning effort", .presentation_category = .model, .has_args = true, .accepts_payload = true },
+    .{ .kind = .permissions, .command = "/permissions", .help_entry = "/permissions [ask|auto|yolo|reset]", .completion_description = "choose what x1 is allowed to do", .presentation_category = .security, .show_in_welcome = true, .has_args = true, .accepts_payload = true },
     .{ .kind = .allowlist, .command = "/allowlist", .help_entry = "/allowlist [view [effective|local|user]|[local|user] add|remove|reset ...]", .completion_description = "manage trusted commands, tools, and URLs", .presentation_category = .security, .show_in_welcome = true, .has_args = true, .accepts_payload = true },
     .{ .kind = .undo, .command = "/undo", .help_entry = "/undo", .completion_description = "undo the latest tracked file operation", .presentation_category = .session },
     .{ .kind = .mcp, .command = "/mcp", .help_entry = "/mcp [list|resource|prompt|add|remove|path|reload|auth|logout]", .completion_description = "manage local and remote MCP servers, resources, and prompts", .presentation_category = .extensions, .has_args = true, .accepts_payload = true },
     .{ .kind = .skills, .command = "/skills", .help_entry = "/skills [list|add|install|show|create|remove|path] [name|url|path] ($ opens skill search)", .completion_description = "browse and manage skills", .presentation_category = .extensions, .has_args = true, .accepts_payload = true },
     .{ .kind = .copy, .command = "/copy", .help_entry = "/copy", .completion_description = "copy the last assistant response", .presentation_category = .session },
-    .{ .kind = .feedback, .command = "/feedback", .help_entry = "/feedback", .completion_description = "open the fx feedback form", .presentation_category = .product, .show_in_welcome = true },
+    .{ .kind = .feedback, .command = "/feedback", .help_entry = "/feedback", .completion_description = "open the x1 feedback form", .presentation_category = .product, .show_in_welcome = true },
     .{ .kind = .trace, .command = "/trace", .help_entry = "/trace", .completion_description = "copy a private diagnostic trace", .presentation_category = .product },
     .{ .kind = .compact, .command = "/compact", .help_entry = "/compact", .completion_description = "compact older conversation turns", .presentation_category = .session },
     .{ .kind = .settings, .command = "/settings", .help_entry = "/settings [startup-scrollback [on|off]]", .completion_description = "browse and update settings", .presentation_category = .appearance, .has_args = true, .accepts_payload = true },
     .{ .kind = .alias, .command = "/alias", .aliases = &.{}, .help_entry = "/alias [name] [command]", .completion_description = "show alias availability", .presentation_category = .extensions, .has_args = true, .accepts_payload = true },
-    .{ .kind = .credits, .command = "/credits", .aliases = &.{"/balance"}, .help_entry = "/credits (/balance)", .completion_description = "show gateway credits balance", .presentation_category = .account, .requires_prompt_credential = true },
+    .{ .kind = .credits, .command = "/credits", .aliases = &.{"/balance"}, .help_entry = "/credits (/balance)", .completion_description = "show LayerX1 plan, dollar balance, and month usage", .presentation_category = .account, .requires_prompt_credential = true },
     .{ .kind = .paste, .command = "/paste", .help_entry = "/paste", .completion_description = "attach an image from the clipboard when supported", .presentation_category = .media },
     .{ .kind = .fast, .command = "/fast", .help_entry = "/fast", .completion_description = "toggle Fast mode when supported", .presentation_category = .model },
     .{ .kind = .statusline, .command = "/statusline", .help_entry = "/statusline [context|session|workspace]", .completion_description = "toggle status line segments", .presentation_category = .appearance, .has_args = true, .accepts_payload = true },
     .{ .kind = .notifications, .command = "/sound", .help_entry = "/sound [on|off|max]", .completion_description = "toggle sounds and terminal bells", .presentation_category = .appearance, .has_args = true, .accepts_payload = true },
     .{ .kind = .workspace, .command = "/workspace", .help_entry = "/workspace [list|add PATH|remove PATH|clear]", .completion_description = "manage additional workspace directories", .presentation_category = .workspace, .show_in_welcome = true, .has_args = true, .accepts_payload = true },
-    .{ .kind = .version, .command = "/version", .help_entry = "/version", .completion_description = "show the fx version", .presentation_category = .general },
+    .{ .kind = .version, .command = "/version", .help_entry = "/version", .completion_description = "show the x1 version", .presentation_category = .general },
     .{ .kind = .quit, .command = "/quit", .aliases = &.{"/exit"}, .help_entry = "/quit", .completion_description = "exit the interactive shell", .presentation_category = .general, .show_in_welcome = true },
 };
 
@@ -578,7 +571,8 @@ test "built-in slash registry resolves primary commands and aliases" {
 
     const model_command = slash_registry.lookup("/model") orelse return error.TestExpectedEqual;
     try std.testing.expect(!model_command.requires_prompt_credential);
-    try std.testing.expect(slash_registry.lookup("/models") == null);
+    const models_alias = slash_registry.lookup("/models") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(SlashKind.model, models_alias.kind);
 
     try std.testing.expect(command_specs.matchedSlashPrefix(slash_registry, "/model\nmodel-id", .model) == null);
 }

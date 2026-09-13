@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { FX_BIN } from "../evals/eval-helpers";
+import { X1_BIN } from "../evals/eval-helpers";
 import {
   classifierEvidenceFromRequest,
   FAKE_GATEWAY_MODEL,
@@ -53,7 +53,7 @@ afterEach(async () => {
 });
 
 async function waitForTerminalHostExit(home: string): Promise<void> {
-  const identityPath = join(home, ".fx", "terminal-host", "host.json");
+  const identityPath = join(home, ".x1", "terminal-host", "host.json");
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     if (!existsSync(identityPath)) return;
@@ -63,7 +63,7 @@ async function waitForTerminalHostExit(home: string): Promise<void> {
 }
 
 function terminalHostPid(home: string): number | null {
-  const identityPath = join(home, ".fx", "terminal-host", "host.json");
+  const identityPath = join(home, ".x1", "terminal-host", "host.json");
   try {
     const identity = JSON.parse(readFileSync(identityPath, "utf8")) as { pid?: unknown };
     const pid = Number(identity.pid);
@@ -74,7 +74,7 @@ function terminalHostPid(home: string): number | null {
 }
 
 async function cleanupTerminalHost(home: string): Promise<void> {
-  const identityPath = join(home, ".fx", "terminal-host", "host.json");
+  const identityPath = join(home, ".x1", "terminal-host", "host.json");
   const naturalDeadline = Date.now() + 3_000;
   while (Date.now() < naturalDeadline) {
     if (!existsSync(identityPath)) return;
@@ -175,7 +175,7 @@ async function cleanupNarrowReturn(
   active: TmuxSession,
   childStarted: boolean,
 ): Promise<void> {
-  const identityPath = join(fixture.home, ".fx", "terminal-host", "host.json");
+  const identityPath = join(fixture.home, ".x1", "terminal-host", "host.json");
   const identity = JSON.parse(
     await waitForTrace(identityPath, '"pid"'),
   ) as { pid: string };
@@ -321,19 +321,19 @@ function holdUntilCleanup(root: string): string {
 }
 
 function terminalTransportPaths(home: string) {
-  const durableDir = join(home, ".fx", "terminal-host");
+  const durableDir = join(home, ".x1", "terminal-host");
   const durableSocket = join(durableDir, "host.sock");
   const capacity = process.platform === "darwin" ? 104 : 108;
   if (Buffer.byteLength(durableSocket) < capacity) {
     return { dir: durableDir, socket: durableSocket };
   }
   const digest = createHash("sha256")
-    .update("fx.terminal.transport.v1\0")
+    .update("x1.terminal.transport.v1\0")
     .update(home)
     .digest("hex")
     .slice(0, 32);
   const base = process.platform === "darwin" ? "/private/tmp" : "/tmp";
-  const dir = join(base, `fx-terminal-${process.getuid?.() ?? 0}-${digest}`);
+  const dir = join(base, `x1-terminal-${process.getuid?.() ?? 0}-${digest}`);
   return { dir, socket: join(dir, "host.sock") };
 }
 
@@ -347,17 +347,17 @@ function createFixture(prefix: string, endpointBytes?: number) {
       "x".repeat(
         endpointBytes -
           Buffer.byteLength(homeBase) -
-          Buffer.byteLength("/.fx/terminal-host/host.sock") -
+          Buffer.byteLength("/.x1/terminal-host/host.sock") -
           1,
       ),
     );
   const workspace = join(root, "workspace");
   const tracePath = join(root, "trace.log");
   const stderrPath = join(root, "stderr.log");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".x1"), { recursive: true });
   mkdirSync(workspace);
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".x1", "settings.json"),
     JSON.stringify({
       permission_mode: "yolo",
       sandbox: "os",
@@ -375,7 +375,7 @@ function createFixture(prefix: string, endpointBytes?: number) {
   roots.push(root);
   fixtureHomes.push(home);
   const transport = terminalTransportPaths(home);
-  if (transport.dir !== join(home, ".fx", "terminal-host")) {
+  if (transport.dir !== join(home, ".x1", "terminal-host")) {
     transportRoots.add(transport.dir);
   }
   return {
@@ -423,7 +423,7 @@ async function launch(
   fixture: ReturnType<typeof createFixture>,
   gateway: ReturnType<typeof startFakeGateway>,
   extraEnv: Record<string, string | undefined> = {},
-  cmd = FX_BIN,
+  cmd = X1_BIN,
   size = { width: 120, height: 30 },
 ) {
   const session = await TmuxSession.create({
@@ -435,15 +435,15 @@ async function launch(
       SHELL: TERMINAL_FIXTURE_SHELL,
       AI_GATEWAY_API_KEY: "fake-terminal-tool-key",
       VERCEL_OIDC_TOKEN: undefined,
-      FX_AUTO_UPGRADE: "0",
-      FX_PERMISSION_MODE: "yolo",
-      FX_MODEL: FAKE_GATEWAY_MODEL,
-      FX_GATEWAY_BASE_URL: gateway.baseUrl,
-      FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-      FX_TRACE_LOG: fixture.tracePath,
-      FX_TRACE_SCOPES:
+      X1_AUTO_UPGRADE: "0",
+      X1_PERMISSION_MODE: "yolo",
+      X1_MODEL: FAKE_GATEWAY_MODEL,
+      X1_GATEWAY_BASE_URL: gateway.baseUrl,
+      X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+      X1_TRACE_LOG: fixture.tracePath,
+      X1_TRACE_SCOPES:
         "input,terminal,terminal_client,terminal_store,terminal_host,agent,worker,gateway",
-      FX_TERMINAL_HOST_IDLE_MS: "2500",
+      X1_TERMINAL_HOST_IDLE_MS: "2500",
       ...extraEnv,
     },
     width: size.width,
@@ -465,7 +465,7 @@ function activeTaskId(home: string): string {
 }
 
 function terminalRecords(home: string): Array<Record<string, unknown>> {
-  const sessionsRoot = join(home, ".fx", "sessions");
+  const sessionsRoot = join(home, ".x1", "sessions");
   if (!existsSync(sessionsRoot)) return [];
   return readdirSync(sessionsRoot).flatMap((sessionId) => {
     const terminalRoot = join(sessionsRoot, sessionId, "terminal", "state");
@@ -588,7 +588,7 @@ async function waitForTrace(path: string, needle: string): Promise<string> {
 }
 
 function sessionRecords(home: string): Array<Record<string, unknown>> {
-  const sessionsRoot = join(home, ".fx", "sessions");
+  const sessionsRoot = join(home, ".x1", "sessions");
   if (!existsSync(sessionsRoot)) return [];
   return readdirSync(sessionsRoot).flatMap((name) => {
     const path = join(sessionsRoot, name, "session.json");
@@ -599,7 +599,7 @@ function sessionRecords(home: string): Array<Record<string, unknown>> {
 }
 
 function sessionEventLogs(home: string): string {
-  const sessionsRoot = join(home, ".fx", "sessions");
+  const sessionsRoot = join(home, ".x1", "sessions");
   if (!existsSync(sessionsRoot)) return "";
   return readdirSync(sessionsRoot).map((name) => {
     const path = join(sessionsRoot, name, "events.jsonl");
@@ -610,12 +610,12 @@ function sessionEventLogs(home: string): string {
 test.skipIf(!tmuxAvailable())(
   "manager terminal takeover forwards raw input resizes detaches and restores inline state",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-takeover-");
+    const fixture = createFixture("x1-tui-terminal-takeover-");
     const scriptPath = writeTakeoverFixture(fixture);
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_TRACE_SCOPES:
+      X1_TRACE_SCOPES:
         "input,terminal,terminal_takeover,terminal_client,terminal_store,terminal_host",
     });
 
@@ -697,7 +697,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "takeover manager return rebuilds the recorded 60x12 inline viewport",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-takeover-narrow-return-");
+    const fixture = createFixture("x1-tui-terminal-takeover-narrow-return-");
     const tapePath = join(fixture.root, "session.fxtape");
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
@@ -705,13 +705,13 @@ test.skipIf(!tmuxAvailable())(
       fixture,
       gateway,
       {
-        FX_RECORD: tapePath,
-        FX_RECORD_INPUT: "1",
-        FX_TERMINAL_TEST_TAKEOVER_FAILURE: "release_admission",
-        FX_TRACE_SCOPES:
+        X1_RECORD: tapePath,
+        X1_RECORD_INPUT: "1",
+        X1_TERMINAL_TEST_TAKEOVER_FAILURE: "release_admission",
+        X1_TRACE_SCOPES:
           "input,render,resize,terminal,terminal_takeover,terminal_client,terminal_store,terminal_host",
       },
-      FX_BIN,
+      X1_BIN,
       { width: 120, height: 36 },
     );
     const interactiveFlags = TERMINAL_FIXTURE_SHELL.endsWith("/zsh")
@@ -820,7 +820,7 @@ test.skipIf(!tmuxAvailable())(
       expect(countOccurrences(finalScrollback, "LANE1_COMPOSER_DRAFT_ABCDE")).toBe(1);
 
       const replay = Bun.spawnSync({
-        cmd: [FX_BIN, "replay", tapePath],
+        cmd: [X1_BIN, "replay", tapePath],
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -852,7 +852,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "narrow takeover cleanup preserves a primary assertion failure",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-takeover-narrow-failure-");
+    const fixture = createFixture("x1-tui-terminal-takeover-narrow-failure-");
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway);
@@ -899,13 +899,13 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "takeover retains keyboard bytes submitted before delayed lease acquisition",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-takeover-delayed-");
+    const fixture = createFixture("x1-tui-terminal-takeover-delayed-");
     const scriptPath = writeTakeoverFixture(fixture);
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_TERMINAL_TEST_TAKEOVER_ACQUIRE_DELAY_MS: "1500",
-      FX_TRACE_SCOPES:
+      X1_TERMINAL_TEST_TAKEOVER_ACQUIRE_DELAY_MS: "1500",
+      X1_TRACE_SCOPES:
         "terminal,terminal_takeover,terminal_client,terminal_store,terminal_host",
     });
 
@@ -938,13 +938,13 @@ for (const failure of [
   test.skipIf(!tmuxAvailable())(
     `takeover ${failure} failure is contained and restores the exact inline draft`,
     async () => {
-      const fixture = createFixture(`fx-tui-terminal-takeover-${failure}-`);
+      const fixture = createFixture(`x1-tui-terminal-takeover-${failure}-`);
       const scriptPath = writeTakeoverFixture(fixture);
       const gateway = startFakeGateway([]);
       gateways.push(gateway);
       const active = await launch(fixture, gateway, {
-        FX_TERMINAL_TEST_TAKEOVER_FAILURE: failure,
-        FX_TRACE_SCOPES:
+        X1_TERMINAL_TEST_TAKEOVER_FAILURE: failure,
+        X1_TRACE_SCOPES:
           "terminal,terminal_takeover,terminal_client,terminal_store,terminal_host",
       });
 
@@ -988,7 +988,7 @@ for (const failure of [
 test.skipIf(!tmuxAvailable())(
   "tmux-backed agent session accepts only the authenticated human takeover lease",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-takeover-tmux-");
+    const fixture = createFixture("x1-tui-terminal-takeover-tmux-");
     const scriptPath = writeTakeoverFixture(fixture);
     const tmuxStart = (callId: string) =>
       fakeGatewayToolCall(callId, "terminal", {
@@ -1011,7 +1011,7 @@ test.skipIf(!tmuxAvailable())(
     const gateway = startFakeGateway(gatewayResponses);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_TRACE_SCOPES:
+      X1_TRACE_SCOPES:
         "terminal,terminal_takeover,terminal_client,terminal_store,terminal_host",
     });
 
@@ -1061,9 +1061,9 @@ test.skipIf(!tmuxAvailable())(
 
 for (const backend of ["native", "tmux"] as const) {
   test.skipIf(!tmuxAvailable())(
-    `abrupt Fx death leaves a live ${backend} takeover discoverable and reclaimable on exact task resume`,
+    `abrupt x1 death leaves a live ${backend} takeover discoverable and reclaimable on exact task resume`,
     async () => {
-      const fixture = createFixture(`fx-tui-terminal-reclaim-${backend}-`);
+      const fixture = createFixture(`x1-tui-terminal-reclaim-${backend}-`);
       const scriptPath = writeTakeoverFixture(fixture);
       const gatewayResponses = [
         fakeGatewayToolCall(`reclaim_${backend}_start`, "terminal", {
@@ -1086,7 +1086,7 @@ for (const backend of ["native", "tmux"] as const) {
       const traceScopes =
         "terminal,terminal_takeover,terminal_client,terminal_store,terminal_host";
       const active = await launch(fixture, gateway, {
-        FX_TRACE_SCOPES: traceScopes,
+        X1_TRACE_SCOPES: traceScopes,
       });
 
       await active.sendText(`Start the reclaimable ${backend} terminal.`);
@@ -1134,8 +1134,8 @@ for (const backend of ["native", "tmux"] as const) {
       const resumed = await launch(
         fixture,
         gateway,
-        { FX_TRACE_SCOPES: traceScopes },
-        `${FX_BIN} resume --id ${taskId}`,
+        { X1_TRACE_SCOPES: traceScopes },
+        `${X1_BIN} resume --id ${taskId}`,
       );
       await resumed.sendText("Recover the terminal, write the marker, and release it.");
       await resumed.waitForText(`${marker}_READY`, TIMEOUT);
@@ -1199,12 +1199,12 @@ for (const backend of ["native", "tmux"] as const) {
 test.skipIf(!tmuxAvailable())(
   "takeover host loss returns through the manager to the exact inline draft",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-takeover-loss-");
+    const fixture = createFixture("x1-tui-terminal-takeover-loss-");
     const scriptPath = writeTakeoverFixture(fixture);
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_TRACE_SCOPES:
+      X1_TRACE_SCOPES:
         "terminal,terminal_takeover,terminal_client,terminal_store,terminal_host",
     });
 
@@ -1218,7 +1218,7 @@ test.skipIf(!tmuxAvailable())(
 
     const identityPath = join(
       fixture.home,
-      ".fx",
+      ".x1",
       "terminal-host",
       "host.json",
     );
@@ -1244,7 +1244,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "terminal action-specific schema rejects mixed input before starting a session",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-action-schema-");
+    const fixture = createFixture("x1-tui-terminal-action-schema-");
     const mixedMarker = join(fixture.workspace, "mixed-start-ran");
     let terminalSessionId = "";
     const gateway = startFakeGateway([
@@ -1528,7 +1528,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "terminal exec treats textual null placeholders as absent fields",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-null-placeholder-");
+    const fixture = createFixture("x1-tui-terminal-null-placeholder-");
     const marker = join(fixture.workspace, "null-placeholder-ran");
     const gateway = startFakeGateway([
       fakeGatewayToolCall("terminal_null_placeholder_exec", "terminal", {
@@ -1584,7 +1584,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "terminal repeated unknown correction with a valid neighbor stops without request three",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-correction-loop-");
+    const fixture = createFixture("x1-tui-terminal-correction-loop-");
     const firstBatch = [
       {
         id: "terminal_s_1",
@@ -1643,7 +1643,7 @@ test.skipIf(!tmuxAvailable())(
     ]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_TRACE_SCOPES:
+      X1_TRACE_SCOPES:
         "input,terminal,terminal_client,terminal_store,terminal_host,agent,worker,gateway,tool,permission",
     });
 
@@ -1720,7 +1720,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI starts and gracefully closes an interactive terminal when the command is exact empty",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-empty-command-");
+    const fixture = createFixture("x1-tui-terminal-empty-command-");
     let terminalSessionId = "";
     const gateway = startFakeGateway([
       fakeGatewayToolCall("tui_terminal_empty_start", "terminal", {
@@ -1779,7 +1779,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI normalizes gateway start composites, explains external monitor rejection, and preserves local monitor flow",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-monitor-path-scope-");
+    const fixture = createFixture("x1-tui-terminal-monitor-path-scope-");
     const outsidePath = join(fixture.root, "outside-ready");
     const localPath = join(fixture.workspace, "local-ready");
     const rejectedMarker = join(fixture.workspace, "rejected-start-ran");
@@ -1815,7 +1815,7 @@ test.skipIf(!tmuxAvailable())(
         expect(sessionEventLogs(fixture.home)).toContain("path_outside_workspace");
         const identity = JSON.parse(
           readFileSync(
-            join(fixture.home, ".fx", "terminal-host", "host.json"),
+            join(fixture.home, ".x1", "terminal-host", "host.json"),
             "utf8",
           ),
         ) as { pid: string };
@@ -1915,7 +1915,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI auto mode reports terminal start exit and skips owner-scoped list review",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-public-");
+    const fixture = createFixture("x1-tui-terminal-public-");
     let startedSessionId = "";
     const gateway = startFakeGateway([
       fakeGatewayToolCall("tui_terminal_start", "terminal", {
@@ -1949,8 +1949,8 @@ test.skipIf(!tmuxAvailable())(
     ]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_PERMISSION_MODE: "auto",
-      FX_TRACE_SCOPES:
+      X1_PERMISSION_MODE: "auto",
+      X1_TRACE_SCOPES:
         "input,terminal,terminal_client,terminal_store,terminal_host,agent,worker,gateway,permission",
     });
 
@@ -1992,7 +1992,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal wait reports its safety ceiling without implying completion",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-wait-ceiling-");
+    const fixture = createFixture("x1-tui-terminal-wait-ceiling-");
     let terminalSessionId = "";
     const command = "printf WAIT_CEILING_READY; sleep 30";
     const gateway = startFakeGateway([
@@ -2054,7 +2054,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal exec reports timeout instead of blaming the command",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-exec-timeout-");
+    const fixture = createFixture("x1-tui-terminal-exec-timeout-");
     const command = "printf TUI_TIMEOUT_STARTED; sleep 5";
     const gateway = startFakeGateway([
       fakeGatewayToolCall("terminal_exec_timeout", "terminal", {
@@ -2090,7 +2090,7 @@ test.skipIf(!tmuxAvailable())(
       fixture,
       gateway,
       {},
-      `${FX_BIN} --resume-last`,
+      `${X1_BIN} --resume-last`,
     );
     const resumedPane = await resumed.waitForText(`Timed out ${command}`, TIMEOUT);
     expect(resumedPane).toContain(header);
@@ -2105,7 +2105,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal exec reports and resumes natural SIGTERM",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-exec-sigterm-");
+    const fixture = createFixture("x1-tui-terminal-exec-sigterm-");
     const command = "kill -TERM $$";
     const callId = "terminal_exec_sigterm";
     const gateway = startFakeGateway([
@@ -2148,7 +2148,7 @@ test.skipIf(!tmuxAvailable())(
       fixture,
       gateway,
       {},
-      `${FX_BIN} --resume-last`,
+      `${X1_BIN} --resume-last`,
     );
     const resumedPane = await resumed.waitForText(`Signaled 15 ${command}`, TIMEOUT);
     expect(resumedPane).toContain(header);
@@ -2163,7 +2163,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal failure names the structured session error",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-structured-error-");
+    const fixture = createFixture("x1-tui-terminal-structured-error-");
     const gateway = startFakeGateway([
       fakeGatewayToolCall("terminal_missing_session", "terminal", {
         action: "wait",
@@ -2196,7 +2196,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal model write acquires and releases control atomically",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-atomic-write-");
+    const fixture = createFixture("x1-tui-terminal-atomic-write-");
     const payload = "ATOMIC_WRITE_INPUT";
     let terminalSessionId = "";
     let atomicTextResult = "";
@@ -2299,7 +2299,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal write lease payload contract rejects combined acquire and delivers after valid acquisition",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-lease-payload-");
+    const fixture = createFixture("x1-tui-terminal-lease-payload-");
     const payload = "LEASE_PAYLOAD_INPUT\n";
     let terminalSessionId = "";
     const gateway = startFakeGateway([
@@ -2423,7 +2423,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal agent lease ends with its turn before the process exits",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-turn-lease-");
+    const fixture = createFixture("x1-tui-terminal-turn-lease-");
     let terminalSessionId = "";
     const gateway = startFakeGateway([
       fakeGatewayToolCall("turn_lease_start", "terminal", {
@@ -2527,7 +2527,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI terminal agent lease releases after an interrupted turn",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-interrupted-lease-");
+    const fixture = createFixture("x1-tui-terminal-interrupted-lease-");
     const held = heldFakeGatewayFinalText();
     let terminalSessionId = "";
     try {
@@ -2620,7 +2620,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI public terminal controls reject encoded bytes and deliver key designators",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-public-controls-");
+    const fixture = createFixture("x1-tui-terminal-public-controls-");
     const bytePath = join(fixture.root, "control-byte.txt");
     let terminalSessionId = "";
     const gateway = startFakeGateway([
@@ -2725,7 +2725,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI public signal reaches a foreground job outside the shell process group",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-public-signal-");
+    const fixture = createFixture("x1-tui-terminal-public-signal-");
     const proofPath = join(fixture.root, "foreground-signal.proof");
     const termPath = join(fixture.root, "foreground-signal.term");
     const scriptPath = join(fixture.workspace, "foreground-signal.sh");
@@ -2820,7 +2820,7 @@ ${holdUntilCleanup(fixture.root)}
 test.skipIf(!tmuxAvailable())(
   "TUI public terminal waits with the advertised ceiling on one native session",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-public-wait-");
+    const fixture = createFixture("x1-tui-terminal-public-wait-");
     const marker = "TUI_PUBLIC_WAIT_MARKER";
     let terminalSessionId = "";
     const gateway = startFakeGateway([
@@ -2949,7 +2949,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "TUI public event monitor ignores a materialized check interval and acknowledges one event",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-public-monitor-");
+    const fixture = createFixture("x1-tui-terminal-public-monitor-");
 
     const marker = "TUI_PUBLIC_MONITOR_MARKER";
     let terminalSessionId = "";
@@ -3145,8 +3145,8 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "long HOME executes public native terminal start inspect read and close",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-long-home-", 141);
-    const durableDir = join(fixture.home, ".fx", "terminal-host");
+    const fixture = createFixture("x1-tui-terminal-long-home-", 141);
+    const durableDir = join(fixture.home, ".x1", "terminal-host");
     const durableSocket = join(durableDir, "host.sock");
     const transport = terminalTransportPaths(fixture.home);
     expect(Buffer.byteLength(durableSocket)).toBe(141);
@@ -3241,7 +3241,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "direct paste and image starts bypass the model and restore the manager inventory exactly",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-direct-");
+    const fixture = createFixture("x1-tui-terminal-direct-");
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway);
@@ -3332,7 +3332,7 @@ test.skipIf(!tmuxAvailable())(
       expect(record.history_len).toBe(0);
     }
     const promptHistory = readFileSync(
-      join(fixture.home, ".fx", "history.jsonl"),
+      join(fixture.home, ".x1", "history.jsonl"),
       "utf8",
     );
     expect(promptHistory).toContain("/image ");
@@ -3345,15 +3345,15 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "post-admission direct command settles truthfully during immediate quit",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-direct-immediate-quit-");
+    const fixture = createFixture("x1-tui-terminal-direct-immediate-quit-");
     const tapePath = join(fixture.root, "immediate-quit.fxtape");
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_RECORD: tapePath,
-      FX_TERMINAL_TEST_COMMAND_BOUNDARY_DELAY_MS: "5000",
-      FX_TERMINAL_TEST_GRACEFUL_EXIT_WAIT_CEILING_MS: "0",
-      FX_TRACE_SCOPES: "terminal",
+      X1_RECORD: tapePath,
+      X1_TERMINAL_TEST_COMMAND_BOUNDARY_DELAY_MS: "5000",
+      X1_TERMINAL_TEST_GRACEFUL_EXIT_WAIT_CEILING_MS: "0",
+      X1_TRACE_SCOPES: "terminal",
     });
     const commandRanPath = join(fixture.root, "immediate-command-ran");
     const command = `: > ${JSON.stringify(commandRanPath)}`;
@@ -3376,7 +3376,7 @@ test.skipIf(!tmuxAvailable())(
     sessions.splice(sessions.indexOf(active), 1);
 
     const replay = Bun.spawnSync({
-      cmd: [FX_BIN, "replay", tapePath],
+      cmd: [X1_BIN, "replay", tapePath],
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -3394,7 +3394,7 @@ test.skipIf(!tmuxAvailable())(
       expect(record.history_len).toBe(0);
     }
     expect(
-      readFileSync(join(fixture.home, ".fx", "history.jsonl"), "utf8"),
+      readFileSync(join(fixture.home, ".x1", "history.jsonl"), "utf8"),
     ).toContain("/quit");
     expect(readFileSync(fixture.stderrPath, "utf8")).toBe("");
 
@@ -3407,11 +3407,11 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "invalid and queue-full direct admission preserve draft owners while startup is slow",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-queue-");
+    const fixture = createFixture("x1-tui-terminal-queue-");
     const gateway = startFakeGateway([]);
     gateways.push(gateway);
     const active = await launch(fixture, gateway, {
-      FX_TERMINAL_TEST_CLIENT_REQUEST_DELAY_MS: "15000",
+      X1_TERMINAL_TEST_CLIENT_REQUEST_DELAY_MS: "15000",
     });
 
     await active.sendText("!");
@@ -3460,7 +3460,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable() || loginProfileName === null)(
   "failed direct start stays responsive and publishes one structured final notice",
   async () => {
-    const fixture = createFixture("fx-tui-terminal-failed-start-");
+    const fixture = createFixture("x1-tui-terminal-failed-start-");
     const profileStartedPath = join(fixture.root, "profile-started");
     const profilePidPath = join(fixture.root, "profile.pid");
     writeFileSync(
@@ -3522,7 +3522,7 @@ test.skipIf(!tmuxAvailable() || loginProfileName === null)(
     for (const record of sessionRecords(fixture.home)) {
       expect(record.history_len).toBe(0);
     }
-    expect(existsSync(join(fixture.home, ".fx", "history.jsonl"))).toBe(false);
+    expect(existsSync(join(fixture.home, ".x1", "history.jsonl"))).toBe(false);
     expect(readFileSync(fixture.stderrPath, "utf8")).toBe("");
 
     const profilePid = Number(readFileSync(profilePidPath, "utf8"));
@@ -3533,7 +3533,7 @@ test.skipIf(!tmuxAvailable() || loginProfileName === null)(
     sessions.splice(sessions.indexOf(active), 1);
     await waitForTerminalHostExit(fixture.home);
     expect(
-      existsSync(join(fixture.home, ".fx", "terminal-host", "host.json")),
+      existsSync(join(fixture.home, ".x1", "terminal-host", "host.json")),
     ).toBe(false);
 
     gateway.stop();

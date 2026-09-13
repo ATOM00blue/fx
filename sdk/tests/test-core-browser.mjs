@@ -131,7 +131,7 @@ async function waitFor(expression, sessionId, timeoutMs = 10000) {
   let diagnostic;
   try {
     diagnostic = await command("Runtime.evaluate", {
-      expression: "window.__fxBrowserTerminalTest || null",
+      expression: "window.__x1BrowserTerminalTest || null",
       returnByValue: true,
     }, sessionId);
   } catch {}
@@ -151,7 +151,7 @@ async function runCase(name, query, verify) {
   events.set("Runtime.exceptionThrown", list);
   try {
     await command("Page.navigate", { url: `http://127.0.0.1:${port}/sdk/index.html?${query}` }, sessionId);
-    const result = await waitFor("window.__fxCoreTest && ['completed', 'failed', 'unsupported'].includes(window.__fxCoreTest.state) && window.__fxCoreTest", sessionId);
+    const result = await waitFor("window.__x1CoreTest && ['completed', 'failed', 'unsupported'].includes(window.__x1CoreTest.state) && window.__x1CoreTest", sessionId);
     if (exceptions.length) throw new Error(exceptions.join("; "));
     verify(result);
     console.log(`browser core ${name} passed`);
@@ -202,13 +202,13 @@ try {
     await command("Page.enable", {}, sessionId);
     await command("Page.navigate", { url: `http://127.0.0.1:${port}/sdk/browser-test-terminal.html` }, sessionId);
     const result = await withTimeout(
-      waitFor("window.__fxBrowserTerminalTest && ['completed', 'failed'].includes(window.__fxBrowserTerminalTest.state) && window.__fxBrowserTerminalTest", sessionId),
+      waitFor("window.__x1BrowserTerminalTest && ['completed', 'failed'].includes(window.__x1BrowserTerminalTest.state) && window.__x1BrowserTerminalTest", sessionId),
       "browser terminal case timed out",
       15000,
     );
     expect(result.state === "completed", result.error || `unexpected terminal state ${result.state}`);
     expect(result.code === 0, `unexpected terminal exit code ${result.code}`);
-    expect(result.output.includes("Run /help for commands"), "browser terminal startup output missing");
+    expect(result.output.includes("layerx1.com"), "browser terminal startup output missing");
     expect(result.inputTaskRanDuringStream, "browser terminal input task was blocked until the buffered stream finished");
     expect(result.draftRenderedDuringStream, "browser terminal input rendered only after the stream source closed");
     expect(result.activeClearFetchAborted, "active /clear did not abort the browser fetch");

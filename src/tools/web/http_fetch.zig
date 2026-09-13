@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const debug_trace = @import("../../core/shared/debug_trace.zig");
 const io_mod = @import("../../core/shared/io.zig");
 const url_policy = @import("url_policy.zig");
@@ -444,6 +445,8 @@ fn isRetryableConnectError(err: anyerror) bool {
         error.ConnectionFailed,
         error.UnexpectedClose,
         error.Timeout,
+        error.WouldBlock,
+        error.ConnectionPending,
         => true,
         else => false,
     };
@@ -451,6 +454,9 @@ fn isRetryableConnectError(err: anyerror) bool {
 
 fn connectDefault(_: *anyopaque, alloc: Allocator, target: PinnedTarget, options: FetchOptions) anyerror!ConnectorResponse {
     const effective = normalizedOptions(options);
+    if (comptime builtin.os.tag == .windows) {
+        return connectDefaultStream(alloc, target, effective);
+    }
     const dialer: Dialer = .{
         .ctx = @ptrCast(&default_connector_ctx),
         .connect_fn = connectDefaultDialer,
@@ -464,6 +470,158 @@ fn connectDefault(_: *anyopaque, alloc: Allocator, target: PinnedTarget, options
     return switch (target.url.scheme) {
         .http => try fetchPlain(alloc, fd, target, effective),
         .https => try fetchTls(alloc, fd, target, effective),
+    };
+}
+
+fn streamTimeout(options: FetchOptions) std.Io.Timeout {
+    if (options.deadline) |deadline| {
+        return .{
+            .deadline = .{
+                .clock = .awake,
+                .raw = .{ .nanoseconds = @as(i96, deadline.deadline_ms) * std.time.ns_per_ms },
+            },
+        };
+    }
+    return .{
+        .duration = .{
+            .clock = .awake,
+            .raw = .fromMilliseconds(default_hop_timeout_ms),
+        },
+    };
+}
+
+fn connectDefaultStream(alloc: Allocator, target: PinnedTarget, options: FetchOptions) anyerror!ConnectorResponse {
+    if (target.admitted_addresses.len == 0) return error.NoAddressReturned;
+    const zio = io_mod.getIo();
+    var last_err: anyerror = error.NoAddressReturned;
+    for (target.admitted_addresses, 0..) |address, index| {
+        try checkControl(options);
+        var stream = address.connect(zio, .{
+            .mode = .stream,
+            .timeout = streamTimeout(options),
+        }) catch |err| {
+            traceDialFailure(index, target.admitted_addresses.len, err);
+            last_err = err;
+            if (!isRetryableConnectError(err)) return err;
+            if (index + 1 == target.admitted_addresses.len) return err;
+            continue;
+        };
+        defer stream.close(zio);
+        return switch (target.url.scheme) {
+            .http => try fetchPlainStream(alloc, stream, target, options),
+            .https => try fetchTlsStream(alloc, stream, target, options),
+        };
+    }
+    return last_err;
+}
+
+fn fetchPlainStream(
+    alloc: Allocator,
+    stream: std.Io.net.Stream,
+    target: PinnedTarget,
+    options: FetchOptions,
+) anyerror!ConnectorResponse {
+    const zio = io_mod.getIo();
+    var write_buffer: [plain_transport_buffer_len]u8 = undefined;
+    var read_buffer: [plain_transport_buffer_len]u8 = undefined;
+    var stream_writer = stream.writer(zio, &write_buffer);
+    var stream_reader = stream.reader(zio, &read_buffer);
+    writeRequest(&stream_writer.interface, target, options) catch |err| {
+        const root = unwrapWriteFailure(err, stream_writer.err);
+        traceFailure(.request_write, root);
+        return root;
+    };
+    stream_writer.interface.flush() catch |err| {
+        const root = unwrapWriteFailure(err, stream_writer.err);
+        traceFailure(.request_write, root);
+        return root;
+    };
+
+    var failure_stage: FailureStage = .response_head;
+    return readResponse(alloc, &stream_reader.interface, options.max_body_bytes, options, &failure_stage) catch |err| {
+        const root = unwrapReadFailure(err, null, stream_reader.err);
+        traceFailure(failure_stage, root);
+        return root;
+    };
+}
+
+fn fetchTlsStream(
+    alloc: Allocator,
+    stream: std.Io.net.Stream,
+    target: PinnedTarget,
+    options: FetchOptions,
+) anyerror!ConnectorResponse {
+    const zio = io_mod.getIo();
+
+    var ca_bundle: std.crypto.Certificate.Bundle = .empty;
+    defer ca_bundle.deinit(alloc);
+    var ca_lock: std.Io.RwLock = .init;
+    const now = std.Io.Clock.real.now(zio);
+    ca_bundle.rescan(alloc, zio, now) catch |err| {
+        traceFailure(.tls_handshake, err);
+        return err;
+    };
+
+    var encrypted_read_buffer: [tls_transport_buffer_len]u8 = undefined;
+    var encrypted_write_buffer: [tls_transport_buffer_len]u8 = undefined;
+    var encrypted_reader = stream.reader(zio, &encrypted_read_buffer);
+    var encrypted_writer = stream.writer(zio, &encrypted_write_buffer);
+
+    const tls_read_buffer = try alloc.alloc(u8, std.crypto.tls.Client.min_buffer_len);
+    defer alloc.free(tls_read_buffer);
+    const tls_write_buffer = try alloc.alloc(u8, std.crypto.tls.Client.min_buffer_len);
+    defer alloc.free(tls_write_buffer);
+    var entropy: [std.crypto.tls.Client.Options.entropy_len]u8 = undefined;
+    zio.random(&entropy);
+
+    var tls_client = std.crypto.tls.Client.init(
+        &encrypted_reader.interface,
+        &encrypted_writer.interface,
+        .{
+            .host = .{ .explicit = target.tls_server_name },
+            .ca = .{ .bundle = .{
+                .gpa = alloc,
+                .io = zio,
+                .lock = &ca_lock,
+                .bundle = &ca_bundle,
+            } },
+            .read_buffer = tls_read_buffer,
+            .write_buffer = tls_write_buffer,
+            .entropy = &entropy,
+            .realtime_now = now,
+            .allow_truncation_attacks = tls_allow_truncation_attacks,
+        },
+    ) catch |err| {
+        const root = switch (err) {
+            error.ReadFailed => unwrapReadFailure(err, null, encrypted_reader.err),
+            error.WriteFailed => unwrapWriteFailure(err, encrypted_writer.err),
+            else => err,
+        };
+        traceFailure(.tls_handshake, root);
+        return root;
+    };
+
+    writeRequest(&tls_client.writer, target, options) catch |err| {
+        const root = unwrapWriteFailure(err, encrypted_writer.err);
+        traceFailure(.request_write, root);
+        return root;
+    };
+    tls_client.writer.flush() catch |err| {
+        const root = unwrapWriteFailure(err, encrypted_writer.err);
+        traceFailure(.request_write, root);
+        return root;
+    };
+    encrypted_writer.interface.flush() catch |err| {
+        const root = unwrapWriteFailure(err, encrypted_writer.err);
+        traceFailure(.request_write, root);
+        return root;
+    };
+
+    var failure_stage: FailureStage = .response_head;
+    return readResponse(alloc, &tls_client.reader, options.max_body_bytes, options, &failure_stage) catch |err| {
+        const root = unwrapReadFailure(err, tls_client.read_err, encrypted_reader.err);
+        traceFailure(failure_stage, root);
+        return root;
     };
 }
 
@@ -571,7 +729,7 @@ fn writeRequest(writer: *std.Io.Writer, target: PinnedTarget, options: FetchOpti
     try writer.print(
         "GET {s} HTTP/1.1\r\n" ++
             "Host: {s}\r\n" ++
-            "User-Agent: fx (web_fetch; +https://github.com/vercel-labs/fx)\r\n" ++
+            "User-Agent: x1 (web_fetch; +https://layerx1.com)\r\n" ++
             "Accept: text/markdown, text/html, */*\r\n" ++
             "Accept-Encoding: gzip, deflate, zstd\r\n" ++
             "Connection: close\r\n" ++
@@ -2812,7 +2970,7 @@ test "web_fetch advertises supported content codings" {
     try std.testing.expectEqualStrings(
         "GET /docs?q=1 HTTP/1.1\r\n" ++
             "Host: example.com\r\n" ++
-            "User-Agent: fx (web_fetch; +https://github.com/vercel-labs/fx)\r\n" ++
+            "User-Agent: x1 (web_fetch; +https://layerx1.com)\r\n" ++
             "Accept: text/markdown, text/html, */*\r\n" ++
             "Accept-Encoding: gzip, deflate, zstd\r\n" ++
             "Connection: close\r\n" ++

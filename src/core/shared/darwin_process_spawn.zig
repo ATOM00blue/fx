@@ -450,10 +450,10 @@ test "Darwin spawn resolves argv through parent PATH and replaces the child envi
     var environment = std.process.Environ.Map.init(alloc);
     defer environment.deinit();
     try environment.put("PATH", "/not/a/search/path");
-    try environment.put("FX_SPAWN_CONTRACT", "child-only");
+    try environment.put("X1_SPAWN_CONTRACT", "child-only");
 
     const result = try std.process.run(alloc, io, .{
-        .argv = &.{ "sh", "-c", "printf '%s:%s' \"$FX_SPAWN_CONTRACT\" \"$PATH\"" },
+        .argv = &.{ "sh", "-c", "printf '%s:%s' \"$X1_SPAWN_CONTRACT\" \"$PATH\"" },
         .environ_map = &environment,
     });
     defer alloc.free(result.stdout);
@@ -639,7 +639,7 @@ test "Darwin spawn reports launch errors and preserves wait and kill" {
     const io = try darwin_io();
     const missing_before = try child_pid_snapshot();
     try std.testing.expectError(error.FileNotFound, std.process.spawn(io, .{
-        .argv = &.{"fx-contract-executable-that-does-not-exist"},
+        .argv = &.{"x1-contract-executable-that-does-not-exist"},
     }));
     const missing_after = try wait_for_children_to_settle(io, missing_before);
     defer reap_new_children(io, missing_before, missing_after);
@@ -773,7 +773,7 @@ test "Darwin spawn partial setup failure closes every parent descriptor" {
     const children_before = try child_pid_snapshot();
     try std.testing.expectError(error.FileNotFound, std.process.spawn(io, .{
         .argv = &.{"/bin/sh"},
-        .cwd = .{ .path = "/fx-contract-cwd-that-does-not-exist" },
+        .cwd = .{ .path = "/x1-contract-cwd-that-does-not-exist" },
         .stdin = .pipe,
         .stdout = .pipe,
         .stderr = .pipe,
@@ -790,7 +790,7 @@ test "Darwin spawn partial setup failure leaves no child behind" {
     const before = try child_pid_snapshot();
     try std.testing.expectError(error.FileNotFound, std.process.spawn(io, .{
         .argv = &.{"/bin/sh"},
-        .cwd = .{ .path = "/fx-contract-cwd-that-does-not-exist" },
+        .cwd = .{ .path = "/x1-contract-cwd-that-does-not-exist" },
         .stdin = .pipe,
         .stdout = .pipe,
         .stderr = .pipe,

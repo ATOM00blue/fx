@@ -265,7 +265,7 @@ pub const ModelAggregate = struct {
 pub const PendingGeneration = struct {
     id: []u8,
     sequence: u64,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     origin: []u8,
     team: ?[]u8,
     credential_source: ?types.CredentialSource = null,
@@ -404,7 +404,7 @@ pub const Usage = struct {
 
     pub fn initFreshWithProvider(provider: generation_usage.Provider) Usage {
         var usage = initFresh();
-        usage.generation_usage_providers = generation_usage.Set.gatewayOnly(provider);
+        usage.generation_usage_providers = generation_usage.Set.x1Only(provider);
         return usage;
     }
 
@@ -907,7 +907,7 @@ pub const Usage = struct {
             alloc,
             sequence,
             id,
-            .gateway,
+            .layerx1,
             origin,
             team,
             null,
@@ -1702,7 +1702,7 @@ pub const Usage = struct {
         self.startReconciliationWithCredential(
             alloc,
             api_key,
-            .{ .provider = .gateway, .credential_identity = null },
+            .{ .provider = .layerx1, .credential_identity = null },
             false,
             null,
         );
@@ -1735,7 +1735,7 @@ pub const Usage = struct {
         self.startReconciliationWithCredential(
             alloc,
             api_key,
-            self.reconciliation_authority orelse .{ .provider = .gateway, .credential_identity = null },
+            self.reconciliation_authority orelse .{ .provider = .layerx1, .credential_identity = null },
             true,
             null,
         );
@@ -1793,7 +1793,7 @@ pub const Usage = struct {
         self.startReconciliationWithCredential(
             alloc,
             refreshed_api_key,
-            self.reconciliation_authority orelse .{ .provider = .gateway, .credential_identity = null },
+            self.reconciliation_authority orelse .{ .provider = .layerx1, .credential_identity = null },
             true,
             expected_api_key,
         );
@@ -2467,7 +2467,7 @@ pub fn billingProjectionEql(first: Snapshot, second: Snapshot) bool {
 pub fn writeSnapshot(writer: *std.Io.Writer, snapshot: Snapshot) !void {
     try validateSnapshot(snapshot);
     // Keep the durable session payload in the exact pre-usage-dashboard
-    // shape. Older fx binaries reject unknown snapshot fields instead of
+    // shape. Older x1 binaries reject unknown snapshot fields instead of
     // ignoring them; richer metrics and recovery hints live in the validated
     // session sidecar.
     try writer.writeAll("{\"billing\":");
@@ -2805,7 +2805,7 @@ pub fn parseSnapshotValue(alloc: Allocator, value: std.json.Value) !Snapshot {
             const field = pending_entry.object.get("provider") orelse return error.InvalidUsageSnapshot;
             if (field != .string) return error.InvalidUsageSnapshot;
             break :provider model_provider.parse(field.string) orelse return error.InvalidUsageSnapshot;
-        } else .gateway;
+        } else .layerx1;
         const credential_source = if (provider_scoped)
             try parseCredentialSourceOptional(pending_entry.object.get("credential_source"))
         else
@@ -3250,10 +3250,6 @@ fn canonicalExactGenerationId(
     external_id: []const u8,
     buffer: *[30]u8,
 ) ![]const u8 {
-    if (provider == .gateway) {
-        try validateGenerationId(external_id);
-        return external_id;
-    }
     try validateExternalGenerationId(external_id);
     var digest: [Sha256.digest_length]u8 = undefined;
     var hash = Sha256.init(.{});
@@ -3269,9 +3265,7 @@ fn canonicalExactGenerationId(
 
 fn exactUsageOrigin(provider: model_provider.ProviderId) []const u8 {
     return switch (provider) {
-        .gateway => "exact/gateway",
-        .codex => "exact/codex",
-        .grok => "exact/grok",
+        .layerx1 => "exact/layerx1",
     };
 }
 
@@ -3280,18 +3274,18 @@ test "direct exact generation IDs are deterministic and provider scoped" {
     var replay_buffer: [30]u8 = undefined;
     var other_provider_buffer: [30]u8 = undefined;
     const first = try canonicalExactGenerationId(
-        .codex,
+        .layerx1,
         "response-shared-id",
         &first_buffer,
     );
     const replay = try canonicalExactGenerationId(
-        .codex,
+        .layerx1,
         "response-shared-id",
         &replay_buffer,
     );
     const other_provider = try canonicalExactGenerationId(
-        .grok,
-        "response-shared-id",
+        .layerx1,
+        "response-other-id",
         &other_provider_buffer,
     );
 
@@ -3302,17 +3296,16 @@ test "direct exact generation IDs are deterministic and provider scoped" {
 
     var gateway_buffer: [30]u8 = undefined;
     const gateway_id = "gen_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-    try std.testing.expectEqualStrings(
-        gateway_id,
-        try canonicalExactGenerationId(.gateway, gateway_id, &gateway_buffer),
+    const canonical_gateway_id = try canonicalExactGenerationId(.layerx1, gateway_id, &gateway_buffer);
+    try std.testing.expect(!std.mem.eql(u8, gateway_id, canonical_gateway_id));
+    try std.testing.expect(types.validGatewayGenerationId(canonical_gateway_id));
+    try std.testing.expectError(
+        error.InvalidGenerationId,
+        canonicalExactGenerationId(.layerx1, "", &gateway_buffer),
     );
     try std.testing.expectError(
         error.InvalidGenerationId,
-        canonicalExactGenerationId(.codex, "", &gateway_buffer),
-    );
-    try std.testing.expectError(
-        error.InvalidGenerationId,
-        canonicalExactGenerationId(.grok, "response\ninvalid", &gateway_buffer),
+        canonicalExactGenerationId(.layerx1, "response\ninvalid", &gateway_buffer),
     );
 }
 
@@ -3336,6 +3329,10 @@ fn validateModel(model: []const u8) !void {
     }
 }
 
+/// Compatibility exception: usage records persist the transport origin as an
+/// opaque HTTP(S) string. Historical FX/Vercel sessions may still contain
+/// `https://ai-gateway.vercel.sh`. Changing the allowed charset would strand
+/// that private state, so any bounded printable origin remains readable.
 fn validateOrigin(origin: []const u8) !void {
     if (origin.len == 0 or origin.len > max_origin_bytes) {
         return error.InvalidGatewayOrigin;
@@ -3455,7 +3452,7 @@ fn testGatewayUsageOutcome(
     immediate: bool,
 ) stream_provider.UsageOutcome {
     return if (immediate)
-        .{ .exact = .gateway }
+        .{ .exact = .layerx1 }
     else
         .{ .deferred = testGatewayUsageReference(
             generation_id,
@@ -3468,13 +3465,13 @@ fn testGatewayUsageReference(
     scope: []const u8,
 ) stream_provider.DeferredUsageReference {
     return .{
-        .provider = .gateway,
+        .provider = .layerx1,
         .generation_id = generation_id,
         .scope = scope,
-        .credential_source = .ai_gateway_api_key,
+        .credential_source = .layerx1_subscription,
         .credential_identity = credential_authority.derive(
-            .ai_gateway_api_key,
-            null,
+            .layerx1_subscription,
+            "acct_test",
         ),
     };
 }
@@ -4327,7 +4324,7 @@ test "generation allocation failure marks billing incomplete before snapshot" {
     try std.testing.expectEqual(@as(usize, 0), snapshot.pending.len);
 }
 
-test "invalid generation identity settles the provider observation" {
+test "provider-local generation identity settles the X1 observation" {
     const alloc = std.testing.allocator;
     var usage = Usage.initFresh();
     defer usage.deinit(alloc);
@@ -4349,12 +4346,12 @@ test "invalid generation identity settles the provider observation" {
                 .billable_web_search_calls = 0,
             },
         },
-        .{ .exact = .gateway },
+        .{ .exact = .layerx1 },
     );
 
     var snapshot = try usage.snapshot(alloc);
     defer snapshot.deinit(alloc);
-    try std.testing.expectEqual(Availability.incomplete, snapshot.billing);
+    try std.testing.expectEqual(Availability.complete, snapshot.billing);
     try std.testing.expect(snapshot.api_duration_complete);
     try std.testing.expectEqual(@as(u64, 1), snapshot.settled_through_sequence);
     try std.testing.expectEqual(@as(usize, 0), snapshot.pending.len);
@@ -4410,7 +4407,7 @@ test "rejected observed generation settles without publishing its identity or bi
                 .billable_web_search_calls = 0,
             },
         },
-        .{ .exact = .gateway },
+        .{ .exact = .layerx1 },
     );
 
     var snapshot = try usage.snapshot(alloc);
@@ -4529,24 +4526,24 @@ test "deferred usage preserves provider and credential authority" {
     var usage = Usage.initFresh();
     defer usage.deinit(alloc);
     const identity = @import("../auth/credential_authority.zig").derive(
-        .fx_login,
+        .layerx1_subscription,
         "acct_1",
     ).?;
     const observation = try InvocationObservation.begin(&usage);
     try observation.complete(alloc, .{}, .{ .deferred = .{
-        .provider = .gateway,
+        .provider = .layerx1,
         .generation_id = "gen_01ARZ3NDEKTSV4RRFFQ69G5FAV",
         .scope = "https://ai-gateway.vercel.sh",
         .tenant = "team_1",
         .account_id = "acct_1",
-        .credential_source = .fx_login,
+        .credential_source = .layerx1_subscription,
         .credential_identity = identity,
     } });
 
     var snapshot = try usage.snapshot(alloc);
     defer snapshot.deinit(alloc);
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, snapshot.pending[0].provider);
-    try std.testing.expectEqual(types.CredentialSource.fx_login, snapshot.pending[0].credential_source.?);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, snapshot.pending[0].provider);
+    try std.testing.expectEqual(types.CredentialSource.layerx1_subscription, snapshot.pending[0].credential_source.?);
     try std.testing.expect(snapshot.pending[0].credential_identity.?.eql(identity));
 }
 
@@ -4621,15 +4618,15 @@ test "usage restore and reset retain the injected generation provider" {
 
     usage.resetFresh(alloc);
     try std.testing.expect(
-        usage.generation_usage_providers.select(.gateway).?.lookup_fn == provider.lookup_fn,
+        usage.generation_usage_providers.select(.layerx1).?.lookup_fn == provider.lookup_fn,
     );
     try usage.restore(alloc, saved, 1);
     try std.testing.expect(
-        usage.generation_usage_providers.select(.gateway).?.lookup_fn == provider.lookup_fn,
+        usage.generation_usage_providers.select(.layerx1).?.lookup_fn == provider.lookup_fn,
     );
     usage.resetLegacy(alloc);
     try std.testing.expect(
-        usage.generation_usage_providers.select(.gateway).?.lookup_fn == provider.lookup_fn,
+        usage.generation_usage_providers.select(.layerx1).?.lookup_fn == provider.lookup_fn,
     );
 }
 
@@ -4655,7 +4652,7 @@ test "reconciliation settles usage through the injected provider" {
         alloc,
         "credential",
         &cancel,
-        .{ .provider = .gateway, .credential_identity = null },
+        .{ .provider = .layerx1, .credential_identity = null },
         usage.generation_usage_providers,
         1,
     );
@@ -5285,8 +5282,8 @@ test "provider rejection removes pending generation and marks billing incomplete
         alloc,
         "credential",
         &cancel,
-        .{ .provider = .gateway, .credential_identity = null },
-        generation_usage.Set.gatewayOnly(fake.provider()),
+        .{ .provider = .layerx1, .credential_identity = null },
+        generation_usage.Set.x1Only(fake.provider()),
         1,
     );
 
@@ -5319,8 +5316,8 @@ test "provider preserve outcome keeps pending generation for a future credential
         alloc,
         "credential",
         &cancel,
-        .{ .provider = .gateway, .credential_identity = null },
-        generation_usage.Set.gatewayOnly(fake.provider()),
+        .{ .provider = .layerx1, .credential_identity = null },
+        generation_usage.Set.x1Only(fake.provider()),
         1,
     );
 
@@ -5357,8 +5354,8 @@ test "provider retry outcome leaves pending generation unchanged" {
         alloc,
         "credential",
         &cancel,
-        .{ .provider = .gateway, .credential_identity = null },
-        generation_usage.Set.gatewayOnly(fake.provider()),
+        .{ .provider = .layerx1, .credential_identity = null },
+        generation_usage.Set.x1Only(fake.provider()),
         1,
     );
 
@@ -5391,8 +5388,8 @@ test "provider failure leaves pending generation unchanged" {
         alloc,
         "credential",
         &cancel,
-        .{ .provider = .gateway, .credential_identity = null },
-        generation_usage.Set.gatewayOnly(fake.provider()),
+        .{ .provider = .layerx1, .credential_identity = null },
+        generation_usage.Set.x1Only(fake.provider()),
         1,
     );
 
@@ -5425,8 +5422,8 @@ test "provider cancellation stops reconciliation and preserves pending usage" {
         alloc,
         "credential",
         &cancel,
-        .{ .provider = .gateway, .credential_identity = null },
-        generation_usage.Set.gatewayOnly(fake.provider()),
+        .{ .provider = .layerx1, .credential_identity = null },
+        generation_usage.Set.x1Only(fake.provider()),
         2,
     );
 
@@ -5592,6 +5589,7 @@ test "terminal checkpoint failure preserves request progress as incomplete" {
 }
 
 test "pending generation origins remain bounded transport inputs" {
+    try validateOrigin("https://api.layerx1.com");
     try validateOrigin("https://ai-gateway.vercel.sh");
     try validateOrigin("http://127.0.0.1:3000");
     try validateOrigin("https://provider.example");
@@ -5686,16 +5684,16 @@ test "stale reconciliation credential cannot replace a refreshed credential" {
     try std.testing.expect(!usage.reconciliation_credential_blocked);
 }
 
-test "resumed provider reconciliation uses Gateway credential slot identity" {
+test "resumed provider reconciliation uses X1 account identity" {
     const alloc = std.testing.allocator;
     var usage = Usage.initFresh();
     defer usage.deinit(alloc);
 
     usage.replaceProviderReconciliationCredential(
         alloc,
-        .gateway,
-        .ai_gateway_api_key,
-        null,
+        .layerx1,
+        .layerx1_subscription,
+        "acct_test",
         "fresh-secret-key",
     );
     try std.testing.expect(usage.reconciliation_key_digest != null);
@@ -5709,9 +5707,9 @@ test "resumed provider reconciliation uses Gateway credential slot identity" {
 
     usage.replaceProviderReconciliationCredential(
         alloc,
-        .gateway,
-        .ai_gateway_api_key,
-        null,
+        .layerx1,
+        .layerx1_subscription,
+        "acct_test",
         "secret-key",
     );
     try std.testing.expect(usage.reconciliation_key_digest != null);
@@ -5720,8 +5718,8 @@ test "resumed provider reconciliation uses Gateway credential slot identity" {
 
     usage.replaceProviderReconciliationCredential(
         alloc,
-        .codex,
-        .chatgpt_subscription,
+        .layerx1,
+        .layerx1_subscription,
         null,
         "subscription-token",
     );

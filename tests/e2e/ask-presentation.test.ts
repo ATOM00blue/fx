@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { X1_BIN, runx1 } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -47,7 +47,7 @@ afterEach(async () => {
 });
 
 async function waitForTerminalHostExit(root: string): Promise<void> {
-  const identityPath = join(root, "home", ".fx", "terminal-host", "host.json");
+  const identityPath = join(root, "home", ".x1", "terminal-host", "host.json");
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     if (!existsSync(identityPath)) return;
@@ -57,7 +57,7 @@ async function waitForTerminalHostExit(root: string): Promise<void> {
 }
 
 function createRoot() {
-  const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-presentation-"));
+  const root = mkdtempSync(join(tmpdir(), "x1-e2e-ask-presentation-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   mkdirSync(home);
@@ -67,7 +67,7 @@ function createRoot() {
 }
 
 function createShortRoot() {
-  const root = realpathSync(mkdtempSync("/tmp/fx-ask-terminal-"));
+  const root = realpathSync(mkdtempSync("/tmp/x1-ask-terminal-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   mkdirSync(home);
@@ -84,13 +84,13 @@ function gatewayEnv(
     HOME: home,
     AI_GATEWAY_API_KEY: "fake-ask-presentation-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_SKIP_ONBOARDING: "1",
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_PERMISSION_MODE: "auto",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    X1_DISABLE_KEYCHAIN: "1",
+    X1_SKIP_ONBOARDING: "1",
+    X1_MODEL: FAKE_GATEWAY_MODEL,
+    X1_PERMISSION_MODE: "auto",
+    X1_GATEWAY_BASE_URL: gateway.baseUrl,
+    X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+    X1_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
   };
 }
 
@@ -99,8 +99,8 @@ function shellQuote(value: string): string {
 }
 
 function terminalCommand(args: string[]): string {
-  const fx = [FX_BIN, ...args].map(shellQuote).join(" ");
-  const script = `${fx}; code=$?; printf '\\n__FX_EXIT_%s__\\n' "$code"; exit "$code"`;
+  const x1 = [X1_BIN, ...args].map(shellQuote).join(" ");
+  const script = `${x1}; code=$?; printf '\\n__X1_EXIT_%s__\\n' "$code"; exit "$code"`;
   return `/bin/sh -c ${shellQuote(script)}`;
 }
 
@@ -136,7 +136,7 @@ function fakeGatewayStreamingText(lines: string[], delayMs: number) {
   );
 }
 
-describe("fx ask presentation", () => {
+describe("x1 ask presentation", () => {
   test("redirected command output separates the next tool header", async () => {
     const root = createRoot();
     const gateway = startFakeGateway([
@@ -162,7 +162,7 @@ describe("fx ask presentation", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runx1(
       ["ask", "--json", "--yolo", "--no-save", "--no-color", "Run both commands."],
       {
         cwd: root.workspace,
@@ -187,31 +187,31 @@ describe("fx ask presentation", () => {
     if (configuredShell.endsWith("/zsh")) {
       writeFileSync(
         join(root.home, ".zprofile"),
-        "export FX_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n",
+        "export X1_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n",
       );
       writeFileSync(
         join(root.home, ".zshrc"),
-        "export FX_PROFILE_RC=rc\nalias fx_profile_alias='printf alias-user'\n" +
-          "fx_profile_function() { printf function-user; }\n",
+        "export X1_PROFILE_RC=rc\nalias x1_profile_alias='printf alias-user'\n" +
+          "x1_profile_function() { printf function-user; }\n",
       );
     } else {
       writeFileSync(
         join(root.home, ".bash_profile"),
-        "export FX_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n" +
+        "export X1_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n" +
           "source \"$HOME/.bashrc\"\n",
       );
       writeFileSync(
         join(root.home, ".bashrc"),
-        "export FX_PROFILE_RC=rc\nalias fx_profile_alias='printf alias-user'\n" +
-          "fx_profile_function() { printf function-user; }\n",
+        "export X1_PROFILE_RC=rc\nalias x1_profile_alias='printf alias-user'\n" +
+          "x1_profile_function() { printf function-user; }\n",
       );
     }
 
     const profileCommand =
-      "printf 'mode=%s:%s:' \"${FX_PROFILE_LOGIN-unset}\" \"${FX_PROFILE_RC-unset}\"; " +
+      "printf 'mode=%s:%s:' \"${X1_PROFILE_LOGIN-unset}\" \"${X1_PROFILE_RC-unset}\"; " +
       "case :\"$PATH\": in *:\"$HOME/profile-bin\":*) printf 'path-user:';; *) printf 'path-clean:';; esac; " +
-      "if alias fx_profile_alias >/dev/null 2>&1; then fx_profile_alias; else printf no-alias; fi; printf ':'; " +
-      "if command -v fx_profile_function >/dev/null; then fx_profile_function; else printf no-function; fi";
+      "if alias x1_profile_alias >/dev/null 2>&1; then x1_profile_alias; else printf no-alias; fi; printf ':'; " +
+      "if command -v x1_profile_function >/dev/null; then x1_profile_function; else printf no-function; fi";
     const nestedExecMarker = join(root.workspace, "nested-no-save-ran");
     const gateway = startFakeGateway([
       fakeGatewayToolCall("terminal-omitted", "terminal", {
@@ -253,7 +253,7 @@ describe("fx ask presentation", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runx1(
       ["ask", "--json", "--yolo", "--no-save", "Verify terminal exec profiles."],
       {
         cwd: root.workspace,
@@ -338,7 +338,7 @@ describe("fx ask presentation", () => {
     expect(gateway.requests[2]!.body).toContain("no-alias:no-function");
     expect(gateway.requests[4]!.body).toContain("tool_execution_failed");
     expect(gateway.requests[4]!.body).toContain(
-      "Durable terminal actions require a saved fx session.",
+      "Durable terminal actions require a saved x1 session.",
     );
     expect(gateway.requests[4]!.body).toContain(
       "Use terminal.exec, or rerun without --no-save.",
@@ -353,12 +353,12 @@ describe("fx ask presentation", () => {
     expect(existsSync(nestedExecMarker)).toBe(false);
     expect(gateway.requests[6]!.body).toContain("neighbor-exec");
     expect(
-      existsSync(join(root.home, ".fx", "terminal-host", "host.json")),
+      existsSync(join(root.home, ".x1", "terminal-host", "host.json")),
     ).toBe(false);
   }, TIMEOUT);
 
   test.skipIf(!tmuxAvailable())(
-    "fx ask executes the shared public terminal tool through the tmux backend",
+    "x1 ask executes the shared public terminal tool through the tmux backend",
     async () => {
       const root = createShortRoot();
       const toolCallId = "ask_terminal_tmux_1";
@@ -381,13 +381,13 @@ describe("fx ask presentation", () => {
       ]);
       gateways.push(gateway);
 
-      const result = await runFx(
+      const result = await runx1(
         ["ask", "--yolo", "Run the tmux public terminal fixture."],
         {
           cwd: root.workspace,
           env: {
             ...gatewayEnv(root.home, gateway),
-            FX_TERMINAL_HOST_IDLE_MS: "200",
+            X1_TERMINAL_HOST_IDLE_MS: "200",
           },
           timeoutMs: TIMEOUT,
         },
@@ -411,7 +411,7 @@ describe("fx ask presentation", () => {
     const root = createRoot();
     const rawGateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
     gateways.push(rawGateway);
-    const raw = await runFx(["ask", "--no-save", "Render the fixture."], {
+    const raw = await runx1(["ask", "--no-save", "Render the fixture."], {
       cwd: root.workspace,
       env: gatewayEnv(root.home, rawGateway),
       timeoutMs: TIMEOUT,
@@ -424,7 +424,7 @@ describe("fx ask presentation", () => {
 
     const jsonGateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
     gateways.push(jsonGateway);
-    const json = await runFx(
+    const json = await runx1(
       ["ask", "--json", "--no-save", "Render the fixture."],
       {
         cwd: root.workspace,
@@ -455,7 +455,7 @@ describe("fx ask presentation", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runx1(
       ["ask", "--json", "--auto", "--no-save", "Inspect fixture.txt."],
       {
         cwd: root.workspace,
@@ -527,7 +527,7 @@ describe("fx ask presentation", () => {
       await session.waitForText("Between groups.", TIMEOUT);
       await session.resizeWindow(104, 36);
       releaseFinal!();
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
+      await session.waitForText("__X1_EXIT_0__", TIMEOUT);
       const pane = await session.capturePane();
       const scrollback = await session.captureFullScrollback();
       const escaped = await session.captureFullScrollbackEscapes();
@@ -577,7 +577,7 @@ describe("fx ask presentation", () => {
       });
       sessions.push(session);
 
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
+      await session.waitForText("__X1_EXIT_0__", TIMEOUT);
       const pane = await session.captureFullScrollback();
       expect(pane).toContain("● 1 tool call · 1 read");
       expect(pane).toContain("Listing memories");
@@ -589,7 +589,7 @@ describe("fx ask presentation", () => {
   );
 
   test.skipIf(!tmuxAvailable())(
-    "--no-color keeps the TTY layout without Fx styles or hyperlinks",
+    "--no-color keeps the TTY layout without x1 styles or hyperlinks",
     async () => {
       const root = createRoot();
       const gateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
@@ -611,7 +611,7 @@ describe("fx ask presentation", () => {
       });
       sessions.push(session);
 
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
+      await session.waitForText("__X1_EXIT_0__", TIMEOUT);
       const pane = await session.captureFullScrollback();
       const escaped = await session.captureFullScrollbackEscapes();
       expect(pane).toContain("Render the no-color fixture.");
@@ -643,7 +643,7 @@ describe("fx ask presentation", () => {
         cwd: root.workspace,
         env: {
           ...gatewayEnv(root.home, gateway),
-          FX_THEME: "light",
+          X1_THEME: "light",
           NO_COLOR: undefined,
         },
         width: 120,
@@ -653,7 +653,7 @@ describe("fx ask presentation", () => {
       });
       sessions.push(session);
 
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
+      await session.waitForText("__X1_EXIT_0__", TIMEOUT);
       const escaped = await session.captureFullScrollbackEscapes();
       expect(escaped).toContain("\x1b[38;5;238mconst\x1b[39m");
       expect(escaped).not.toContain("\x1b[38;5;252mconst\x1b[39m");
@@ -708,7 +708,7 @@ describe("fx ask presentation", () => {
       });
       sessions.push(session);
 
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
+      await session.waitForText("__X1_EXIT_0__", TIMEOUT);
       const scrollback = await session.captureFullScrollback();
       let previousIndex = -1;
       for (const line of answerLines) {
@@ -802,15 +802,15 @@ describe("fx ask presentation", () => {
         while (Date.now() < headerDeadline) {
           initialScrollback = await session.captureFullScrollback();
           if (
-            initialScrollback.includes("Run /help for commands") &&
+            initialScrollback.includes("layerx1.com") &&
             initialScrollback.includes("Stream every answer line.")
           ) break;
           await Bun.sleep(25);
         }
-        expect(initialScrollback).toContain("Run /help for commands");
+        expect(initialScrollback).toContain("layerx1.com");
         expect(initialScrollback).toContain("Stream every answer line.");
         expect(initialScrollback).not.toContain(answerLines[0]!);
-        expect(initialScrollback.indexOf("Run /help for commands")).toBeLessThan(
+        expect(initialScrollback.indexOf("layerx1.com")).toBeLessThan(
           initialScrollback.indexOf("Stream every answer line."),
         );
 
@@ -828,9 +828,9 @@ describe("fx ask presentation", () => {
         releaseResponse();
       }
 
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
+      await session.waitForText("__X1_EXIT_0__", TIMEOUT);
       const finalScrollback = await session.captureFullScrollback();
-      expect(finalScrollback.split("Run /help for commands")).toHaveLength(2);
+      expect(finalScrollback.split("layerx1.com")).toHaveLength(2);
       for (const line of answerLines) {
         expect(finalScrollback.split(line)).toHaveLength(2);
       }
@@ -872,9 +872,9 @@ describe("fx ask presentation", () => {
       });
       sessions.push(session);
 
-      await session.waitForText(/__FX_EXIT_[0-9]+__/, TIMEOUT);
+      await session.waitForText(/__X1_EXIT_[0-9]+__/, TIMEOUT);
       const scrollback = await session.captureFullScrollback();
-      expect(scrollback).toContain("__FX_EXIT_0__");
+      expect(scrollback).toContain("__X1_EXIT_0__");
       let previousIndex = -1;
       for (const line of answerLines) {
         const marker = line.slice(0, "WRAPPED_LINE_00".length);
@@ -924,7 +924,7 @@ describe("fx ask presentation", () => {
       });
       sessions.push(session);
 
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
+      await session.waitForText("__X1_EXIT_0__", TIMEOUT);
       const scrollback = await session.captureFullScrollback();
       expect(scrollback).toContain("Run the notice filtering fixture.");
       expect(scrollback).toContain("Notice filtering complete.");

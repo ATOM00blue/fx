@@ -4,11 +4,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import xtermHeadless from "@xterm/headless";
-import { createFxTerminal, supportsJspi, xtermAdapter } from "../node.js";
+import { createX1Terminal, supportsJspi, xtermAdapter } from "../node.js";
 
 const { Terminal } = xtermHeadless;
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/fx-term.wasm"));
+const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/x1-term.wasm"));
 if (!supportsJspi()) process.exit(2);
 
 function instrumentTerminal(terminal, disposals, onWrite = () => {}) {
@@ -65,11 +65,11 @@ const fetch = async (_url, init) => {
     }, { once: true });
   });
 };
-const runtime = await createFxTerminal({
+const runtime = await createX1Terminal({
   backend: "wasm",
   wasm: await readFile(wasmPath),
   terminal: instrumentedTerminalHost,
-  env: { AI_GATEWAY_API_KEY: "term-lifecycle-key" },
+  env: { X1_API_KEY: "term-lifecycle-key" },
   fetch,
   onEvent(event) { events.push(event); },
 });
@@ -84,7 +84,7 @@ async function waitFor(predicate, label) {
   }
 }
 
-await waitFor(() => grid().includes("𝒇x"), "startup");
+await waitFor(() => grid().includes("layerx1.com"), "startup");
 terminal.resize(112, 36);
 await waitFor(
   () => events.some((event) => event.type === "terminal.resize" && event.cols === 112 && event.rows === 36) &&
@@ -107,7 +107,9 @@ const themeRepaintStart = terminalOutput.length;
 runtime.write("\x1b]11;rgb:ffff/ffff/ffff\x1b\\\x1b[?1;2c");
 await waitFor(() => {
   const repaint = terminalOutput.slice(themeRepaintStart);
-  return repaint.includes("\x1b[3J") && repaint.includes("\x1b[38;5;247m");
+  // Idle welcome uses hint_style (dark 255 → light 235). Dim 247 only
+  // appears on inline-code / dim transcript that this screen does not have.
+  return repaint.includes("\x1b[3J") && repaint.includes("\x1b[38;5;235m");
 }, "light theme retint and repaint");
 
 const submittedAt = performance.now();
@@ -136,7 +138,7 @@ const exitCode = await Promise.race([
   runtime.exited,
   new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for exit")), 5000)),
 ]);
-if (exitCode !== 0) throw new Error(`fx-term exited with ${exitCode}`);
+if (exitCode !== 0) throw new Error(`x1-term exited with ${exitCode}`);
 await new Promise((resolve) => setTimeout(resolve, 0));
 const exitEvents = events.filter((event) => event.type === "runtime.exit");
 if (exitEvents.length !== 1) throw new Error(`expected one runtime.exit event, got ${exitEvents.length}`);
@@ -146,17 +148,17 @@ if (disposals.data !== 1 || disposals.resize !== 1) {
 
 const abortTerminal = new Terminal({ cols: 80, rows: 24, allowProposedApi: true, scrollback: 1000 });
 const abortDisposals = { data: 0, resize: 0 };
-const abortRuntime = await createFxTerminal({
+const abortRuntime = await createX1Terminal({
   backend: "wasm",
   wasm: await readFile(wasmPath),
   terminal: instrumentTerminal(abortTerminal, abortDisposals),
-  env: { AI_GATEWAY_API_KEY: "term-lifecycle-key" },
+  env: { X1_API_KEY: "term-lifecycle-key" },
   fetch,
 });
 const abortFlush = () => new Promise((resolve) => abortTerminal.write("", resolve));
 const abortGrid = () => terminalGrid(abortTerminal);
 const abortStartupDeadline = performance.now() + 5000;
-while (!abortGrid().includes("𝒇x")) {
+while (!abortGrid().includes("layerx1.com")) {
   await abortFlush();
   if (performance.now() >= abortStartupDeadline) throw new Error(`timed out waiting for abort runtime startup:\n${abortGrid()}`);
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -235,9 +237,9 @@ async function runActiveTransitionChild(scenario, command) {
 
   const completedResponse = (text) => new Response(new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: "followup_1", delta: text })}\n\n`));
-      controller.enqueue(encoder.encode('data: {"type":"finish","finishReason":{"unified":"stop","raw":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":1}}}\n\n'));
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "response.output_text.delta", id: "followup_1", delta: text })}\n\n`));
+      controller.enqueue(encoder.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+      controller.enqueue(encoder.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
       controller.close();
     },
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -261,7 +263,7 @@ async function runActiveTransitionChild(scenario, command) {
       pull(controller) {
         if (sent) return;
         sent = true;
-        controller.enqueue(encoder.encode('data: {"type":"text-delta","id":"stream_1","delta":"STREAM_STARTED"}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"STREAM_STARTED"}\n\n'));
         streamStarted = true;
         init.signal.addEventListener("abort", () => {
           firstFetchAborted = true;
@@ -272,11 +274,11 @@ async function runActiveTransitionChild(scenario, command) {
     }), { status: 200, headers: { "content-type": "text/event-stream" } });
   };
 
-  const childRuntime = await createFxTerminal({
+  const childRuntime = await createX1Terminal({
     backend: "wasm",
     wasm: await readFile(wasmPath),
     terminal: childHost,
-    env: { AI_GATEWAY_API_KEY: "term-active-transition-key" },
+    env: { X1_API_KEY: "term-active-transition-key" },
     fetch: childFetch,
   });
   const childFlush = () => new Promise((resolveFlush) => childTerminal.write("", resolveFlush));
@@ -292,7 +294,7 @@ async function runActiveTransitionChild(scenario, command) {
   };
 
   await childRuntime.interactive;
-  await waitForChild(() => childOutput.includes("Run /help for commands"), "child startup");
+  await waitForChild(() => childOutput.includes("layerx1.com"), "child startup");
   process.stdout.write("runtime_interactive\n");
   childRuntime.write("first prompt\r");
   await waitForChild(() => fetchCount === 1, "first fetch");

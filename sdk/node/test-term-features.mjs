@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import xtermHeadless from "@xterm/headless";
-import { createFxTerminal, supportsJspi, xtermAdapter } from "../node.js";
+import { createX1Terminal, supportsJspi, xtermAdapter } from "../node.js";
 
 const { Terminal } = xtermHeadless;
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/fx-term.wasm"));
+const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/x1-term.wasm"));
 if (!supportsJspi()) process.exit(2);
 
 const terminal = new Terminal({ cols: 100, rows: 34, allowProposedApi: true, scrollback: 2000 });
@@ -32,23 +32,23 @@ const fetch = async (url, init = {}) => {
   const response = turn === 1 ? "first answer" : "second answer";
   return new Response(new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(`data: {"type":"text-delta","delta":"${response}"}\n`));
-      controller.enqueue(encoder.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":2}}}\n'));
-      controller.enqueue(encoder.encode("data: [DONE]\n"));
+      controller.enqueue(encoder.encode(`data: {"type":"response.output_text.delta","delta":"${response}"}\n`));
+      controller.enqueue(encoder.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+      controller.enqueue(encoder.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
       controller.close();
     },
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
 };
 const stderrDecoder = new TextDecoder();
 let stderrText = "";
-const runtime = await createFxTerminal({
+const runtime = await createX1Terminal({
   backend: "wasm",
   wasm: await readFile(wasmPath),
   terminal: xtermAdapter(terminal),
   env: {
-    AI_GATEWAY_API_KEY: "feature-key",
-    FX_TRACE_STDERR: "1",
-    FX_TRACE_SCOPES: "full_transcript,full_transcript_cache,frame_schedule",
+    X1_API_KEY: "feature-key",
+    X1_TRACE_STDERR: "1",
+    X1_TRACE_SCOPES: "full_transcript,full_transcript_cache,frame_schedule",
   },
   fetch,
   configStore: { get(id) { return config.get(id) ?? null; }, set(id, value) { config.set(id, value); } },
@@ -76,7 +76,7 @@ async function command(text, expected) {
   await waitFor(() => grid().includes(expected), expected);
 }
 
-await waitFor(() => grid().includes("𝒇x"), "startup");
+await waitFor(() => grid().includes("layerx1.com"), "startup");
 await command("first question", "first answer");
 await command("second question", "second answer");
 if (requests.length !== 2) throw new Error(`expected two gateway turns, got ${requests.length}`);
@@ -92,7 +92,7 @@ await waitFor(() => grid().includes("Full detail"), "full transcript detail");
 runtime.write("\x0f");
 await waitFor(() => terminal.buffer.active.type === "normal", "full transcript close");
 
-await command("/login", "Vercel sign-in failed. The current credential is unchanged.");
+await command("/login", "Set X1_API_KEY through createX1Terminal() to authenticate this WASM session.");
 await command("/resume", "Session resume is owned by the embedding SDK");
 await command("/mcp list", "No MCP servers configured");
 await command("/skills list", "Skills are unavailable in this host");
@@ -104,5 +104,5 @@ await waitFor(() => !grid().includes("Tab Provider"), "model catalog close");
 
 runtime.write("/exit\r");
 const code = await Promise.race([runtime.exited, new Promise((_, reject) => setTimeout(() => reject(new Error("exit timeout")), 5000))]);
-if (code !== 0) throw new Error(`fx-term exited with ${code}`);
+if (code !== 0) throw new Error(`x1-term exited with ${code}`);
 console.log("headless features passed: history, transcript, catalog, and host degradation");

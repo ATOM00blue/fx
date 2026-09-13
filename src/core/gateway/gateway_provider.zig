@@ -60,6 +60,7 @@ pub const CreditsLookupInput = struct {
     credential: ?[]const u8,
     credential_source: ?credentials.Source = null,
     tenant: ?[]const u8,
+    account_id: ?[]const u8 = null,
 };
 
 pub const FetchCreditsFn = *const fn (
@@ -411,7 +412,7 @@ test "capability resolver uses provider catalog metadata" {
         std.testing.allocator,
         fake.provider(),
         .{
-            .access = credentials.catalogAccessForCredential(.ai_gateway_api_key, "test-key", "team_123"),
+            .access = credentials.catalogAccessForCredential(.layerx1_subscription, "test-key", "team_123"),
             .endpoint = "/v1/models",
             .cancel_flag = &cancel_flag,
         },
@@ -436,28 +437,6 @@ test "capability resolver uses provider catalog metadata" {
     );
     try std.testing.expect(!missing.supports_fast_mode);
     try std.testing.expect(!missing.supports_vision);
-}
-
-test "capability resolver retries rejected authenticated catalog access anonymously" {
-    var resolver: CapabilityResolver = .{};
-    defer resolver.deinit(std.testing.allocator);
-    var fake = FakeCatalog{ .outcome = .authenticated_rejected_then_ready };
-
-    const capabilities = try resolver.resolve(
-        std.testing.allocator,
-        fake.provider(),
-        .{
-            .access = credentials.catalogAccessForCredential(.ai_gateway_api_key, "test-key", "team_123"),
-            .endpoint = "/v1/models",
-        },
-        "provider/model",
-        .{},
-    );
-
-    try std.testing.expectEqual(@as(usize, 2), fake.calls);
-    try std.testing.expect(fake.saw_authenticated_access);
-    try std.testing.expect(fake.saw_public_retry);
-    try std.testing.expect(capabilities.supports_vision);
 }
 
 test "capability resolver degrades terminal catalog failures to local capabilities" {

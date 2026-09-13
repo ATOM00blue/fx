@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { FX_BIN, REPO_ROOT } from "../../evals/eval-helpers";
+import { X1_BIN, REPO_ROOT } from "../../evals/eval-helpers";
 import {
   ACTIVE_TOOL_MARKER,
   analyzeRun,
@@ -74,7 +74,7 @@ type ScenarioContext = {
   binarySha256: string;
 };
 
-type FxLaunchOptions = {
+type x1LaunchOptions = {
   stderrPath?: string;
   gatewayApiKey?: string;
   gatewayChatUrl?: string;
@@ -139,7 +139,7 @@ const DEFAULT_BENCH_SIZES: RenderLabTerminalSize[] = [
 ];
 const BENCHMARK_COMBINED_P95_LIMIT_MS = 8;
 const BENCHMARK_P95_MIN_RUNS = 20;
-const PROMPT_TEXT = "FX_RENDER_LAB%";
+const PROMPT_TEXT = "X1_RENDER_LAB%";
 const TRACE_SCOPES =
   "render,paint,resize,scroll,footer.clean,input,permission,frame_layout,frame_plan,frame_diff,frame_commit,frame_owner_violation,frame_schedule,ui_activity";
 const QUIESCENCE_INTERVAL_MS = 300;
@@ -149,7 +149,7 @@ export async function runRenderLab(rawOptions: Partial<Options> = {}): Promise<R
   const options = {
     scenario: rawOptions.scenario ?? SCENARIO,
     runs: rawOptions.runs ?? 1,
-    out: rawOptions.out ?? join(shortTempBase(), "fx-render-lab-artifacts"),
+    out: rawOptions.out ?? join(shortTempBase(), "x1-render-lab-artifacts"),
     analyze: rawOptions.analyze ?? null,
     listScenarios: rawOptions.listScenarios ?? false,
     sizes: rawOptions.sizes ?? null,
@@ -247,7 +247,7 @@ async function runSameShellRelaunch(outRoot: string, runNumber: number): Promise
   const artifactDir = join(outRoot, `run-${timestampForPath(startedAt)}-${runNumber}`);
   mkdirSync(join(artifactDir, "replay", "frames"), { recursive: true });
 
-  const binarySha256 = sha256(FX_BIN);
+  const binarySha256 = sha256(X1_BIN);
   const manifest: RenderLabManifest = {
     version: 1,
     scenario: SCENARIO,
@@ -256,7 +256,7 @@ async function runSameShellRelaunch(outRoot: string, runNumber: number): Promise
     completedAt: null,
     repoRoot: REPO_ROOT,
     artifactDir,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256,
     traceLogPath: join(artifactDir, "trace.log"),
     tapePath: join(artifactDir, "render.fxtape"),
@@ -313,9 +313,9 @@ async function runSameShellRelaunch(outRoot: string, runNumber: number): Promise
       "shell-long-line-before-first",
     );
 
-    await launchFx(context, session, "first");
+    await launchx1(context, session, "first");
     await submitSlashCommand(context, session, "/status", "permission_mode", "first-status-visible");
-    await quitFx(context, session, "first");
+    await quitx1(context, session, "first");
 
     await runShellCommand(
       context,
@@ -332,12 +332,12 @@ async function runSameShellRelaunch(outRoot: string, runNumber: number): Promise
       "shell-long-line-between-launches",
     );
 
-    await launchFx(context, session, "second");
+    await launchx1(context, session, "second");
     await submitSlashCommand(context, session, "/version", "● Version:", "second-version-visible");
     await resize(context, session, 72, 24, "second-resize-narrow");
     await resize(context, session, 132, 42, "second-resize-wide");
     await resize(context, session, 120, 40, "second-resize-restored");
-    await quitFx(context, session, "second");
+    await quitx1(context, session, "second");
 
     await runShellCommand(
       context,
@@ -347,12 +347,12 @@ async function runSameShellRelaunch(outRoot: string, runNumber: number): Promise
       "shell-before-third",
     );
 
-    await launchFx(context, session, "third");
+    await launchx1(context, session, "third");
     await submitSlashCommand(context, session, "/help", "/version", "third-help-visible");
     const finalFrame = await capture(context, session, "final-third-launch-state");
     manifest.finalFrameIndex = finalFrame.index;
 
-    await quitFx(context, session, "third-cleanup");
+    await quitx1(context, session, "third-cleanup");
     await session.sendText("exit");
     await session.waitForEnd(10_000);
     session = null;
@@ -401,7 +401,7 @@ async function runActiveToolPlacement(
   const artifactDir = join(outRoot, `run-${timestampForPath(startedAt)}-${runNumber}`);
   mkdirSync(join(artifactDir, "replay", "frames"), { recursive: true });
 
-  const binarySha256 = sha256(FX_BIN);
+  const binarySha256 = sha256(X1_BIN);
   const manifest: RenderLabManifest = {
     version: 1,
     scenario,
@@ -410,7 +410,7 @@ async function runActiveToolPlacement(
     completedAt: null,
     repoRoot: REPO_ROOT,
     artifactDir,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256,
     traceLogPath: join(artifactDir, "trace.log"),
     tapePath: join(artifactDir, "render.fxtape"),
@@ -424,7 +424,7 @@ async function runActiveToolPlacement(
     markers: {
       shell: [],
       submitted: ["exercise one active command placement"],
-      history: ["Run /help for commands"],
+      history: ["layerx1.com"],
     },
     frames: [],
     failures: [],
@@ -445,7 +445,7 @@ async function runActiveToolPlacement(
     });
     const context = { fixture, manifest, binarySha256 };
 
-    await launchFx(context, session, "active-tool", {
+    await launchx1(context, session, "active-tool", {
       stderrPath: join(artifactDir, "stderr.log"),
       gatewayApiKey: "render-lab-local-gateway-key",
       gatewayChatUrl: gateway.chatUrl,
@@ -577,7 +577,7 @@ async function runActiveToolPlacement(
     const finalUpdate = await capture(context, session, "active-tool-final-update");
     manifest.finalFrameIndex = finalUpdate.index;
 
-    await quitFx(context, session, "active-tool-cleanup");
+    await quitx1(context, session, "active-tool-cleanup");
     await session.sendText("exit");
     await session.waitForEnd(10_000);
     session = null;
@@ -638,7 +638,7 @@ async function runUserCardResizeReplayScrollback(
   const artifactDir = join(outRoot, `run-${timestampForPath(startedAt)}-${runNumber}`);
   mkdirSync(join(artifactDir, "replay", "frames"), { recursive: true });
 
-  const binarySha256 = sha256(FX_BIN);
+  const binarySha256 = sha256(X1_BIN);
   const promptHead = `USER_CARD_HEAD_${markerSuffix}`;
   const promptTail = `USER_CARD_TAIL_${markerSuffix}`;
   const prompt = [
@@ -655,7 +655,7 @@ async function runUserCardResizeReplayScrollback(
     completedAt: null,
     repoRoot: REPO_ROOT,
     artifactDir,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256,
     traceLogPath: join(artifactDir, "trace.log"),
     tapePath: join(artifactDir, "render.fxtape"),
@@ -669,7 +669,7 @@ async function runUserCardResizeReplayScrollback(
     markers: {
       shell: [],
       submitted: [promptHead, promptTail],
-      history: ["Run /help for commands"],
+      history: ["layerx1.com"],
     },
     frames: [],
     failures: [],
@@ -689,7 +689,7 @@ async function runUserCardResizeReplayScrollback(
     });
     const context = { fixture, manifest, binarySha256 };
 
-    await launchFx(context, session, "user-card", {
+    await launchx1(context, session, "user-card", {
       stderrPath: join(artifactDir, "stderr.log"),
       gatewayApiKey: "render-lab-local-gateway-key",
       gatewayChatUrl: gateway.chatUrl,
@@ -722,7 +722,7 @@ async function runUserCardResizeReplayScrollback(
       QUIESCENCE_INTERVAL_MS,
     );
 
-    await quitFx(context, session, "user-card-cleanup");
+    await quitx1(context, session, "user-card-cleanup");
     await session.sendText("exit");
     await session.waitForEnd(10_000);
     session = null;
@@ -775,7 +775,7 @@ async function runTuiObservabilityGauntlet(
   const artifactDir = join(outRoot, `run-${timestampForPath(startedAt)}-${runNumber}`);
   mkdirSync(join(artifactDir, "replay", "frames"), { recursive: true });
 
-  const binarySha256 = sha256(FX_BIN);
+  const binarySha256 = sha256(X1_BIN);
   const shellMarker = `OBSERVABILITY_SHELL_HISTORY_${markerSuffix}`;
   const promptHead = `OBSERVABILITY_PROMPT_HEAD_${markerSuffix}`;
   const promptTail = `OBSERVABILITY_PROMPT_TAIL_${markerSuffix}`;
@@ -792,7 +792,7 @@ async function runTuiObservabilityGauntlet(
     completedAt: null,
     repoRoot: REPO_ROOT,
     artifactDir,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256,
     traceLogPath: join(artifactDir, "trace.log"),
     tapePath: join(artifactDir, "render.fxtape"),
@@ -808,7 +808,7 @@ async function runTuiObservabilityGauntlet(
       clearedShell: [shellMarker],
       submitted: [promptHead, promptTail],
       history: [
-        "Run /help for commands",
+        "layerx1.com",
         OBSERVABILITY_TRANSCRIPT_HEAD,
         OBSERVABILITY_TRANSCRIPT_TAIL,
         "OBSERVABILITY_TOOL_OUTPUT",
@@ -841,7 +841,7 @@ async function runTuiObservabilityGauntlet(
       "observability-shell-seed",
     );
 
-    await launchFx(context, session, "observability", {
+    await launchx1(context, session, "observability", {
       stderrPath: join(artifactDir, "stderr.log"),
       gatewayApiKey: "render-lab-local-gateway-key",
       gatewayChatUrl: gateway.chatUrl,
@@ -923,7 +923,7 @@ async function runTuiObservabilityGauntlet(
       QUIESCENCE_INTERVAL_MS,
     );
 
-    await quitFx(context, session, "observability-cleanup");
+    await quitx1(context, session, "observability-cleanup");
     await session.sendText("exit");
     await session.waitForEnd(10_000);
     session = null;
@@ -1044,7 +1044,7 @@ async function runStartupScrollbackOverflow(
   const artifactDir = join(outRoot, `run-${timestampForPath(startedAt)}-${runNumber}`);
   mkdirSync(join(artifactDir, "replay", "frames"), { recursive: true });
 
-  const binarySha256 = sha256(FX_BIN);
+  const binarySha256 = sha256(X1_BIN);
   const promptHead = `OVERFLOW_PROMPT_HEAD_${markerSuffix}`;
   const promptTail = `OVERFLOW_PROMPT_TAIL_${markerSuffix}`;
   const manifest: RenderLabManifest = {
@@ -1055,7 +1055,7 @@ async function runStartupScrollbackOverflow(
     completedAt: null,
     repoRoot: REPO_ROOT,
     artifactDir,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256,
     traceLogPath: join(artifactDir, "trace.log"),
     tapePath: join(artifactDir, "render.fxtape"),
@@ -1073,7 +1073,7 @@ async function runStartupScrollbackOverflow(
         `SHELL_OVERFLOW_END_${markerSuffix}`,
       ],
       submitted: [promptTail],
-      history: [promptHead, "Run /help for commands"],
+      history: [promptHead, "layerx1.com"],
     },
     frames: [],
     failures: [],
@@ -1082,9 +1082,9 @@ async function runStartupScrollbackOverflow(
   writeReproScript(manifest);
 
   const fixture = createFixture(runId);
-  mkdirSync(join(fixture.home, ".fx"), { recursive: true });
+  mkdirSync(join(fixture.home, ".x1"), { recursive: true });
   writeFileSync(
-    join(fixture.home, ".fx", "settings.json"),
+    join(fixture.home, ".x1", "settings.json"),
     `${JSON.stringify({ startup_scrollback: startupScrollback })}\n`,
   );
   const gateway = startLocalGatewayFixture(promptTail);
@@ -1120,7 +1120,7 @@ async function runStartupScrollbackOverflow(
       "overflow-shell-end",
     );
 
-    await launchFx(context, session, "overflow", {
+    await launchx1(context, session, "overflow", {
       stderrPath: join(artifactDir, "stderr.log"),
       gatewayApiKey: "render-lab-local-gateway-key",
       gatewayChatUrl: gateway.chatUrl,
@@ -1154,7 +1154,7 @@ async function runStartupScrollbackOverflow(
     gateway.releaseResponse();
     await session.waitForPane((pane) => pane.includes(LOCAL_GATEWAY_COMPLETION), 10_000);
 
-    await quitFx(context, session, "overflow-cleanup");
+    await quitx1(context, session, "overflow-cleanup");
     await session.sendText("exit");
     await session.waitForEnd(10_000);
     session = null;
@@ -1273,7 +1273,7 @@ function runBufferSystemFrameBench(
   const artifactDir = join(outRoot, `run-${timestampForPath(startedAt)}-bench`);
   mkdirSync(join(artifactDir, "replay", "frames"), { recursive: true });
 
-  const binarySha256 = sha256(FX_BIN);
+  const binarySha256 = sha256(X1_BIN);
   const manifest: RenderLabManifest = {
     version: 1,
     scenario: BUFFER_SYSTEM_FRAME_BENCH,
@@ -1282,7 +1282,7 @@ function runBufferSystemFrameBench(
     completedAt: null,
     repoRoot: REPO_ROOT,
     artifactDir,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256,
     traceLogPath: join(artifactDir, "trace.log"),
     tapePath: join(artifactDir, "render.fxtape"),
@@ -1620,26 +1620,26 @@ function roundStat(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
-async function launchFx(
+async function launchx1(
   context: ScenarioContext,
   session: RenderLabTmux,
   label: string,
-  options: FxLaunchOptions = {},
+  options: x1LaunchOptions = {},
 ): Promise<void> {
   const environment = [
     options.gatewayApiKey ? `AI_GATEWAY_API_KEY=${shQuote(options.gatewayApiKey)}` : null,
-    options.gatewayChatUrl ? `FX_E2E_GATEWAY_CHAT_URL=${shQuote(options.gatewayChatUrl)}` : null,
-    options.gatewayModelsUrl ? `FX_E2E_GATEWAY_MODELS_URL=${shQuote(options.gatewayModelsUrl)}` : null,
-    options.permissionMode ? `FX_PERMISSION_MODE=${shQuote(options.permissionMode)}` : null,
+    options.gatewayChatUrl ? `X1_E2E_GATEWAY_CHAT_URL=${shQuote(options.gatewayChatUrl)}` : null,
+    options.gatewayModelsUrl ? `X1_E2E_GATEWAY_MODELS_URL=${shQuote(options.gatewayModelsUrl)}` : null,
+    options.permissionMode ? `X1_PERMISSION_MODE=${shQuote(options.permissionMode)}` : null,
   ].filter((entry): entry is string => entry !== null).join(" ");
   const environmentPrefix = environment.length > 0 ? `${environment} ` : "";
   const stderrRedirect = options.stderrPath ? ` 2>${shQuote(options.stderrPath)}` : "";
   await session.sendText(
-    `${environmentPrefix}FX_RECORD=${shQuote(context.manifest.tapePath)} FX_RECORD_INPUT=1 ${shQuote(FX_BIN)}${stderrRedirect}`,
+    `${environmentPrefix}X1_RECORD=${shQuote(context.manifest.tapePath)} X1_RECORD_INPUT=1 ${shQuote(X1_BIN)}${stderrRedirect}`,
   );
-  await capture(context, session, `${label}-fx-launch-requested`);
-  await session.waitForPane((pane) => pane.includes("Run /help for commands"), 25_000);
-  await capture(context, session, `${label}-fx-prompt-visible`);
+  await capture(context, session, `${label}-x1-launch-requested`);
+  await session.waitForPane((pane) => pane.includes("layerx1.com"), 25_000);
+  await capture(context, session, `${label}-x1-prompt-visible`);
 }
 
 function startLocalGatewayFixture(expectedPromptTail: string): LocalGatewayFixture {
@@ -1940,11 +1940,11 @@ async function submitSlashCommand(
   await capture(context, session, event);
 }
 
-async function quitFx(context: ScenarioContext, session: RenderLabTmux, label: string): Promise<void> {
+async function quitx1(context: ScenarioContext, session: RenderLabTmux, label: string): Promise<void> {
   await session.sendLiteral("/quit");
   await session.sendKeys("Enter");
   await session.sendKeys("Enter");
-  await capture(context, session, `${label}-fx-quit-requested`);
+  await capture(context, session, `${label}-x1-quit-requested`);
   await session.waitForPane((pane) => pane.includes(PROMPT_TEXT), 15_000);
   await capture(context, session, `${label}-post-quit-shell-prompt`);
 }
@@ -2053,7 +2053,7 @@ function writeFrame(manifest: RenderLabManifest, frame: RenderLabFrame): void {
 async function writeReplaySummary(manifest: RenderLabManifest): Promise<void> {
   try {
     const output = execFileSync(
-      FX_BIN,
+      X1_BIN,
       ["replay", manifest.tapePath, "--json", "--golden", manifest.finalGridPath],
       { cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
@@ -2089,7 +2089,7 @@ class RenderLabTmux {
     width: number;
     height: number;
   }): Promise<RenderLabTmux> {
-    const name = `fx-render-lab-${process.pid}-${randomBytes(4).toString("hex")}`;
+    const name = `x1-render-lab-${process.pid}-${randomBytes(4).toString("hex")}`;
     const env = testEnv(opts.fixture, opts.manifest);
     const command = [
       "env",
@@ -2097,14 +2097,14 @@ class RenderLabTmux {
       "AI_GATEWAY_API_KEY",
       "-u",
       "VERCEL_OIDC_TOKEN",
-      "FX_DISABLE_KEYCHAIN=1",
-      "FX_SKIP_ONBOARDING=1",
+      "X1_DISABLE_KEYCHAIN=1",
+      "X1_SKIP_ONBOARDING=1",
       `HOME=${shQuote(opts.fixture.home)}`,
       `ZDOTDIR=${shQuote(opts.fixture.zdotdir)}`,
       `HISTFILE=${shQuote(opts.fixture.histfile)}`,
       `SHELL=${shQuote(zshPath())}`,
-      `FX_TRACE_LOG=${shQuote(opts.manifest.traceLogPath)}`,
-      `FX_TRACE_SCOPES=${shQuote(TRACE_SCOPES)}`,
+      `X1_TRACE_LOG=${shQuote(opts.manifest.traceLogPath)}`,
+      `X1_TRACE_SCOPES=${shQuote(TRACE_SCOPES)}`,
       `SHELL_A_BEFORE_FIRST=${shQuote(opts.manifest.markers.shell[0] ?? "")}`,
       `SHELL_A_BETWEEN_LAUNCHES=${shQuote(opts.manifest.markers.shell[1] ?? "")}`,
       `SHELL_A_BEFORE_THIRD=${shQuote(opts.manifest.markers.shell[2] ?? "")}`,
@@ -2183,7 +2183,7 @@ class RenderLabTmux {
       timestampMs: Date.now(),
       width: size.width,
       height: size.height,
-      binaryPath: FX_BIN,
+      binaryPath: X1_BIN,
       binarySha256,
       grid: this.captureGrid(),
       escapes: this.captureEscapes(),
@@ -2287,12 +2287,12 @@ function preflight(): void {
 }
 
 function preflightBinaryOnly(): void {
-  if (!existsSync(FX_BIN)) {
-    throw new Error(`fx binary not found at ${FX_BIN}. Run zig build first.`);
+  if (!existsSync(X1_BIN)) {
+    throw new Error(`x1 binary not found at ${X1_BIN}. Run zig build first.`);
   }
-  const stat = statSync(FX_BIN);
+  const stat = statSync(X1_BIN);
   if (!stat.isFile() || (stat.mode & 0o111) === 0) {
-    throw new Error(`fx binary is not executable at ${FX_BIN}`);
+    throw new Error(`x1 binary is not executable at ${X1_BIN}`);
   }
 }
 
@@ -2300,15 +2300,15 @@ function testEnv(fixture: Fixture, manifest: RenderLabManifest): NodeJS.ProcessE
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.AI_GATEWAY_API_KEY;
   delete env.VERCEL_OIDC_TOKEN;
-  env.FX_DISABLE_KEYCHAIN = "1";
-  env.FX_SKIP_ONBOARDING = "1";
+  env.X1_DISABLE_KEYCHAIN = "1";
+  env.X1_SKIP_ONBOARDING = "1";
   env.HOME = fixture.home;
   env.ZDOTDIR = fixture.zdotdir;
   env.HISTFILE = fixture.histfile;
   env.SHELL = zshPath();
   env.TERM_PROGRAM = "tmux";
-  env.FX_TRACE_LOG = manifest.traceLogPath;
-  env.FX_TRACE_SCOPES = TRACE_SCOPES;
+  env.X1_TRACE_LOG = manifest.traceLogPath;
+  env.X1_TRACE_SCOPES = TRACE_SCOPES;
   env.SHELL_A_BEFORE_FIRST = manifest.markers.shell[0] ?? "";
   env.SHELL_A_BETWEEN_LAUNCHES = manifest.markers.shell[1] ?? "";
   env.SHELL_A_BEFORE_THIRD = manifest.markers.shell[2] ?? "";
@@ -2324,17 +2324,17 @@ function createFixture(runId: string): Fixture {
     work: join(root, "w"),
     histfile: join(root, "hist"),
   };
-  mkdirSync(join(fixture.home, ".fx"), { recursive: true });
+  mkdirSync(join(fixture.home, ".x1"), { recursive: true });
   mkdirSync(fixture.zdotdir, { recursive: true });
   mkdirSync(fixture.work, { recursive: true });
   writeFileSync(
-    join(fixture.home, ".fx", "settings.json"),
+    join(fixture.home, ".x1", "settings.json"),
     `${JSON.stringify({})}\n`,
   );
   writeFileSync(join(fixture.work, "run-id.txt"), `${runId}\n`);
   writeFileSync(
     join(fixture.zdotdir, ".zshrc"),
-    ["PROMPT='FX_RENDER_LAB%% '", "RPROMPT=''", "setopt NO_BEEP", ""].join("\n"),
+    ["PROMPT='X1_RENDER_LAB%% '", "RPROMPT=''", "setopt NO_BEEP", ""].join("\n"),
   );
   return fixture;
 }

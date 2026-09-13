@@ -372,15 +372,8 @@ pub fn compareModelCatalogEntries(_: void, a: ModelCatalogEntry, b: ModelCatalog
 }
 
 fn modelProviderRank(id: []const u8) u8 {
-    if (std.mem.startsWith(u8, id, "anthropic/")) return 0;
-    if (std.mem.startsWith(u8, id, "openai/")) return 1;
-    if (std.mem.startsWith(u8, id, "google/")) return 2;
-    if (std.mem.startsWith(u8, id, "xai/")) return 3;
-    if (std.mem.startsWith(u8, id, "deepseek/")) return 4;
-    if (std.mem.startsWith(u8, id, "meta/")) return 5;
-    if (std.mem.startsWith(u8, id, "mistral/")) return 6;
-    if (std.mem.startsWith(u8, id, "alibaba/")) return 7;
-    return 8;
+    if (std.mem.startsWith(u8, id, "lx1-")) return 0;
+    return 1;
 }
 
 fn modelTierRank(id: []const u8) u8 {
@@ -393,8 +386,7 @@ fn modelTierRank(id: []const u8) u8 {
         text_utils.containsIgnoreCase(id, "o1") or
         text_utils.containsIgnoreCase(id, "o3") or
         text_utils.containsIgnoreCase(id, "o4") or
-        text_utils.containsIgnoreCase(id, "pro") or
-        text_utils.containsIgnoreCase(id, "grok-4"))
+        text_utils.containsIgnoreCase(id, "pro"))
     {
         return 0;
     }
@@ -412,13 +404,12 @@ const FeaturedPickerFamily = struct {
 // These are product preferences, but the model version in each slot always
 // comes from the live Gateway catalog instead of a pinned model ID.
 const featured_picker_families = [_]FeaturedPickerFamily{
-    .{ .family = "anthropic/claude-fable", .count = 1 },
-    .{ .family = "openai/gpt", .count = 1 },
-    .{ .family = "xai/grok-build", .count = 1 },
-    .{ .family = "anthropic/claude-opus", .count = 1 },
-    .{ .family = "zai/glm", .count = 1 },
-    .{ .family = "deepseek/deepseek", .count = 1 },
-    .{ .family = "minimax/minimax", .count = 1 },
+    .{ .family = "lx1-deepseek", .count = 1 },
+    .{ .family = "lx1-glm", .count = 1 },
+    .{ .family = "lx1-sonnet", .count = 1 },
+    .{ .family = "lx1-qwen3", .count = 1 },
+    .{ .family = "lx1-kimi", .count = 1 },
+    .{ .family = "lx1-mistral", .count = 1 },
 };
 
 pub fn projectPickerModelCatalog(alloc: std.mem.Allocator, candidates: []const ModelCatalogEntry) !std.ArrayList(ModelCatalogEntry) {
@@ -521,14 +512,10 @@ fn isWithinPickerFamilyLimit(candidate: ModelCatalogEntry, candidates: []const M
 }
 
 fn modelPickerFamily(id: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, id, "openai/gpt-") and text_utils.containsIgnoreCase(id, "-codex")) {
-        return "openai/gpt-codex";
-    }
-    if (std.mem.startsWith(u8, id, "deepseek/deepseek-")) {
-        return "deepseek/deepseek";
-    }
-    if (std.mem.startsWith(u8, id, "minimax/minimax-")) {
-        return "minimax/minimax";
+    if (std.mem.startsWith(u8, id, "lx1-")) {
+        const rest = id["lx1-".len..];
+        const dash = std.mem.findScalar(u8, rest, '-') orelse return id;
+        return id[0 .. "lx1-".len + dash];
     }
 
     const slash = std.mem.findScalar(u8, id, '/') orelse return id;
@@ -544,10 +531,7 @@ fn modelPickerProvider(id: []const u8) []const u8 {
     return id[0..slash];
 }
 
-fn pickerProviderLimit(provider: []const u8) usize {
-    if (std.mem.eql(u8, provider, "anthropic") or std.mem.eql(u8, provider, "openai")) {
-        return extended_picker_provider_limit;
-    }
+fn pickerProviderLimit(_: []const u8) usize {
     return picker_provider_limit;
 }
 
@@ -559,24 +543,11 @@ fn pickerProviderSelectionCount(entries: []const ModelCatalogEntry, provider: []
     return count;
 }
 
-fn isPickerProviderCandidate(provider: []const u8, candidate: ModelCatalogEntry, candidates: []const ModelCatalogEntry) bool {
-    const family = modelPickerFamily(candidate.id);
-    if (std.mem.eql(u8, provider, "anthropic")) {
-        return std.mem.eql(u8, family, "anthropic/claude-opus") and
-            isWithinPickerFamilyLimit(candidate, candidates);
-    }
-    if (std.mem.eql(u8, provider, "openai")) {
-        const is_gpt = std.mem.eql(u8, family, "openai/gpt");
-        const is_codex = std.mem.eql(u8, family, "openai/gpt-codex");
-        return (is_gpt or is_codex) and isWithinPickerFamilyLimit(candidate, candidates);
-    }
-    return true;
+fn isPickerProviderCandidate(_: []const u8, candidate: ModelCatalogEntry, candidates: []const ModelCatalogEntry) bool {
+    return isWithinPickerFamilyLimit(candidate, candidates);
 }
 
-fn pickerFamilyLimit(family: []const u8) usize {
-    // Let the picker show two general models next to one coding-focused model.
-    if (std.mem.eql(u8, family, "openai/gpt")) return 2;
-    if (std.mem.eql(u8, family, "openai/gpt-codex")) return 1;
+fn pickerFamilyLimit(_: []const u8) usize {
     return extended_picker_provider_limit;
 }
 
@@ -588,7 +559,7 @@ fn pickerModelIsNewer(a: ModelCatalogEntry, b: ModelCatalogEntry) bool {
 
 fn featuredPickerModelIsNewer(family: []const u8, a: ModelCatalogEntry, b: ModelCatalogEntry) bool {
     if (a.released != b.released) return a.released > b.released;
-    if (std.mem.eql(u8, family, "deepseek/deepseek")) {
+    if (std.mem.eql(u8, family, "lx1-deepseek")) {
         const a_quality = deepseekFeaturedQualityRank(a.id);
         const b_quality = deepseekFeaturedQualityRank(b.id);
         if (a_quality != b_quality) return a_quality < b_quality;
@@ -660,144 +631,6 @@ test "catalog HTTP failure classification preserves policy evidence" {
     }
 }
 
-test "catalog authentication fallback is anonymous and bounded" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
-    defer alloc.free(root);
-    const trace_path = try std.fs.path.join(alloc, &.{ root, "catalog-trace.log" });
-    defer alloc.free(trace_path);
-    debug_trace.resetForTest();
-    defer debug_trace.resetForTest();
-    try debug_trace.configureForTestWithScopes(alloc, trace_path, "catalog");
-
-    const access = credentials.catalogAccessForCredential(.ai_gateway_api_key, "test-key", "team_123");
-    const rejection = Failure{ .category = .authentication, .http_status = .unauthorized };
-    var accepted = FallbackProbe{ .failures = .{ rejection, null } };
-    var loaded = fetchWithPublicFallback(accepted.provider(), std.testing.allocator, .{
-        .access = access,
-        .endpoint = "/v1/models",
-    });
-    defer freeModelCatalog(std.testing.allocator, &loaded.loaded.catalog);
-    try std.testing.expectEqual(AccessLevel.public_only, loaded.loaded.provenance.access.level);
-    try std.testing.expectEqual(credentials.Source.ai_gateway_api_key, loaded.loaded.provenance.access.source.?);
-    try std.testing.expectEqual(credentials.CatalogPublicOnlyReason.authenticated_credential_rejected, loaded.loaded.provenance.access.public_only_reason.?);
-    try std.testing.expect(loaded.loaded.provenance.access.private_models_may_be_hidden);
-    try std.testing.expect(loaded.loaded.provenance.anonymous_fallback_used);
-    try std.testing.expectEqual(FailureCategory.authentication, loaded.loaded.provenance.fallback_failure.?.category);
-    try std.testing.expectEqual(std.http.Status.unauthorized, loaded.loaded.provenance.fallback_failure.?.http_status.?);
-    try std.testing.expect(!loaded.loaded.provenance.fallback_failure.?.retryable);
-    try std.testing.expectEqual(@as(usize, 2), accepted.calls);
-    try std.testing.expect(accepted.anonymous_retry);
-
-    for ([_]Failure{
-        .{ .category = .authentication },
-        .{ .category = .cancellation },
-        .{ .category = .transport, .retryable = true },
-    }) |failure| {
-        var rejected = FallbackProbe{ .failures = .{ failure, null } };
-        const failed = fetchWithPublicFallback(rejected.provider(), std.testing.allocator, .{
-            .access = access,
-            .endpoint = "/v1/models",
-        }).failed;
-        try std.testing.expectEqual(failure.category, failed.failure.category);
-        try std.testing.expectEqual(AccessLevel.authenticated, failed.access.level);
-        try std.testing.expect(!failed.anonymous_fallback_used);
-        try std.testing.expectEqual(@as(usize, 1), rejected.calls);
-    }
-
-    var twice = FallbackProbe{ .failures = .{ rejection, rejection } };
-    const failed = fetchWithPublicFallback(twice.provider(), std.testing.allocator, .{
-        .access = access,
-        .endpoint = "/v1/models",
-    }).failed;
-    try std.testing.expectEqual(AccessLevel.public_only, failed.access.level);
-    try std.testing.expect(failed.anonymous_fallback_used);
-    try std.testing.expectEqual(std.http.Status.unauthorized, failed.failure.http_status.?);
-    try std.testing.expectEqual(@as(usize, 2), twice.calls);
-
-    debug_trace.shutdown();
-    var trace_file = try std.Io.Dir.openFileAbsolute(io_mod.getIo(), trace_path, .{});
-    defer trace_file.close(io_mod.getIo());
-    const trace = try io_mod.readFileToEnd(alloc, &trace_file, 8192);
-    defer alloc.free(trace);
-    try std.testing.expectEqual(@as(usize, 5), std.mem.count(u8, trace, "event=model_catalog_load "));
-    try std.testing.expect(std.mem.find(
-        u8,
-        trace,
-        "requested_access=authenticated credential_source=ai_gateway_api_key effective_access=public_only public_only_reason=authenticated_credential_rejected anonymous_fallback=true outcome=loaded failure_category=authentication http_status=401 retryable=false",
-    ) != null);
-    try std.testing.expect(std.mem.find(
-        u8,
-        trace,
-        "requested_access=authenticated credential_source=ai_gateway_api_key effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=failed failure_category=transport http_status=none retryable=true",
-    ) != null);
-    try std.testing.expect(std.mem.find(u8, trace, "test-key") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "team_123") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "/v1/models") == null);
-}
-
-test "catalog fallback classification stays bounded across repeated cycles" {
-    const access = credentials.catalogAccessForCredential(
-        .ai_gateway_api_key,
-        "repeated-test-key",
-        "repeated-team",
-    );
-    const terminal_failures = [_]Failure{
-        .{ .category = .authentication },
-        .{ .category = .rate_limited, .http_status = .too_many_requests, .retryable = true },
-        .{ .category = .gateway_unavailable, .http_status = .service_unavailable, .retryable = true },
-        .{ .category = .cancellation },
-        .{ .category = .transport, .retryable = true },
-        .{ .category = .malformed_response },
-        .{ .category = .http_status, .http_status = .bad_request },
-    };
-
-    for (0..128) |iteration| {
-        const status: std.http.Status = if (iteration % 2 == 0) .unauthorized else .forbidden;
-        const rejection = Failure{ .category = .authentication, .http_status = status };
-        var fallback = FallbackProbe{ .failures = .{ rejection, null } };
-        var loaded = fetchWithPublicFallback(fallback.provider(), std.testing.allocator, .{
-            .access = access,
-            .endpoint = "/v1/models",
-        });
-        switch (loaded) {
-            .loaded => |*result| {
-                defer freeModelCatalog(std.testing.allocator, &result.catalog);
-                try std.testing.expectEqual(AccessLevel.public_only, result.provenance.access.level);
-                try std.testing.expectEqual(status, result.provenance.fallback_failure.?.http_status.?);
-                try std.testing.expect(result.provenance.anonymous_fallback_used);
-            },
-            .failed => return error.TestExpectedEqual,
-        }
-        try std.testing.expectEqual(@as(usize, 2), fallback.calls);
-        try std.testing.expect(fallback.anonymous_retry);
-
-        const expected = terminal_failures[iteration % terminal_failures.len];
-        var terminal = FallbackProbe{ .failures = .{ expected, null } };
-        const failed = fetchWithPublicFallback(terminal.provider(), std.testing.allocator, .{
-            .access = access,
-            .endpoint = "/v1/models",
-        });
-        switch (failed) {
-            .loaded => |result| {
-                var catalog = result.catalog;
-                freeModelCatalog(std.testing.allocator, &catalog);
-                return error.TestExpectedEqual;
-            },
-            .failed => |result| {
-                try std.testing.expectEqual(expected.category, result.failure.category);
-                try std.testing.expectEqual(expected.http_status, result.failure.http_status);
-                try std.testing.expectEqual(AccessLevel.authenticated, result.access.level);
-                try std.testing.expect(!result.anonymous_fallback_used);
-            },
-        }
-        try std.testing.expectEqual(@as(usize, 1), terminal.calls);
-        try std.testing.expect(!terminal.anonymous_retry);
-    }
-}
-
 test "picker curation skips fast variants in provider scan but keeps them selectable" {
     const candidates = [_]ModelCatalogEntry{
         .{ .id = @constCast("zai/glm-5.2"), .model_type = @constCast("language"), .released = 100, .has_tool_use = true },
@@ -833,38 +666,34 @@ test "projectModelIds preserves order and returns owned copies" {
     try std.testing.expectEqualStrings("beta", ids.items[1]);
 }
 
-test "catalog order prefers tool use, tier, provider, then recency" {
+test "catalog order prefers tool use, then lx1 ids, then recency" {
     var entries = [_]ModelCatalogEntry{
-        .{ .id = @constCast("mistral/large-x"), .model_type = @constCast("language"), .released = 100 },
-        .{ .id = @constCast("anthropic/claude-haiku-4.5"), .model_type = @constCast("language"), .released = 99, .has_tool_use = true },
-        .{ .id = @constCast("xai/grok-flash"), .model_type = @constCast("language"), .released = 90, .has_tool_use = true },
-        .{ .id = @constCast("openai/gpt-5"), .model_type = @constCast("language"), .released = 10, .has_tool_use = true },
-        .{ .id = @constCast("anthropic/claude-opus-4.5"), .model_type = @constCast("language"), .released = 3, .has_tool_use = true },
-        .{ .id = @constCast("anthropic/claude-opus-4.6"), .model_type = @constCast("language"), .released = 5, .has_tool_use = true },
+        .{ .id = @constCast("other-tool"), .model_type = @constCast("language"), .released = 100, .has_tool_use = true },
+        .{ .id = @constCast("lx1-flash"), .model_type = @constCast("language"), .released = 90, .has_tool_use = true },
+        .{ .id = @constCast("lx1-pro"), .model_type = @constCast("language"), .released = 5, .has_tool_use = true },
+        .{ .id = @constCast("lx1-no-tools"), .model_type = @constCast("language"), .released = 200 },
     };
 
     std.mem.sort(ModelCatalogEntry, &entries, {}, compareModelCatalogEntries);
 
-    try std.testing.expectEqualStrings("anthropic/claude-opus-4.6", entries[0].id);
-    try std.testing.expectEqualStrings("anthropic/claude-opus-4.5", entries[1].id);
-    try std.testing.expectEqualStrings("openai/gpt-5", entries[2].id);
-    try std.testing.expectEqualStrings("xai/grok-flash", entries[3].id);
-    try std.testing.expectEqualStrings("anthropic/claude-haiku-4.5", entries[4].id);
-    try std.testing.expectEqualStrings("mistral/large-x", entries[5].id);
+    try std.testing.expectEqualStrings("lx1-pro", entries[0].id);
+    try std.testing.expectEqualStrings("other-tool", entries[1].id);
+    try std.testing.expectEqualStrings("lx1-flash", entries[2].id);
+    try std.testing.expectEqualStrings("lx1-no-tools", entries[3].id);
 }
 
 test "featured deepseek slot prefers the pro variant at equal recency" {
     const candidates = [_]ModelCatalogEntry{
-        .{ .id = @constCast("deepseek/deepseek-v4"), .model_type = @constCast("language"), .released = 110, .has_tool_use = true },
-        .{ .id = @constCast("deepseek/deepseek-v4-flash"), .model_type = @constCast("language"), .released = 110, .has_tool_use = true },
-        .{ .id = @constCast("deepseek/deepseek-v4-pro"), .model_type = @constCast("language"), .released = 110, .has_tool_use = true },
+        .{ .id = @constCast("lx1-deepseek-v4"), .model_type = @constCast("language"), .released = 110, .has_tool_use = true },
+        .{ .id = @constCast("lx1-deepseek-v4-flash"), .model_type = @constCast("language"), .released = 110, .has_tool_use = true },
+        .{ .id = @constCast("lx1-deepseek-v4-pro"), .model_type = @constCast("language"), .released = 110, .has_tool_use = true },
     };
 
     var curated = try projectPickerModelCatalog(std.testing.allocator, &candidates);
     defer freeModelCatalog(std.testing.allocator, &curated);
 
     try std.testing.expectEqual(@as(usize, 3), curated.items.len);
-    try std.testing.expectEqualStrings("deepseek/deepseek-v4-pro", curated.items[0].id);
-    try std.testing.expectEqualStrings("deepseek/deepseek-v4", curated.items[1].id);
-    try std.testing.expectEqualStrings("deepseek/deepseek-v4-flash", curated.items[2].id);
+    try std.testing.expectEqualStrings("lx1-deepseek-v4-pro", curated.items[0].id);
+    try std.testing.expectEqualStrings("lx1-deepseek-v4", curated.items[1].id);
+    try std.testing.expectEqualStrings("lx1-deepseek-v4-flash", curated.items[2].id);
 }

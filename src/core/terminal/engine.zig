@@ -73,7 +73,8 @@ pub const StyleFlags = packed struct(u8) {
     underline: bool = false,
     reverse: bool = false,
     strike: bool = false,
-    _pad: u2 = 0,
+    blink: bool = false,
+    _pad: u1 = 0,
 
     pub fn eql(a: StyleFlags, b: StyleFlags) bool {
         return @as(u8, @bitCast(a)) == @as(u8, @bitCast(b));
@@ -351,7 +352,7 @@ pub const Grid = struct {
     /// Resize the grid. Keeps top-left content, clips anything outside
     /// the new bounds, fills any grown area with blanks. Matches what a
     /// real terminal does when the pane shrinks or grows — content is
-    /// not auto-cleared, so the caller (fx) is responsible for
+    /// not auto-cleared, so the caller (x1) is responsible for
     /// repainting.
     pub fn resize(self: *Grid, cols: u16, rows: u16) !void {
         if (cols == 0 or rows == 0) return error.InvalidGridSize;
@@ -1506,7 +1507,7 @@ pub const Grid = struct {
 
     /// Produce a blank cell in the current erase-style — space
     /// glyph with default fg/flags but the cursor's active bg.
-    /// Real terminals extend the current bg into erased cells; fx's
+    /// Real terminals extend the current bg into erased cells; x1's
     /// user-message card relies on that behaviour to draw the bar
     /// without having to pad with literal spaces.
     fn blankCell(self: Grid) Cell {
@@ -1637,6 +1638,7 @@ pub const Grid = struct {
                 2 => self.current_style.flags.dim = true,
                 3 => self.current_style.flags.italic = true,
                 4 => self.current_style.flags.underline = true,
+                5 => self.current_style.flags.blink = true,
                 7 => self.current_style.flags.reverse = true,
                 9 => self.current_style.flags.strike = true,
                 22 => {
@@ -1645,6 +1647,7 @@ pub const Grid = struct {
                 },
                 23 => self.current_style.flags.italic = false,
                 24 => self.current_style.flags.underline = false,
+                25 => self.current_style.flags.blink = false,
                 27 => self.current_style.flags.reverse = false,
                 29 => self.current_style.flags.strike = false,
                 30...37 => self.current_style.fg = .{ .indexed = @intCast(p - 30) },
@@ -2942,7 +2945,7 @@ fn renderColor(color: Color) contracts.CellColor {
 }
 
 /// Paint an immutable engine snapshot as the complete outer terminal
-/// viewport. This deliberately does not add fx chrome: every visible cell,
+/// viewport. This deliberately does not add x1 chrome: every visible cell,
 /// cursor fact, and interactive terminal mode comes from the hosted child.
 pub fn writeFullSnapshot(
     snapshot: contracts.RenderSnapshot,
@@ -3117,6 +3120,7 @@ fn emitSgrTransition(out: *std.Io.Writer, next: Style) !void {
     if (next.flags.dim) try out.writeAll("\x1b[2m");
     if (next.flags.italic) try out.writeAll("\x1b[3m");
     if (next.flags.underline) try out.writeAll("\x1b[4m");
+    if (next.flags.blink) try out.writeAll("\x1b[5m");
     if (next.flags.reverse) try out.writeAll("\x1b[7m");
     if (next.flags.strike) try out.writeAll("\x1b[9m");
     try emitColor(out, next.fg, .fg);
@@ -3840,6 +3844,17 @@ test "SGR 0 resets to default" {
     try testing.expect(ok1.style.bg.eql(.default));
 }
 
+test "SGR 5 and 25 apply and clear blink without confusing indexed color" {
+    var g = try Grid.init(testing.allocator, 3, 1);
+    defer g.deinit();
+    try g.feed("\x1b[5m\x1b[38;5;255mx\x1b[25my");
+
+    try testing.expect(g.cellAt(1, 1).?.style.flags.blink);
+    try testing.expect(g.cellAt(1, 1).?.style.fg.eql(.{ .indexed = 255 }));
+    try testing.expect(!g.cellAt(1, 2).?.style.flags.blink);
+    try testing.expect(g.cellAt(1, 2).?.style.fg.eql(.{ .indexed = 255 }));
+}
+
 test "SGR 9 and 29 apply and clear strikethrough" {
     var g = try Grid.init(testing.allocator, 3, 1);
     defer g.deinit();
@@ -3878,13 +3893,13 @@ test "presentation boundary resumes and steadies strikethrough" {
 test "presentation resume preserves OSC 8 parameters and close clears them" {
     var source = try Grid.init(testing.allocator, 4, 1);
     defer source.deinit();
-    try source.feed("\x1b]8;id=fx-42;https://example.com\x1b\\x");
+    try source.feed("\x1b]8;id=x1-42;https://example.com\x1b\\x");
 
     var resume_writer: std.Io.Writer.Allocating = .init(testing.allocator);
     defer resume_writer.deinit();
     try source.writePresentationResume(&resume_writer.writer);
     try testing.expectEqualStrings(
-        "\x1b]8;id=fx-42;https://example.com\x1b\\",
+        "\x1b]8;id=x1-42;https://example.com\x1b\\",
         resume_writer.written(),
     );
 
@@ -3905,13 +3920,13 @@ test "OSC 8 parameter replacement is atomic on allocation failure" {
     const alloc = failing.allocator();
     var source = try Grid.init(alloc, 4, 1);
     defer source.deinit();
-    try source.feed("\x1b]8;id=fx-old;https://example.com\x1b\\");
+    try source.feed("\x1b]8;id=x1-old;https://example.com\x1b\\");
     try source.osc_buffer.ensureTotalCapacity(alloc, 128);
 
     failing.fail_index = failing.alloc_index;
     try testing.expectError(
         error.OutOfMemory,
-        source.feed("\x1b]8;id=fx-new;https://example.com\x1b\\"),
+        source.feed("\x1b]8;id=x1-new;https://example.com\x1b\\"),
     );
     try testing.expect(source.atControlSequenceBoundary());
 
@@ -3919,19 +3934,19 @@ test "OSC 8 parameter replacement is atomic on allocation failure" {
     var old_resume: std.Io.Writer = .fixed(&old_resume_buf);
     try source.writePresentationResume(&old_resume);
     try testing.expectEqualStrings(
-        "\x1b]8;id=fx-old;https://example.com\x1b\\",
+        "\x1b]8;id=x1-old;https://example.com\x1b\\",
         old_resume.buffered(),
     );
 
     failing.fail_index = std.math.maxInt(usize);
-    try source.feed("\x1b]8;id=fx-new;https://example.com\x1b\\");
+    try source.feed("\x1b]8;id=x1-new;https://example.com\x1b\\");
     try testing.expectEqual(@as(usize, 1), source.hyperlink_pool.items.len);
 
     var new_resume_buf: [128]u8 = undefined;
     var new_resume: std.Io.Writer = .fixed(&new_resume_buf);
     try source.writePresentationResume(&new_resume);
     try testing.expectEqualStrings(
-        "\x1b]8;id=fx-new;https://example.com\x1b\\",
+        "\x1b]8;id=x1-new;https://example.com\x1b\\",
         new_resume.buffered(),
     );
 }
@@ -4527,7 +4542,7 @@ test "bounded deterministic corrupt checkpoint fuzz" {
     }
 }
 
-test "full snapshot painter owns the viewport without Fx chrome" {
+test "full snapshot painter owns the viewport without x1 chrome" {
     const cells = [_]contracts.RenderCell{
         .{ .kind = .single, .text = "A", .style = .{
             .foreground = .{ .rgb = .{ .red = 1, .green = 2, .blue = 3 } },

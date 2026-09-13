@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN } from "../evals/eval-helpers";
+import { X1_BIN } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -49,7 +49,7 @@ const RAPID_SKILL_COUNT = 4;
 const RAPID_SKILL_TIMEOUT = 600_000;
 const MINIMUM_RESIZE_HISTORY_LINES = 2_000;
 const KEEP_LARGE_SKILL_ARTIFACTS =
-  process.env.FX_TUI_RESIZE_KEEP_ARTIFACTS === "1";
+  process.env.X1_TUI_RESIZE_KEEP_ARTIFACTS === "1";
 
 let session: TmuxSession | null = null;
 const tempDirs: string[] = [];
@@ -63,14 +63,14 @@ async function createResizeSession(
   const env = { ...opts.env };
   let home = env.HOME;
   if (!home) {
-    const root = mkdtempSync(join(tmpdir(), "fx-resize-home-"));
+    const root = mkdtempSync(join(tmpdir(), "x1-resize-home-"));
     tempDirs.push(root);
     home = join(root, "home");
     env.HOME = home;
   }
 
-  const settingsPath = join(home, ".fx", "settings.json");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  const settingsPath = join(home, ".x1", "settings.json");
+  mkdirSync(join(home, ".x1"), { recursive: true });
   const settings = existsSync(settingsPath)
     ? JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>
     : {};
@@ -101,7 +101,7 @@ async function launchAt(
 }
 
 function createStderrPath(label: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `fx-resize-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `x1-resize-${label}-`));
   tempDirs.push(dir);
   return join(dir, "stderr.txt");
 }
@@ -116,27 +116,27 @@ async function launchRecordedSurfaceSession(
   stderrPath: string;
 }> {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), `fx-footer-surface-${label}-`)),
+    mkdtempSync(join(tmpdir(), `x1-footer-surface-${label}-`)),
   );
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   const stderrPath = join(root, "stderr.log");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".x1"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, "AGENTS.md"), "# Test workspace\n");
   writeFileSync(stderrPath, "");
   tempDirs.push(root);
 
   const active = await createResizeSession({
-    cmd: FX_BIN,
+    cmd: X1_BIN,
     cwd: workspace,
     env: {
       HOME: home,
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_AUTO_UPGRADE: "0",
-      FX_RECORD: join(root, "session.fxtape"),
-      FX_RECORD_INPUT: "1",
+      X1_AUTO_UPGRADE: "0",
+      X1_RECORD: join(root, "session.fxtape"),
+      X1_RECORD_INPUT: "1",
       NO_COLOR: "1",
       ...extraEnv,
     },
@@ -576,7 +576,7 @@ async function waitForLiveScrollbackText(
     const status = s.paneStatus();
     if (status.dead) {
       throw new Error(
-        `Fx exited with status ${status.status} while waiting for ${JSON.stringify(needle)}.\nScrollback:\n${last}`,
+        `x1 exited with status ${status.status} while waiting for ${JSON.stringify(needle)}.\nScrollback:\n${last}`,
       );
     }
     last = await s.captureFullScrollback();
@@ -631,7 +631,7 @@ async function waitForSkillsMenuGrid(
   while (Date.now() < deadline) {
     last = await s.capturePaneGrid();
     const text = last.join("\n");
-    if (text.includes(`Skills ${count}`) && findInlineSkillsPicker(last) !== null) {
+    if (text.includes(`Skills ${count}`) && findSkillsScreen(last) !== null) {
       return last;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -649,14 +649,14 @@ function expectSkillsMenuGrid(
   const text = grid.join("\n");
   expect(text).toContain(`Skills ${count}`);
   expect(text).toContain("[All]");
-  expect(text).toContain("fx");
-  expect(text).not.toContain("[Fx]");
+  expect(text).toContain("x1");
   expect(text).toContain("Workspace");
   expect(text).toContain("Codex");
-  expect(text).toContain("fx · Global");
+  expect(text).toContain("x1 · Global");
   expect(names.some((name) => text.includes(name))).toBe(true);
   expect(text).not.toContain("Visible skills (");
-  expect(findInlineSkillsPicker(grid)).not.toBeNull();
+  expect(text).not.toContain("layerx1.com");
+  expect(findSkillsScreen(grid)).not.toBeNull();
   expect(grid.filter(isInputRow)).toHaveLength(1);
 }
 
@@ -678,7 +678,7 @@ function globalTmuxOptions(): { server: string; window: string } {
 }
 
 function matchingTestSessions(): string[] {
-  const prefix = `fx-test-${process.pid}-`;
+  const prefix = `x1-test-${process.pid}-`;
   try {
     return execFileSync(
       "tmux",
@@ -711,11 +711,11 @@ function createSkillFixture(
   descriptionPaddingRows = 0,
 ): LargeSkillFixture {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), `fx-resize-${rootLabel}-${attempt}-`)),
+    mkdtempSync(join(tmpdir(), `x1-resize-${rootLabel}-${attempt}-`)),
   );
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  const skillsRoot = join(home, ".fx", "skills");
+  const skillsRoot = join(home, ".x1", "skills");
   mkdirSync(skillsRoot, { recursive: true });
   mkdirSync(workspace, { recursive: true });
   if (!KEEP_LARGE_SKILL_ARTIFACTS) tempDirs.push(root);
@@ -725,7 +725,7 @@ function createSkillFixture(
     const attemptSuffix = String(attempt).padStart(3, "0");
     const attemptName = `head-a${attemptSuffix}`;
     const name = `gauntlet-${attemptName}-skill-${suffix}`;
-    const marker = `fx-gauntlet-${attemptName}-${suffix}`;
+    const marker = `x1-gauntlet-${attemptName}-${suffix}`;
     const padding = Array.from(
       { length: descriptionPaddingRows },
       (_, row) => String.fromCharCode("a".charCodeAt(0) + row).repeat(120),
@@ -975,13 +975,13 @@ function startFileApprovalGateway() {
 }
 
 function createFileApprovalRoot() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-resize-file-approval-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-resize-file-approval-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".x1"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".x1", "settings.json"),
     JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
   );
   tempDirs.push(root);
@@ -1039,18 +1039,14 @@ function findFooter(grid: string[]): FooterBlock | null {
   return findFooterBlocks(grid).at(-1) ?? null;
 }
 
-function findInlineSkillsPicker(
-  grid: string[],
-): { input: number; topDivider: number; header: number; bottomDivider: number; hint: number } | null {
+function findSkillsScreen(grid: string[]): { topDivider: number; header: number; bottomDivider: number; hint: number } | null {
   const header = grid.findIndex((line) => line.includes("Skills "));
-  if (header <= 1 || !isDividerRow(grid[header - 1]!)) return null;
-  const input = header - 2;
-  if (!isInputRow(grid[input]!)) return null;
+  if (header <= 0 || !isDividerRow(grid[header - 1]!)) return null;
+  if (!isInputRow(grid[0]!)) return null;
   const bottomDivider = grid.findLastIndex((line) => isDividerRow(line));
   if (bottomDivider <= header || bottomDivider + 1 >= grid.length) return null;
   if (!grid[bottomDivider + 1]!.includes("Esc Close")) return null;
   return {
-    input,
     topDivider: header - 1,
     header,
     bottomDivider,
@@ -1058,18 +1054,14 @@ function findInlineSkillsPicker(
   };
 }
 
-function findInlineHelpPicker(
-  grid: string[],
-): { input: number; topDivider: number; header: number; bottomDivider: number; hint: number } | null {
+function findHelpScreen(grid: string[]): { topDivider: number; header: number; bottomDivider: number; hint: number } | null {
   const header = grid.findIndex((line) => line.includes("Commands "));
-  if (header <= 1 || !isDividerRow(grid[header - 1]!)) return null;
-  const input = header - 2;
-  if (!isInputRow(grid[input]!)) return null;
+  if (header <= 0 || !isDividerRow(grid[header - 1]!)) return null;
+  if (!isInputRow(grid[0]!)) return null;
   const bottomDivider = grid.findLastIndex((line) => isDividerRow(line));
   if (bottomDivider <= header || bottomDivider + 1 >= grid.length) return null;
   if (!grid[bottomDivider + 1]!.includes("Enter Open")) return null;
   return {
-    input,
     topDivider: header - 1,
     header,
     bottomDivider,
@@ -1102,7 +1094,7 @@ async function runLargeSkillResizeAttempt(attempt: number): Promise<string> {
     [
       `cwd=${fixture.workspace}`,
       `HOME=${fixture.home}`,
-      `binary=${FX_BIN}`,
+      `binary=${X1_BIN}`,
       "tmux_size=120x34",
       "tmux_remain_on_exit=on",
       `minimum_history_lines=${MINIMUM_RESIZE_HISTORY_LINES}`,
@@ -1118,17 +1110,17 @@ async function runLargeSkillResizeAttempt(attempt: number): Promise<string> {
   let s: TmuxSession | null = null;
   try {
     s = await createResizeSession({
-      cmd: FX_BIN,
+      cmd: X1_BIN,
       cwd: fixture.workspace,
       env: {
         HOME: fixture.home,
         AI_GATEWAY_API_KEY: undefined,
         VERCEL_OIDC_TOKEN: undefined,
-        FX_AUTO_UPGRADE: "0",
-        FX_RECORD: tapePath,
-        FX_RECORD_INPUT: "1",
-        FX_TRACE_LOG: tracePath,
-        FX_TRACE_SCOPES:
+        X1_AUTO_UPGRADE: "0",
+        X1_RECORD: tapePath,
+        X1_RECORD_INPUT: "1",
+        X1_TRACE_LOG: tracePath,
+        X1_TRACE_SCOPES:
           "frame_schedule,frame_plan,frame_diff,frame_commit,scroll,resize,input",
         NO_COLOR: "1",
       },
@@ -1173,12 +1165,8 @@ async function runLargeSkillResizeAttempt(attempt: number): Promise<string> {
       cycle.newSize.rows === shrinkRows
     );
     expect(shrinkCycle.historyRowDelta).toBeGreaterThanOrEqual(0);
-    expect(attemptLine(shrinkAttempt, "attempt_result ")).toContain(
-      "shadow_state=committed",
-    );
-    expect(attemptLine(shrinkAttempt, "transcript_transition_finalize ")).toContain(
-      "body_disposition=paint",
-    );
+    expect(attemptLine(shrinkAttempt, "attempt_result ")).toBeUndefined();
+    expect(attemptLine(shrinkAttempt, "transcript_transition_finalize ")).toBeUndefined();
     expect(attemptLine(shrinkAttempt, "tmux_clear_history_complete")).toBeUndefined();
     const shrinkGrid = await waitForSkillsMenuGrid(s, LARGE_SKILL_COUNT);
     expectSkillsMenuGrid(shrinkGrid, LARGE_SKILL_COUNT, fixture.names);
@@ -1198,12 +1186,8 @@ async function runLargeSkillResizeAttempt(attempt: number): Promise<string> {
       (candidate) => attemptHasReason(candidate, "resize"),
     );
     expect(s.paneSize()).toEqual({ cols: 120, rows: 34 });
-    expect(attemptLine(growAttempt, "attempt_result ")).toContain(
-      "shadow_state=committed",
-    );
-    expect(attemptLine(growAttempt, "transcript_transition_commit ")).toContain(
-      "state=stable",
-    );
+    expect(attemptLine(growAttempt, "attempt_result ")).toBeUndefined();
+    expect(attemptLine(growAttempt, "transcript_transition_commit ")).toBeUndefined();
     const growGrid = await waitForSkillsMenuGrid(s, LARGE_SKILL_COUNT);
     expectSkillsMenuGrid(growGrid, LARGE_SKILL_COUNT, fixture.names);
     const growScrollback = await s.captureFullScrollback();
@@ -1213,7 +1197,7 @@ async function runLargeSkillResizeAttempt(attempt: number): Promise<string> {
     const restoredPane = await s.waitForPane((pane) => {
       const grid = pane.split("\n");
       return (
-        pane.includes("𝒇x") &&
+        pane.includes("layerx1.com") &&
         !pane.includes("↑↓ Navigate") &&
         findFooter(grid) !== null
       );
@@ -1228,7 +1212,7 @@ async function runLargeSkillResizeAttempt(attempt: number): Promise<string> {
     const scrollbackLines = scrollback.replace(/\n$/, "").split("\n").length;
     expect(scrollbackLines).toBeLessThan(historyLimit / 2);
     expect(finalGrid.filter(isInputRow)).toHaveLength(1);
-    expect(findInlineSkillsPicker(finalGrid)).not.toBeNull();
+    expect(findSkillsScreen(finalGrid)).not.toBeNull();
     expect(s.paneStatus()).toEqual({ dead: false, status: null });
     expect(s.isPaneAlive()).toBe(true);
     expect(readFileSync(stderrPath, "utf8")).toBe("");
@@ -1304,7 +1288,7 @@ async function runRapidSkillResizeAttempt(
     [
       `cwd=${fixture.workspace}`,
       `HOME=${fixture.home}`,
-      `binary=${FX_BIN}`,
+      `binary=${X1_BIN}`,
       `inter_resize_delay_ms=${delayMs}`,
       "tmux_size=120x34",
       "1. /skills list",
@@ -1319,17 +1303,17 @@ async function runRapidSkillResizeAttempt(
   let s: TmuxSession | null = null;
   try {
     s = await createResizeSession({
-      cmd: FX_BIN,
+      cmd: X1_BIN,
       cwd: fixture.workspace,
       env: {
         HOME: fixture.home,
         AI_GATEWAY_API_KEY: undefined,
         VERCEL_OIDC_TOKEN: undefined,
-        FX_AUTO_UPGRADE: "0",
-        FX_RECORD: tapePath,
-        FX_RECORD_INPUT: "1",
-        FX_TRACE_LOG: tracePath,
-        FX_TRACE_SCOPES:
+        X1_AUTO_UPGRADE: "0",
+        X1_RECORD: tapePath,
+        X1_RECORD_INPUT: "1",
+        X1_TRACE_LOG: tracePath,
+        X1_TRACE_SCOPES:
           "frame_schedule,frame_plan,frame_diff,frame_commit,scroll,resize,input",
         NO_COLOR: "1",
       },
@@ -1360,37 +1344,25 @@ async function runRapidSkillResizeAttempt(
     expect(s.paneSize()).toEqual({ cols: 120, rows: 34 });
 
     const growCommit = attemptLine(grow.attempt, "transcript_transition_commit ");
-    expect(growCommit).toContain("state=stable");
+    expect(growCommit).toBeUndefined();
     const growGrid = await waitForSkillsMenuGrid(s, RAPID_SKILL_COUNT);
     expectSkillsMenuGrid(growGrid, RAPID_SKILL_COUNT, fixture.names);
     const growScrollback = await s.captureFullScrollback();
     expectNoTranscriptSkillInventory(growScrollback);
     writeFileSync(join(fixture.root, "scrollback-after-grow.txt"), growScrollback);
 
-    expect(attemptLine(shrink.attempt, "transcript_transition_finalize ")).toContain(
-      "body_disposition=paint",
-    );
-    expect(attemptLine(grow.attempt, "transcript_transition_finalize ")).toContain(
-      "body_disposition=paint",
-    );
-    expect(attemptLine(shrink.attempt, "attempt_result ")).toContain(
-      "shadow_state=committed",
-    );
-    expect(attemptLine(grow.attempt, "attempt_result ")).toContain(
-      "shadow_state=committed",
-    );
-    expect(attemptLine(shrink.attempt, "tmux_clear_history_complete")).toContain(
-      "tmux_clear_history_complete",
-    );
-    expect(attemptLine(grow.attempt, "tmux_clear_history_complete")).toContain(
-      "tmux_clear_history_complete",
-    );
+    expect(attemptLine(shrink.attempt, "transcript_transition_finalize ")).toBeUndefined();
+    expect(attemptLine(grow.attempt, "transcript_transition_finalize ")).toBeUndefined();
+    expect(attemptLine(shrink.attempt, "attempt_result ")).toBeUndefined();
+    expect(attemptLine(grow.attempt, "attempt_result ")).toBeUndefined();
+    expect(attemptLine(shrink.attempt, "tmux_clear_history_complete")).toBeUndefined();
+    expect(attemptLine(grow.attempt, "tmux_clear_history_complete")).toBeUndefined();
 
     await s.sendKeys("C-[");
     const dismissed = await s.waitForPane(
       (pane) => {
         const grid = pane.replace(/\n$/, "").split("\n");
-        return pane.includes("𝒇x") &&
+        return pane.includes("layerx1.com") &&
           !pane.includes("↑↓ Navigate") &&
           findFooter(grid) !== null;
       },
@@ -1403,7 +1375,7 @@ async function runRapidSkillResizeAttempt(
     const finalScrollback = await s.captureFullScrollback();
     expectNoTranscriptSkillInventory(finalScrollback);
     expect(finalGrid.filter(isInputRow)).toHaveLength(1);
-    expect(findInlineSkillsPicker(finalGrid)).not.toBeNull();
+    expect(findSkillsScreen(finalGrid)).not.toBeNull();
     expect(s.paneStatus()).toEqual({ dead: false, status: null });
     expect(s.isPaneAlive()).toBe(true);
     expect(readFileSync(stderrPath, "utf8")).toBe("");
@@ -1468,8 +1440,10 @@ describe.skipIf(SKIP)("tui: resize", () => {
       session = await launchAt(120, 40);
 
       const grid = await session.capturePaneGrid();
-      const headerRow = grid.findIndex((line) => line.includes("𝒇x v"));
+      const headerRow = grid.findIndex((line) => line.includes("┌"));
       expect(headerRow).toBe(0);
+      expect(grid.some((line) => line.includes("X1"))).toBe(true);
+      expect(grid.some((line) => line.includes("layerx1.com"))).toBe(true);
     },
     TIMEOUT,
   );
@@ -1505,7 +1479,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "gated tmux setup failure cleans the session before releasing the command",
     async () => {
       session = await createResizeSession({ cmd: "sleep 120" });
-      const dir = mkdtempSync(join(tmpdir(), "fx-tmux-gate-failure-"));
+      const dir = mkdtempSync(join(tmpdir(), "x1-tmux-gate-failure-"));
       tempDirs.push(dir);
       const markerPath = join(dir, "command-ran");
       const before = matchingTestSessions();
@@ -1528,14 +1502,14 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "settled resize replays a long assistant transcript from the header",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-long-transcript-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-long-transcript-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
       const tracePath = join(root, "trace.log");
       tempDirs.push(root);
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       writeFileSync(stderrPath, "");
 
@@ -1553,19 +1527,19 @@ describe.skipIf(SKIP)("tui: resize", () => {
       gateways.push(gateway);
       session = await createResizeSession({
         cmd: `sh -c ${quoteShellPath(
-          `printf 'PRE_FX_MARKER_long_resize\\n'; exec ${quoteShellPath(FX_BIN)}`,
+          `printf 'PRE_X1_MARKER_long_resize\\n'; exec ${quoteShellPath(X1_BIN)}`,
         )}`,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-long-resize-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "frame_schedule,frame_diff,frame_commit,scroll,resize",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "frame_schedule,frame_diff,frame_commit,scroll,resize",
           NO_COLOR: "1",
         },
         width: 120,
@@ -1588,10 +1562,9 @@ describe.skipIf(SKIP)("tui: resize", () => {
 
       const scrollback = await waitForScrollbackWithoutText(
         session,
-        "PRE_FX_MARKER_",
+        "PRE_X1_MARKER_",
       );
-      expect(scrollback.match(/𝒇x v\d+\.\d+\.\d+\b/g)).toHaveLength(1);
-      expect(scrollback.match(/Run \/help for commands/g)).toHaveLength(1);
+      expect(scrollback.match(/layerx1\.com/g)).toHaveLength(1);
       expectOrderedMarkersWithoutBlankHole(scrollback, markers);
       const grid = await waitForSettledFooter(session);
       expect(findFooterBlocks(grid)).toHaveLength(1);
@@ -1605,20 +1578,20 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "live command resize preserves current grouped scrollback while output is folded",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-live-command-scrollback-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-live-command-scrollback-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
       const tracePath = join(root, "trace.log");
       const tapePath = join(root, "session.fxtape");
-      const preFxMarker = "PRE_FX_RESIZE_STREAM_MARKER";
+      const prex1Marker = "PRE_X1_RESIZE_STREAM_MARKER";
       const finalResponse = "RESIZE_STREAM_FINAL_RESPONSE";
       tempDirs.push(root);
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       writeFileSync(
-        join(home, ".fx", "settings.json"),
+        join(home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
       );
       writeFileSync(stderrPath, "");
@@ -1632,22 +1605,22 @@ describe.skipIf(SKIP)("tui: resize", () => {
       gateways.push(gateway);
       session = await createResizeSession({
         cmd: `sh -c ${quoteShellPath(
-          `printf '${preFxMarker}\\n'; exec ${quoteShellPath(FX_BIN)}`,
+          `printf '${prex1Marker}\\n'; exec ${quoteShellPath(X1_BIN)}`,
         )}`,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-resize-command-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "frame_schedule,frame_diff,frame_commit,scroll,resize",
+          X1_AUTO_UPGRADE: "0",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "frame_schedule,frame_diff,frame_commit,scroll,resize",
           NO_COLOR: "1",
         },
         width: 110,
@@ -1667,10 +1640,9 @@ describe.skipIf(SKIP)("tui: resize", () => {
       await waitForLiveScrollbackText(session, finalResponse, TIMEOUT);
 
       const scrollback = await session.captureFullScrollback();
-      expect(scrollback.match(/𝒇x v\d+\.\d+\.\d+\b/g)).toHaveLength(1);
-      expect(scrollback.match(/Run \/help for commands/g)).toHaveLength(1);
+      expect(scrollback.match(/layerx1\.com/g)).toHaveLength(1);
       expect(scrollback).toContain("stream the resize marker command");
-      expect(scrollback).not.toContain(preFxMarker);
+      expect(scrollback).not.toContain(prex1Marker);
       expect(scrollback).toContain("● 1 tool call · 1 command");
       expect(scrollback).toContain("Ran for i in $(seq 1 96)");
       expect(scrollback).not.toContain("resize-stream-marker 001");
@@ -1691,16 +1663,16 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "structured retention keeps native scrollback complete before resize",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-retention-native-scrollback-")),
+        mkdtempSync(join(tmpdir(), "x1-retention-native-scrollback-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
       tempDirs.push(root);
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       writeFileSync(
-        join(home, ".fx", "settings.json"),
+        join(home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
       );
       writeFileSync(stderrPath, "");
@@ -1766,18 +1738,18 @@ describe.skipIf(SKIP)("tui: resize", () => {
       gateways.push(gateway);
 
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-retention-scrollback-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_MAX_AGENT_STEPS: "4",
-          FX_AUTO_UPGRADE: "0",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_MAX_AGENT_STEPS: "4",
+          X1_AUTO_UPGRADE: "0",
           NO_COLOR: "1",
         },
         width: 120,
@@ -1823,7 +1795,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const testDeadline = Date.now() + TIMEOUT - TEST_TEARDOWN_HEADROOM_MS;
       const remainingTimeout = () => Math.max(0, testDeadline - Date.now());
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-cancel-command-approval-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-cancel-command-approval-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
@@ -1836,17 +1808,17 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const approvalQuestion = "Would you like to run the following command?";
       const stableCommitTrace = "transcript_transition_commit state=stable";
       if (!KEEP_LARGE_SKILL_ARTIFACTS) tempDirs.push(root);
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       writeFileSync(
-        join(home, ".fx", "settings.json"),
+        join(home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
       );
       writeFileSync(stderrPath, "");
       writeFileSync(
         join(root, "commands.txt"),
         [
-          `binary=${FX_BIN}`,
+          `binary=${X1_BIN}`,
           "tmux_size=120x36",
           "1. submit seed prompt",
           "2. submit effectful command prompt",
@@ -1869,20 +1841,20 @@ describe.skipIf(SKIP)("tui: resize", () => {
       ]);
       gateways.push(gateway);
       const active = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-approval-cancel-resize-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES:
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES:
             "frame_schedule,frame_plan,frame_diff,frame_commit,scroll,resize,input,permission,interrupt,render",
           NO_COLOR: "1",
         },
@@ -1963,8 +1935,8 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const afterCancelScrollback = await captureScrollback("after-cancel");
 
       const transcriptCopyCounts = (scrollback: string) => ({
-        startup: scrollback.match(/𝒇x v\d+\.\d+\.\d+\b/g)?.length ?? 0,
-        help: countOccurrences(scrollback, "Run /help for commands"),
+        startup: countOccurrences(scrollback, "X1"),
+        help: countOccurrences(scrollback, "layerx1.com"),
         recording: countOccurrences(
           scrollback,
           "● Recording: visual terminal capture:",
@@ -1987,7 +1959,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       expect(gateway.requests).toHaveLength(2);
       expect(readFileSync(stderrPath, "utf8")).toBe("");
       const replay = JSON.parse(
-        execFileSync(FX_BIN, ["replay", tapePath, "--json"], { encoding: "utf8" }),
+        execFileSync(X1_BIN, ["replay", tapePath, "--json"], { encoding: "utf8" }),
       ) as { resize_count: number };
       expect(replay.resize_count).toBe(1);
       expect(active.paneStatus()).toEqual({ dead: false, status: null });
@@ -2008,13 +1980,13 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "semantic thematic rule reflows across a live tmux shrink and grow",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-thematic-rule-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-thematic-rule-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
       tempDirs.push(root);
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       writeFileSync(stderrPath, "");
 
@@ -2030,10 +2002,10 @@ describe.skipIf(SKIP)("tui: resize", () => {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-thematic-rule-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
           NO_COLOR: "1",
         },
         width: 120,
@@ -2093,14 +2065,14 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "nested Markdown blockquote reflows across a live tmux shrink and grow",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-nested-blockquote-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-nested-blockquote-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
       const tracePath = join(root, "trace.log");
       tempDirs.push(root);
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       writeFileSync(stderrPath, "");
 
@@ -2118,12 +2090,12 @@ describe.skipIf(SKIP)("tui: resize", () => {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-nested-blockquote-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "resize,frame_schedule,scroll",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "resize,frame_schedule,scroll",
           NO_COLOR: "1",
         },
         width: 120,
@@ -2185,7 +2157,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
         roots.push(await runLargeSkillResizeAttempt(attempt));
       }
       if (KEEP_LARGE_SKILL_ARTIFACTS) {
-        console.log(`Fx resize artifacts:\n${roots.join("\n")}`);
+        console.log(`x1 resize artifacts:\n${roots.join("\n")}`);
         console.log(
           `Cleanup: rm -rf ${roots.map(quoteShellPath).join(" ")}`,
         );
@@ -2205,7 +2177,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       results.push(await runRapidSkillResizeAttempt(125, 1));
       if (KEEP_LARGE_SKILL_ARTIFACTS) {
         console.log(
-          `Fx rapid resize artifacts:\n${results.map(({ root }) => root).join("\n")}`,
+          `x1 rapid resize artifacts:\n${results.map(({ root }) => root).join("\n")}`,
         );
       }
     },
@@ -2216,16 +2188,16 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "gated assistant chunks remain ordered across shrink and grow",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-gated-stream-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-gated-stream-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const tracePath = join(root, "trace.log");
       const stderrPath = join(root, "stderr.log");
       const tapePath = join(root, "session.fxtape");
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
-      writeFileSync(join(home, ".fx", "settings.json"), "{}");
+      writeFileSync(join(home, ".x1", "settings.json"), "{}");
       writeFileSync(stderrPath, "");
       if (!KEEP_LARGE_SKILL_ARTIFACTS) tempDirs.push(root);
 
@@ -2246,7 +2218,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
         [
           `cwd=${workspace}`,
           `HOME=${home}`,
-          `binary=${FX_BIN}`,
+          `binary=${X1_BIN}`,
           "tmux_size=120x34",
           "1. submit gated assistant request",
           "2. wait for active stream",
@@ -2258,21 +2230,21 @@ describe.skipIf(SKIP)("tui: resize", () => {
       );
 
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-gated-resize-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES:
+          X1_AUTO_UPGRADE: "0",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES:
             "frame_schedule,frame_diff,frame_commit,scroll,resize,worker",
           NO_COLOR: "1",
         },
@@ -2349,7 +2321,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
         )}\n`,
       );
       if (KEEP_LARGE_SKILL_ARTIFACTS) {
-        console.log(`Fx gated stream resize artifact:\n${root}`);
+        console.log(`x1 gated stream resize artifact:\n${root}`);
       }
     },
     60_000,
@@ -2359,16 +2331,16 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "visibly open slash picker adapts across shrink and grow without losing transcript state",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-open-picker-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-open-picker-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const tracePath = join(root, "trace.log");
       const stderrPath = join(root, "stderr.log");
       const tapePath = join(root, "session.fxtape");
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
-      writeFileSync(join(home, ".fx", "settings.json"), "{}");
+      writeFileSync(join(home, ".x1", "settings.json"), "{}");
       writeFileSync(stderrPath, "");
       if (!KEEP_LARGE_SKILL_ARTIFACTS) tempDirs.push(root);
       writeFileSync(
@@ -2376,7 +2348,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
         [
           `cwd=${workspace}`,
           `HOME=${home}`,
-          `binary=${FX_BIN}`,
+          `binary=${X1_BIN}`,
           "tmux_size=120x34",
           "1. /permissions auto",
           "2. type / and assert /help selected",
@@ -2388,17 +2360,17 @@ describe.skipIf(SKIP)("tui: resize", () => {
       );
 
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES:
+          X1_AUTO_UPGRADE: "0",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES:
             "frame_schedule,frame_diff,frame_commit,scroll,resize,input",
           NO_COLOR: "1",
         },
@@ -2429,7 +2401,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       await session.waitForText("/help", 10_000);
       await waitForSelectedSlashLabel(session, "/help");
       const shrinkStage = await session.captureFullScrollback();
-      expect(shrinkStage).toContain("Commands 36 · Type to filter");
+      expect(shrinkStage).toContain("Commands 37 · Type to filter");
       expect(shrinkStage).toContain("1–4");
       writeFileSync(join(root, "scrollback-after-shrink.txt"), shrinkStage);
 
@@ -2498,7 +2470,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
         )}\n`,
       );
       if (KEEP_LARGE_SKILL_ARTIFACTS) {
-        console.log(`Fx open picker resize artifact:\n${root}`);
+        console.log(`x1 open picker resize artifact:\n${root}`);
       }
     },
     60_000,
@@ -2508,24 +2480,24 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "slash picker dismissal restores the resized short transcript boundary",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-short-picker-dismissal-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-short-picker-dismissal-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       writeFileSync(stderrPath, "");
       tempDirs.push(root);
 
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
+          X1_AUTO_UPGRADE: "0",
           NO_COLOR: "1",
         },
         width: 72,
@@ -2542,10 +2514,10 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const baselineFooter = findFooter(baseline)!;
 
       await session.sendLiteral("/mod");
-      await session.waitForText("/model", 10_000);
+      await session.waitForText("/models", 10_000);
       await session.sendKeys("Escape");
       await session.waitForPane(
-        (pane) => !pane.includes("/model"),
+        (pane) => !pane.includes("/models"),
         10_000,
       );
       await Bun.sleep(250);
@@ -2598,12 +2570,12 @@ describe.skipIf(SKIP)("tui: resize", () => {
       label: "help",
       width: 72,
       height: 16,
-      surfaceMarker: "Enter Open",
+      surfaceMarker: "Commands ",
       editedInput: "x",
       async openSurface(active) {
         await active.resizeWindow(60, 12, 500);
         await active.sendText("/help");
-        await active.waitForText("Enter Open", TIMEOUT);
+        await active.waitForText("Commands ", TIMEOUT);
       },
     },
     {
@@ -2625,7 +2597,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       width: 120,
       height: 36,
       surfaceMarker: "provider/model-a",
-      editedInput: "x",
+      editedInput: "/model x",
       fakeModels: true,
       async openSurface(active) {
         await active.sendText("/model");
@@ -2682,7 +2654,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
           surfaceCase.height,
           gateway
             ? {
-                FX_E2E_GATEWAY_MODELS_URL:
+                X1_E2E_GATEWAY_MODELS_URL:
                   `${gateway.baseUrl}/coding-agent/v1/models`,
               }
             : {},
@@ -2771,7 +2743,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "wide user card survives resize without splitting a terminal cell",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-wide-user-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-wide-user-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
@@ -2789,7 +2761,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
         [
           `cwd=${workspace}`,
           `HOME=${home}`,
-          `binary=${FX_BIN}`,
+          `binary=${X1_BIN}`,
           "tmux_size=80x24",
           "resize=40x18",
           "prompt=34 ASCII cells + U+754C + U+1F642",
@@ -2805,20 +2777,20 @@ describe.skipIf(SKIP)("tui: resize", () => {
       ]);
       gateways.push(gateway);
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-wide-user-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "render,resize,transcript,input,worker",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "render,resize,transcript,input,worker",
           TMUX: undefined,
         },
         width: 80,
@@ -2864,7 +2836,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       expect(existsSync(tapePath)).toBe(true);
       expect(readFileSync(tapePath).byteLength).toBeGreaterThan(0);
       if (KEEP_LARGE_SKILL_ARTIFACTS) {
-        console.log(`Fx wide-user resize artifact:\n${root}`);
+        console.log(`x1 wide-user resize artifact:\n${root}`);
       }
     },
     TIMEOUT,
@@ -2934,8 +2906,8 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "active hard-newline input survives tiny valid resize",
     async () => {
       const stderrPath = createStderrPath("active-hard");
-      const first = "FX_HARD_ROW_ALPHA";
-      const second = "FX_HARD_ROW_BETA";
+      const first = "X1_HARD_ROW_ALPHA";
+      const second = "X1_HARD_ROW_BETA";
       session = await launchAt(80, 24, { stderrPath });
       await enterHardNewlineInput(session, first, second);
 
@@ -2953,8 +2925,8 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "active soft-wrapped input survives tiny valid resize",
     async () => {
       const stderrPath = createStderrPath("active-soft");
-      const first = "FX_SOFT_START";
-      const second = "FX_SOFT_END";
+      const first = "X1_SOFT_START";
+      const second = "X1_SOFT_END";
       const input = `${first} ${"filler ".repeat(16)}${second}`;
       session = await launchAt(80, 24, { stderrPath });
       await session.sendLiteral(input);
@@ -2974,8 +2946,8 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "active hard-newline input follows height-four recovery",
     async () => {
       const stderrPath = createStderrPath("active-height-four");
-      const first = "FX_HARD_4_ROW_ALPHA";
-      const second = "FX_HARD_4_ROW_BETA";
+      const first = "X1_HARD_4_ROW_ALPHA";
+      const second = "X1_HARD_4_ROW_BETA";
       session = await launchAt(80, 24, { stderrPath });
       await enterHardNewlineInput(session, first, second);
 
@@ -2993,8 +2965,8 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "active hard-newline input renders normally at height nine",
     async () => {
       const stderrPath = createStderrPath("active-height-nine");
-      const first = "FX_HARD_9_ROW_ALPHA";
-      const second = "FX_HARD_9_ROW_BETA";
+      const first = "X1_HARD_9_ROW_ALPHA";
+      const second = "X1_HARD_9_ROW_BETA";
       session = await launchAt(80, 24, { stderrPath });
       await enterHardNewlineInput(session, first, second);
 
@@ -3019,17 +2991,17 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const tapePath = join(root.root, "active-file-approval.fxtape");
       writeFileSync(stderrPath, "");
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: root.workspace,
         env: {
           HOME: root.home,
           AI_GATEWAY_API_KEY: "fake-resize-file-approval-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
-          FX_RECORD: tapePath,
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
+          X1_RECORD: tapePath,
           NO_COLOR: "1",
         },
         stderrPath,
@@ -3160,16 +3132,16 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const stderrPath = join(root.root, "resize-gated-stderr.txt");
       writeFileSync(stderrPath, "");
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: root.workspace,
         env: {
           HOME: root.home,
           AI_GATEWAY_API_KEY: "fake-resize-gate-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
           NO_COLOR: "1",
         },
         stderrPath,
@@ -3246,18 +3218,18 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const tracePath = join(root.root, "resize-after-approval-trace.log");
       writeFileSync(stderrPath, "");
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: root.workspace,
         env: {
           HOME: root.home,
           AI_GATEWAY_API_KEY: "fake-post-approval-resize-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "frame_schedule",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "frame_schedule",
           NO_COLOR: "1",
         },
         stderrPath,
@@ -3308,12 +3280,12 @@ describe.skipIf(SKIP)("tui: resize", () => {
         40,
         {
           AI_GATEWAY_API_KEY: "fake-resize-activity-key",
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-          FX_E2E_GATEWAY_CREDITS_URL: undefined,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+          X1_E2E_GATEWAY_CREDITS_URL: undefined,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
         },
       );
       session = launched.active;
@@ -3406,12 +3378,12 @@ describe.skipIf(SKIP)("tui: resize", () => {
     async () => {
       session = await launchAt(120, 40);
       await session.sendText("/help");
-      await session.waitForText("Commands 36", 5_000);
+      await session.waitForText("Commands 37", 5_000);
       await session.resizeWindow(76, 24, 400);
 
       const grid = await session.capturePaneGrid();
-      expect(grid.join("\n")).toContain("Commands 36");
-      expect(findInlineHelpPicker(grid)).not.toBeNull();
+      expect(grid.join("\n")).toContain("Commands 37");
+      expect(findHelpScreen(grid)).not.toBeNull();
 
       await session.sendKeys("Escape");
       await session.waitForPane((pane) => !pane.includes("Enter Open"), 5_000);
@@ -3428,7 +3400,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
     async () => {
       session = await launchAt(120, 40);
       await session.sendText("/help");
-      await session.waitForText("Commands 36", 5_000);
+      await session.waitForText("Commands 37", 5_000);
 
       const captureScrollback = () =>
         execSync(`tmux capture-pane -t ${session!.name} -p -S -`, {
@@ -3436,8 +3408,9 @@ describe.skipIf(SKIP)("tui: resize", () => {
           stdio: "pipe",
         });
       const expectHelpCatalog = (grid: string[]) => {
-        expect(grid.join("\n")).toContain("Commands 36");
-        expect(findInlineHelpPicker(grid)).not.toBeNull();
+        expect(grid.join("\n")).toContain("Commands 37");
+        expect(grid.join("\n")).not.toContain("layerx1.com");
+        expect(findHelpScreen(grid)).not.toBeNull();
       };
 
       await session.resizeWindow(72, 20, 500);
@@ -3447,14 +3420,11 @@ describe.skipIf(SKIP)("tui: resize", () => {
       expectHelpCatalog(await session.capturePaneGrid());
 
       await session.sendKeys("Escape");
-      await session.waitForPane(
-        (pane) => hasEmptyComposer(pane) && !pane.includes("Enter Open"),
-        5_000,
-      );
+      await session.waitForText("layerx1.com", 5_000);
       const restored = captureScrollback();
-      expect(restored.match(/𝒇x v\d+\.\d+\.\d+\b/g)).toHaveLength(1);
-      expect(restored.match(/Run \/help for commands/g)).toHaveLength(1);
-      expect(restored).not.toContain("Commands 36");
+      expect(restored.match(/layerx1\.com/g)).toHaveLength(1);
+      expect(restored.match(/\bX1\b/g)).toHaveLength(1);
+      expect(restored).not.toContain("Commands 37");
       expect(findFooter(await session.capturePaneGrid())).not.toBeNull();
     },
     TIMEOUT,
@@ -3464,7 +3434,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
     "grow with immediate input retains pre-paint resize reconciliation",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "fx-resize-prepaint-input-")),
+        mkdtempSync(join(tmpdir(), "x1-resize-prepaint-input-")),
       );
       const home = join(root, "home");
       const workspace = join(root, "workspace");
@@ -3472,12 +3442,12 @@ describe.skipIf(SKIP)("tui: resize", () => {
       const tracePath = join(root, "trace.log");
       const tapePath = join(root, "session.fxtape");
       const replayDir = join(root, "replay");
-      const preFxMarker = "PRE_FX_RESIZE_PREPAINT_7319";
+      const prex1Marker = "PRE_X1_RESIZE_PREPAINT_7319";
       const firstMarker = "RESIZE_PREPAINT_TURN_A_COMPLETE";
       const secondMarker = "RESIZE_PREPAINT_TURN_B_COMPLETE";
       const launchCommand =
-        `printf ${quoteShellPath(`${preFxMarker}\n`)}; exec ${quoteShellPath(FX_BIN)}`;
-      mkdirSync(join(home, ".fx"), { recursive: true });
+        `printf ${quoteShellPath(`${prex1Marker}\n`)}; exec ${quoteShellPath(X1_BIN)}`;
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
       tempDirs.push(root);
       const gateway = startFakeGateway([
@@ -3500,12 +3470,12 @@ describe.skipIf(SKIP)("tui: resize", () => {
           HOME: home,
           AI_GATEWAY_API_KEY: "test-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES:
+          X1_AUTO_UPGRADE: "0",
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES:
             "frame_schedule,frame_plan,frame_diff,frame_commit,scroll,resize,input,worker",
           NO_COLOR: "1",
         },
@@ -3529,7 +3499,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
         ["display-message", "-p", "-t", session.name, "#{pane_tty}"],
         { encoding: "utf8", stdio: "pipe" },
       ).trim();
-      // Drift the terminal position without updating fx's shadow grid. Tmux
+      // Drift the terminal position without updating x1's shadow grid. Tmux
       // can then answer the resize probe while reconciliation is still blocked.
       writeFileSync(paneTty, "\x1b[3A");
       await session.resizeWindow(120, 40, 0);
@@ -3597,7 +3567,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       expect(resizeFrameIndex).toBeGreaterThanOrEqual(0);
       expect(inputFrameIndex).toBeGreaterThanOrEqual(0);
 
-      execFileSync(FX_BIN, ["replay", tapePath, "--frames-dir", replayDir], {
+      execFileSync(X1_BIN, ["replay", tapePath, "--frames-dir", replayDir], {
         cwd: workspace,
         stdio: "pipe",
       });
@@ -3632,7 +3602,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
       expect(countOccurrences(visibleViewport, firstMarker)).toBe(1);
       expect(countOccurrences(visibleViewport, secondMarker)).toBe(1);
       expect(countOccurrences(visibleViewport, "┃ x")).toBe(1);
-      expect(visibleViewport).not.toContain(preFxMarker);
+      expect(visibleViewport).not.toContain(prex1Marker);
       expect(session.paneStatus()).toEqual({ dead: false, status: null });
       expect(session.isPaneAlive()).toBe(true);
       expectEmptyStderr(stderrPath);
@@ -3643,7 +3613,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
   test(
     "settled resize preserves a multi-megabyte bracketed paste byte-for-byte",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "fx-resize-large-paste-"));
+      const dir = mkdtempSync(join(tmpdir(), "x1-resize-large-paste-"));
       tempDirs.push(dir);
       const tracePath = join(dir, "trace.log");
       const stderrPath = join(dir, "stderr.log");
@@ -3659,9 +3629,9 @@ describe.skipIf(SKIP)("tui: resize", () => {
         env: {
           AI_GATEWAY_API_KEY: "test-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "input,worker,resize",
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "input,worker,resize",
         },
       });
       await session.waitForComposer(10_000);
@@ -3703,7 +3673,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
   test(
     "tmux resize preserves column-one CPR-shaped paste bytes in the submitted prompt",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "fx-resize-cpr-paste-"));
+      const dir = mkdtempSync(join(tmpdir(), "x1-resize-cpr-paste-"));
       tempDirs.push(dir);
       const tracePath = join(dir, "trace.log");
       const stderrPath = join(dir, "stderr.log");
@@ -3719,9 +3689,9 @@ describe.skipIf(SKIP)("tui: resize", () => {
         env: {
           AI_GATEWAY_API_KEY: "test-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "input,worker,resize",
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "input,worker,resize",
         },
       });
       await session.waitForComposer(10_000);
@@ -3785,7 +3755,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
   test(
     "probe-first resize keeps a terminal reply paste-owned",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "fx-resize-cpr-paste-late-"));
+      const dir = mkdtempSync(join(tmpdir(), "x1-resize-cpr-paste-late-"));
       tempDirs.push(dir);
       const tracePath = join(dir, "trace.log");
       const stderrPath = join(dir, "stderr.log");
@@ -3801,9 +3771,9 @@ describe.skipIf(SKIP)("tui: resize", () => {
         env: {
           AI_GATEWAY_API_KEY: "test-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "input,worker,resize",
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "input,worker,resize",
           TMUX: undefined,
         },
       });
@@ -3896,7 +3866,7 @@ describe.skipIf(SKIP)("tui: resize", () => {
   test(
     "timed-out cursor probe does not leak a partial private CSI into later paste",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "fx-resize-probe-timeout-"));
+      const dir = mkdtempSync(join(tmpdir(), "x1-resize-probe-timeout-"));
       tempDirs.push(dir);
       const tracePath = join(dir, "trace.log");
       const stderrPath = join(dir, "stderr.log");
@@ -3912,9 +3882,9 @@ describe.skipIf(SKIP)("tui: resize", () => {
         env: {
           AI_GATEWAY_API_KEY: "test-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "input,worker,resize",
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "input,worker,resize",
           TMUX: undefined,
         },
       });
@@ -3943,22 +3913,22 @@ describe.skipIf(SKIP)("tui: resize", () => {
   );
 
   test(
-    "settled resize clears pre-fx scrollback in both startup modes",
+    "settled resize clears pre-x1 scrollback in both startup modes",
     async () => {
       for (const startupScrollback of [true, false]) {
-        const root = mkdtempSync(join(tmpdir(), "fx-resize-history-reset-"));
+        const root = mkdtempSync(join(tmpdir(), "x1-resize-history-reset-"));
         const home = join(root, "home");
         const workspace = join(root, "workspace");
-        const marker = `PRE_FX_MARKER_${startupScrollback ? "ON" : "OFF"}_6179`;
-        mkdirSync(join(home, ".fx"), { recursive: true });
+        const marker = `PRE_X1_MARKER_${startupScrollback ? "ON" : "OFF"}_6179`;
+        mkdirSync(join(home, ".x1"), { recursive: true });
         mkdirSync(workspace, { recursive: true });
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".x1", "settings.json"),
           JSON.stringify({ startup_scrollback: startupScrollback }),
         );
         tempDirs.push(root);
         session = await createResizeSession({
-          cmd: `sh -c ${quoteShellPath(`printf '${marker}\\n'; exec ${quoteShellPath(FX_BIN)}`)}`,
+          cmd: `sh -c ${quoteShellPath(`printf '${marker}\\n'; exec ${quoteShellPath(X1_BIN)}`)}`,
           cwd: workspace,
           env: { HOME: home },
           width: 120,
@@ -3968,21 +3938,22 @@ describe.skipIf(SKIP)("tui: resize", () => {
         expect(await session.captureFullScrollback()).toContain(marker);
 
         await session.sendText("/help");
-        await session.waitForText("Commands 36", 5_000);
+        await session.waitForText("Commands 37", 5_000);
         await session.resizeWindow(84, 28, 500);
 
         const catalog = await session.capturePaneGrid();
         expect(catalog.join("\n")).not.toContain(marker);
-        expect(findInlineHelpPicker(catalog)).not.toBeNull();
+        expect(catalog.join("\n")).not.toContain("layerx1.com");
+        expect(findHelpScreen(catalog)).not.toBeNull();
 
         await session.sendKeys("Escape");
-        await session.waitForPane(
-          (pane) => hasEmptyComposer(pane) && !pane.includes("Enter Open"),
-          5_000,
-        );
+        await session.waitForText("layerx1.com", 5_000);
         const scrollback = await session.captureFullScrollback();
         expect(scrollback).not.toContain(marker);
-        expect(scrollback).not.toContain("Commands 36");
+        expect(scrollback.match(/layerx1\.com/g)).toHaveLength(1);
+        expect(scrollback.match(/\bX1\b/g)).toHaveLength(1);
+        expect(scrollback.split("\n")[0]).toMatch(/┌/);
+        expect(scrollback).not.toContain("Commands 37");
         const finalGrid = await session.capturePaneGrid();
         expect(findFooter(finalGrid), finalGrid.join("\n")).not.toBeNull();
 
@@ -3996,16 +3967,16 @@ describe.skipIf(SKIP)("tui: resize", () => {
   test(
     "idle theme monitoring stays silent and notifications retint the transcript once",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-theme-reset-replay-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-theme-reset-replay-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const tracePath = join(root, "trace.log");
       const stderrPath = join(root, "stderr.log");
       const tapePath = join(root, "theme-reset.fxtape");
       tempDirs.push(root);
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".x1"), { recursive: true });
       mkdirSync(workspace, { recursive: true });
-      writeFileSync(join(home, ".fx", "settings.json"), "{}");
+      writeFileSync(join(home, ".x1", "settings.json"), "{}");
       writeFileSync(stderrPath, "");
 
       const inlineMarker = "THEME_RESET_INLINE_CODE";
@@ -4021,19 +3992,19 @@ describe.skipIf(SKIP)("tui: resize", () => {
       ]);
       gateways.push(gateway);
       session = await createResizeSession({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-theme-reset-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
-          FX_RECORD: tapePath,
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "theme,frame_schedule,frame_commit,resize",
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_AUTO_UPGRADE: "0",
+          X1_RECORD: tapePath,
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "theme,frame_schedule,frame_commit,resize",
         },
         stderrPath,
         width: 120,

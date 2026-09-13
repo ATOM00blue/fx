@@ -40,7 +40,7 @@ pub const TerminalInputOwner = enum {
     theme_monitor,
     paste,
     takeover,
-    fx_input,
+    x1_input,
 };
 
 pub fn terminalInputOwner(
@@ -52,7 +52,7 @@ pub fn terminalInputOwner(
     if (paste_active) return .paste;
     if (takeover_active) return .takeover;
     if (monitor.enabled) return .theme_monitor;
-    return .fx_input;
+    return .x1_input;
 }
 
 const InputEscapeAction = input_action.Action;
@@ -528,7 +528,7 @@ test "terminal input carries typed question decisions and focused edits" {
     );
 }
 
-test "Fx terminal reply ownership survives takeover transition" {
+test "x1 terminal reply ownership survives takeover transition" {
     const alloc = std.testing.allocator;
     var monitor = theme_monitor.Monitor{};
     monitor.start();
@@ -570,7 +570,7 @@ test "Fx terminal reply ownership survives takeover transition" {
             switch (terminalInputOwner(theme, false, takeover_active)) {
                 .paste => unreachable,
                 .takeover => try child_bytes.append(alloc, input_byte),
-                .fx_input => try composer_bytes.append(alloc, input_byte),
+                .x1_input => try composer_bytes.append(alloc, input_byte),
                 .theme_monitor => switch (theme.feed(input_byte, now_ms)) {
                     .pending, .consumed => {},
                     .forward => |bytes| try forwarded(

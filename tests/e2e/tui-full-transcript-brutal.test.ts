@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN } from "../evals/eval-helpers";
+import { X1_BIN } from "../evals/eval-helpers";
 import {
   composerContains,
   FAKE_GATEWAY_MODEL,
@@ -130,7 +130,7 @@ function countOccurrences(text: string, needle: string): number {
 }
 
 function committedAssistantOccurrences(home: string, assistant: string): number {
-  const sessionsRoot = join(home, ".fx", "sessions");
+  const sessionsRoot = join(home, ".x1", "sessions");
   let count = 0;
   for (const entry of readdirSync(sessionsRoot, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === "latest") continue;
@@ -196,16 +196,16 @@ function gatewayEnv(
     HOME: home,
     AI_GATEWAY_API_KEY: "fake-full-transcript-brutal-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_AUTO_UPGRADE: "0",
+    X1_GATEWAY_BASE_URL: gateway.baseUrl,
+    X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+    X1_MODEL: FAKE_GATEWAY_MODEL,
+    X1_AUTO_UPGRADE: "0",
     NO_COLOR: "1",
   };
 }
 
 function makeRoot(label: string): StressRoot {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), `fx-ctrl-o-${label}-`)));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), `x1-ctrl-o-${label}-`)));
   return {
     root,
     home: join(root, "home"),
@@ -340,14 +340,14 @@ function prepareFixture(config: StressConfig): {
   totalTools: number;
 } {
   const paths = makeRoot(config.label);
-  mkdirSync(join(paths.home, ".fx"), { recursive: true });
+  mkdirSync(join(paths.home, ".x1"), { recursive: true });
   mkdirSync(paths.workspace);
   writeFileSync(paths.stderrPath, "");
   writeFileSync(paths.resumedStderrPath, "");
   writeFileSync(paths.tracePath, "");
   writeFileSync(paths.resumedTracePath, "");
   writeFileSync(
-    join(paths.home, ".fx", "settings.json"),
+    join(paths.home, ".x1", "settings.json"),
     JSON.stringify({
       sandbox: "none",
       permission_mode: "auto",
@@ -532,26 +532,26 @@ function fxProcessId(session: TmuxSession): number {
   const rows = execFileSync("ps", ["-t", tty, "-o", "pid=,comm="], {
     encoding: "utf8",
   }).trim().split("\n");
-  const pid = findFxProcessId(rows);
+  const pid = findx1ProcessId(rows);
   if (pid !== undefined) return pid;
-  throw new Error(`Unable to find Fx on ${tty}. Processes:\n${rows.join("\n")}`);
+  throw new Error(`Unable to find x1 on ${tty}. Processes:\n${rows.join("\n")}`);
 }
 
-function findFxProcessId(rows: readonly string[]): number | undefined {
+function findx1ProcessId(rows: readonly string[]): number | undefined {
   for (const row of rows) {
     const match = row.trim().match(/^(\d+)\s+(.+)$/);
     if (!match) continue;
     const command = match[2]!;
-    if (command === "fx" || command === FX_BIN || command.endsWith("/fx")) {
+    if (command === "x1" || command === X1_BIN || command.endsWith("/x1")) {
       return Number(match[1]);
     }
   }
   return undefined;
 }
 
-test("Fx process discovery accepts basename and path process names", () => {
-  expect(findFxProcessId(["11361 fx"])).toBe(11361);
-  expect(findFxProcessId(["11362 /workspace/zig-out/bin/fx"])).toBe(11362);
+test("x1 process discovery accepts basename and path process names", () => {
+  expect(findx1ProcessId(["11361 x1"])).toBe(11361);
+  expect(findx1ProcessId(["11362 /workspace/zig-out/bin/x1"])).toBe(11362);
 });
 
 function residentKib(pid: number): number {
@@ -844,14 +844,14 @@ async function runStress(config: StressConfig): Promise<StressRoot> {
   let passed = false;
   try {
     session = await TmuxSession.create({
-      cmd: FX_BIN,
+      cmd: X1_BIN,
       cwd: realpathSync(paths.workspace),
       env: {
         ...gatewayEnv(paths.home, gateway),
-        FX_RECORD: paths.tapePath,
-        FX_RECORD_INPUT: "1",
-        FX_TRACE_LOG: paths.tracePath,
-        FX_TRACE_SCOPES:
+        X1_RECORD: paths.tapePath,
+        X1_RECORD_INPUT: "1",
+        X1_TRACE_LOG: paths.tracePath,
+        X1_TRACE_SCOPES:
           "full_transcript_cache,full_transcript,scroll,frame_render,terminal_diff,frame_schedule",
       },
       stderrPath: paths.stderrPath,
@@ -1076,12 +1076,12 @@ async function runStress(config: StressConfig): Promise<StressRoot> {
     if (config.resumeCycles > 0) {
       resumedGateway = startFakeGateway([]);
       session = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume-last`,
+        cmd: `${X1_BIN} --resume-last`,
         cwd: realpathSync(paths.workspace),
         env: {
           ...gatewayEnv(paths.home, resumedGateway),
-          FX_TRACE_LOG: paths.resumedTracePath,
-          FX_TRACE_SCOPES:
+          X1_TRACE_LOG: paths.resumedTracePath,
+          X1_TRACE_SCOPES:
             "full_transcript_cache,full_transcript,scroll,frame_render,terminal_diff",
         },
         stderrPath: paths.resumedStderrPath,
@@ -1178,7 +1178,7 @@ test.skipIf(!tmuxAvailable())(
   180_000,
 );
 
-test.skipIf(!tmuxAvailable() || process.env.FX_CTRL_O_BRUTAL !== "1")(
+test.skipIf(!tmuxAvailable() || process.env.X1_CTRL_O_BRUTAL !== "1")(
   "Ctrl-O extended brutal soak holds under four thousand chat lines and ninety six tools",
   async () => {
     await runStress({
@@ -1197,7 +1197,7 @@ test.skipIf(!tmuxAvailable() || process.env.FX_CTRL_O_BRUTAL !== "1")(
 
 test.skipIf(
   !tmuxAvailable() ||
-    process.env.FX_CTRL_O_PROFILE !== "1" ||
+    process.env.X1_CTRL_O_PROFILE !== "1" ||
     platform() !== "darwin" ||
     !existsSync("/usr/bin/sample"),
 )(
@@ -1220,10 +1220,10 @@ test.skipIf(
   600_000,
 );
 
-test.skipIf(!tmuxAvailable() || process.env.FX_CTRL_O_50K !== "1")(
+test.skipIf(!tmuxAvailable() || process.env.X1_CTRL_O_50K !== "1")(
   "Ctrl-O load test survives a realistic fifty-thousand-line session with large tool sidecars",
   async () => {
-    const profileSeconds = process.env.FX_CTRL_O_PROFILE === "1" &&
+    const profileSeconds = process.env.X1_CTRL_O_PROFILE === "1" &&
         platform() === "darwin" &&
         existsSync("/usr/bin/sample")
       ? 30

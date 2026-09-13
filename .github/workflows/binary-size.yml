@@ -20,25 +20,35 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            target: x86_64-linux
+            target: x86_64-linux-gnu
             runner: ubuntu-24.04
+            binary: x1
             section_format: elf
             expected_file: "ELF 64-bit LSB.*x86-64"
           - name: linux-aarch64
-            target: aarch64-linux
+            target: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
+            binary: x1
             section_format: elf
             expected_file: "ELF 64-bit LSB.*ARM aarch64"
           - name: macos-x86_64
             target: x86_64-macos
             runner: macos-15-intel
+            binary: x1
             section_format: macho
             expected_file: "Mach-O 64-bit executable x86_64"
           - name: macos-aarch64
             target: aarch64-macos
             runner: macos-15
+            binary: x1
             section_format: macho
             expected_file: "Mach-O 64-bit executable arm64"
+          - name: windows-x86_64
+            target: x86_64-windows-gnu
+            runner: ubuntu-24.04
+            binary: x1.exe
+            section_format: elf
+            expected_file: "PE32\\+ executable.*x86-64"
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_SHA: ${{ github.sha }}
@@ -64,22 +74,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          evidence_dir="$RUNNER_TEMP/fx-binary-size-evidence"
+          evidence_dir="$RUNNER_TEMP/x1-binary-size-evidence"
           mkdir -p "$evidence_dir"
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
           zig build \
             -Dtarget=${{ matrix.target }} \
             -Doptimize=ReleaseSafe \
-            --cache-dir "$RUNNER_TEMP/fx-head-cache" \
-            --global-cache-dir "$RUNNER_TEMP/fx-global-cache"
-          cp zig-out/bin/fx "$evidence_dir/head-fx"
-          file "$evidence_dir/head-fx" > "$evidence_dir/head-file.txt"
+            --cache-dir "$RUNNER_TEMP/x1-head-cache" \
+            --global-cache-dir "$RUNNER_TEMP/x1-global-cache"
+          cp zig-out/bin/${{ matrix.binary }} "$evidence_dir/head-x1"
+          file "$evidence_dir/head-x1" > "$evidence_dir/head-file.txt"
           cat "$evidence_dir/head-file.txt"
           grep -Eq "$EXPECTED_FILE" "$evidence_dir/head-file.txt"
           if [ "$SECTION_FORMAT" = "macho" ]; then
-            size -m "$evidence_dir/head-fx" > "$evidence_dir/head-sections.txt"
+            size -m "$evidence_dir/head-x1" > "$evidence_dir/head-sections.txt"
           else
-            size -A -d "$evidence_dir/head-fx" > "$evidence_dir/head-sections.txt"
+            size -A -d "$evidence_dir/head-x1" > "$evidence_dir/head-sections.txt"
           fi
           cat "$evidence_dir/head-sections.txt"
 
@@ -87,8 +97,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          evidence_dir="$RUNNER_TEMP/fx-binary-size-evidence"
-          base_worktree="$RUNNER_TEMP/fx-binary-size-base"
+          evidence_dir="$RUNNER_TEMP/x1-binary-size-evidence"
+          base_worktree="$RUNNER_TEMP/x1-binary-size-base"
           cleanup() {
             git worktree remove --force "$base_worktree" >/dev/null 2>&1 || true
           }
@@ -100,17 +110,17 @@ jobs:
             zig build \
               -Dtarget=${{ matrix.target }} \
               -Doptimize=ReleaseSafe \
-              --cache-dir "$RUNNER_TEMP/fx-base-cache" \
-              --global-cache-dir "$RUNNER_TEMP/fx-global-cache"
+              --cache-dir "$RUNNER_TEMP/x1-base-cache" \
+              --global-cache-dir "$RUNNER_TEMP/x1-global-cache"
           )
-          cp "$base_worktree/zig-out/bin/fx" "$evidence_dir/base-fx"
-          file "$evidence_dir/base-fx" > "$evidence_dir/base-file.txt"
+          cp "$base_worktree/zig-out/bin/${{ matrix.binary }}" "$evidence_dir/base-x1"
+          file "$evidence_dir/base-x1" > "$evidence_dir/base-file.txt"
           cat "$evidence_dir/base-file.txt"
           grep -Eq "$EXPECTED_FILE" "$evidence_dir/base-file.txt"
           if [ "$SECTION_FORMAT" = "macho" ]; then
-            size -m "$evidence_dir/base-fx" > "$evidence_dir/base-sections.txt"
+            size -m "$evidence_dir/base-x1" > "$evidence_dir/base-sections.txt"
           else
-            size -A -d "$evidence_dir/base-fx" > "$evidence_dir/base-sections.txt"
+            size -A -d "$evidence_dir/base-x1" > "$evidence_dir/base-sections.txt"
           fi
           cat "$evidence_dir/base-sections.txt"
 
@@ -119,10 +129,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          evidence_dir="$RUNNER_TEMP/fx-binary-size-evidence"
+          evidence_dir="$RUNNER_TEMP/x1-binary-size-evidence"
           python3 -m scripts.binary_size \
-            --base-binary "$evidence_dir/base-fx" \
-            --head-binary "$evidence_dir/head-fx" \
+            --base-binary "$evidence_dir/base-x1" \
+            --head-binary "$evidence_dir/head-x1" \
             --base-sections "$evidence_dir/base-sections.txt" \
             --head-sections "$evidence_dir/head-sections.txt" \
             --base-sha "$BASE_SHA" \
@@ -148,12 +158,12 @@ jobs:
         with:
           name: binary-size-evidence-${{ matrix.name }}-${{ github.event.pull_request.number }}
           path: |
-            ${{ runner.temp }}/fx-binary-size-evidence/report.json
-            ${{ runner.temp }}/fx-binary-size-evidence/report.md
-            ${{ runner.temp }}/fx-binary-size-evidence/base-file.txt
-            ${{ runner.temp }}/fx-binary-size-evidence/head-file.txt
-            ${{ runner.temp }}/fx-binary-size-evidence/base-sections.txt
-            ${{ runner.temp }}/fx-binary-size-evidence/head-sections.txt
+            ${{ runner.temp }}/x1-binary-size-evidence/report.json
+            ${{ runner.temp }}/x1-binary-size-evidence/report.md
+            ${{ runner.temp }}/x1-binary-size-evidence/base-file.txt
+            ${{ runner.temp }}/x1-binary-size-evidence/head-file.txt
+            ${{ runner.temp }}/x1-binary-size-evidence/base-sections.txt
+            ${{ runner.temp }}/x1-binary-size-evidence/head-sections.txt
           if-no-files-found: warn
           retention-days: 30
 
@@ -163,7 +173,7 @@ jobs:
         with:
           name: binary-size-binaries-${{ matrix.name }}-${{ github.event.pull_request.number }}
           path: |
-            ${{ runner.temp }}/fx-binary-size-evidence/base-fx
-            ${{ runner.temp }}/fx-binary-size-evidence/head-fx
+            ${{ runner.temp }}/x1-binary-size-evidence/base-x1
+            ${{ runner.temp }}/x1-binary-size-evidence/head-x1
           compression-level: 0
           retention-days: 7

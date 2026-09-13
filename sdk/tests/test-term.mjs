@@ -2,10 +2,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxTerminal, supportsJspi } from "../node.js";
+import { createX1Terminal, supportsJspi } from "../node.js";
 
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultWasm = resolve(scriptDir, "../../zig-out/bin/fx-term.wasm");
+const defaultWasm = resolve(scriptDir, "../../zig-out/bin/x1-term.wasm");
 const wasmPath = resolve(process.argv[2] || defaultWasm);
 
 if (!supportsJspi()) {
@@ -74,57 +74,57 @@ let secondRequestAt;
 let secondRequestBody;
 let requestCount = 0;
 const mockFetch = async (_url, init) => {
-  requestedModel = new Headers(init.headers).get("ai-language-model-id");
+  requestedModel = JSON.parse(new TextDecoder().decode(init.body)).model;
   requestCount += 1;
   if (requestCount === 2) {
     secondRequestAt = performance.now();
     secondRequestBody = JSON.parse(new TextDecoder().decode(init.body));
     return new Response(new ReadableStream({
       start(controller) {
-        controller.enqueue(encoded.encode(`data: {"type":"text-delta","delta":"${queuedAnswer}"}\n`));
-        controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":2}}}\n'));
-        controller.enqueue(encoded.encode("data: [DONE]\n"));
+        controller.enqueue(encoded.encode(`data: {"type":"response.output_text.delta","delta":"${queuedAnswer}"}\n`));
+        controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+        controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
         controller.close();
       },
     }), { status: 200, headers: { "content-type": "text/event-stream" } });
   }
   return new Response(new ReadableStream({
     async start(controller) {
-      controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"hello"}\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"hello"}\n'));
       streamStartedAt = performance.now();
       const interval = setInterval(() => {
-        controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"."}\n'));
+        controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"."}\n'));
       }, 20);
       await firstStreamRelease;
       clearInterval(interval);
-      controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":" world"}\n'));
-      controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":2}}}\n'));
-      controller.enqueue(encoded.encode("data: [DONE]\n"));
+      controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":" world"}\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
       controller.close();
       streamFinishedAt = performance.now();
     },
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
 };
-const runtime = await createFxTerminal({
+const runtime = await createX1Terminal({
   backend: "wasm",
   wasm: await readFile(wasmPath),
   terminal,
-  env: { AI_GATEWAY_API_KEY: "term-test-key" },
+  env: { X1_API_KEY: "term-test-key" },
   fetch: mockFetch,
   configStore: {
     get(configId) { return persistedConfig.get(configId) ?? null; },
     set(configId, value) { persistedConfig.set(configId, value); },
   },
   onEvent(event) { events.push(event); },
-  traceWasi: process.env.FX_WASI_TRACE === "1",
+  traceWasi: process.env.X1_WASI_TRACE === "1",
   stderr(bytes) { process.stderr.write(bytes); },
 });
 await Promise.race([
   runtime.interactive,
-  new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for fx-term to become interactive")), 5000)),
+  new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for x1-term to become interactive")), 5000)),
 ]);
 const startupDeadline = performance.now() + 5000;
-while (!streamedText.includes("Run /help for commands")) {
+while (!streamedText.includes("layerx1.com")) {
   if (performance.now() >= startupDeadline) throw new Error("timed out waiting for startup output");
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
@@ -136,7 +136,7 @@ runtime.write("\x7f");
 runtime.write("\r");
 const deadline = performance.now() + 5000;
 while (streamStartedAt === undefined) {
-  if (performance.now() >= deadline) throw new Error("timed out waiting for continuous fx-term response");
+  if (performance.now() >= deadline) throw new Error("timed out waiting for continuous x1-term response");
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 observeZeroTimeouts = true;
@@ -156,32 +156,31 @@ observeZeroTimeouts = false;
 if (secondRequestAt !== undefined) throw new Error("queued follow-up started before the active response finished");
 releaseFirstStream();
 while (streamFinishedAt === undefined) {
-  if (performance.now() >= deadline) throw new Error("timed out waiting for streamed fx-term response");
+  if (performance.now() >= deadline) throw new Error("timed out waiting for streamed x1-term response");
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 const queuedDeadline = performance.now() + 5000;
 while (secondRequestAt === undefined || !streamedText.includes(queuedAnswer)) {
-  if (performance.now() >= queuedDeadline) throw new Error("timed out waiting for queued fx-term response");
+  if (performance.now() >= queuedDeadline) throw new Error("timed out waiting for queued x1-term response");
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 runtime.write("/exit\r");
 const exitCode = await Promise.race([
   runtime.exited,
-  new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for fx-term exit")), 5000)),
+  new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for x1-term exit")), 5000)),
 ]);
 globalThis.setTimeout = originalSetTimeout;
 const text = new TextDecoder().decode(Buffer.concat(output.map((chunk) => Buffer.from(chunk))));
 
-if (exitCode !== 0) throw new Error(`fx-term exited with code ${exitCode}`);
-if (!text.includes("𝒇x")) throw new Error("shared Fx welcome frame was not observed");
-if (!text.includes("Run /help for commands")) throw new Error("shared Fx welcome guidance was not observed");
+if (exitCode !== 0) throw new Error(`x1-term exited with code ${exitCode}`);
+if (!text.includes("layerx1.com")) throw new Error("shared X1 welcome frame was not observed");
 if (requestedModel !== "sdk/term-model") throw new Error(`terminal prompt did not use the host-restored model: ${requestedModel}`);
 if (!(streamStartedAt < streamFinishedAt)) throw new Error("terminal fetch did not remain active for continuous streaming");
 if (!(draftVisibleAt < streamFinishedAt)) throw new Error("terminal rendered follow-up input only after continuous streaming finished");
 if (!(queuedVisibleAt < streamFinishedAt)) throw new Error("terminal queued follow-up input only after continuous streaming finished");
 if (!(secondRequestAt >= streamFinishedAt)) throw new Error("terminal started queued follow-up before continuous streaming finished");
-const queuedUser = secondRequestBody.prompt?.filter((message) => message.role === "user").at(-1);
-const queuedText = queuedUser?.content?.filter((part) => part.type === "text").map((part) => part.text);
+const queuedUser = secondRequestBody.input?.filter((message) => message.role === "user").at(-1);
+const queuedText = queuedUser?.content?.filter((part) => part.type === "input_text" || part.type === "text").map((part) => part.text);
 if (queuedText?.length !== 1 || queuedText[0] !== liveDraft) {
   throw new Error(`queued follow-up request changed the submitted draft: ${JSON.stringify(queuedText)}`);
 }

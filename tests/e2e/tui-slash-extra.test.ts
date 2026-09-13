@@ -25,7 +25,7 @@ import {
   tmuxAvailable,
 } from "./tmux-helpers";
 
-const SKIP = !tmuxAvailable() || !HAS_API_KEY;
+const SKIP = !tmuxAvailable();
 const TIMEOUT = 30_000;
 const LONG_TIMEOUT = 120_000;
 const TRACE_SCOPES = "agent,worker,gateway,tool,permission,history,interrupt,prompt";
@@ -51,7 +51,7 @@ describe.skipIf(!tmuxAvailable())("tui: skills command recovery", () => {
   test(
     "invalid /skills create name reports an inline error and preserves the session",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-invalid-skill-name-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-invalid-skill-name-"));
       const home = join(root, "home");
       const stderrPath = join(root, "stderr.log");
       mkdirSync(home);
@@ -73,10 +73,10 @@ describe.skipIf(!tmuxAvailable())("tui: skills command recovery", () => {
         );
         expect(session.isAlive()).toBe(true);
         expect(hasEmptyComposer(rejected)).toBe(true);
-        expect(existsSync(join(home, ".fx", "escape-attempt"))).toBe(false);
+        expect(existsSync(join(home, ".x1", "escape-attempt"))).toBe(false);
 
         await session.sendText("/skills path");
-        const recovered = await session.waitForText("fx managed install root:", 5_000);
+        const recovered = await session.waitForText("x1 managed install root:", 5_000);
         expect(hasEmptyComposer(recovered)).toBe(true);
         expect(readFileSync(stderrPath, "utf8")).toBe("");
       } finally {
@@ -135,7 +135,7 @@ describe.skipIf(!tmuxAvailable())("tui: credits slash command", () => {
             HOME: home,
             AI_GATEWAY_API_KEY: "credits-fake-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_E2E_GATEWAY_CREDITS_URL: gateway.url,
+            X1_E2E_GATEWAY_CREDITS_URL: gateway.url,
           },
           width: 120,
           height: 40,
@@ -178,7 +178,7 @@ describe.skipIf(!tmuxAvailable() || CLIPBOARD_PROGRAM === null)("tui: clipboard 
     async () => {
       if (CLIPBOARD_PROGRAM === null) throw new Error("unsupported clipboard platform");
 
-      const workDir = mkdtempSync(join(tmpdir(), "fx-clipboard-host-"));
+      const workDir = mkdtempSync(join(tmpdir(), "x1-clipboard-host-"));
       const homeDir = join(workDir, "home");
       const binDir = join(workDir, "bin");
       const capturePath = join(workDir, "clipboard.txt");
@@ -186,7 +186,7 @@ describe.skipIf(!tmuxAvailable() || CLIPBOARD_PROGRAM === null)("tui: clipboard 
       const clipboardPath = join(binDir, CLIPBOARD_PROGRAM);
       mkdirSync(homeDir);
       mkdirSync(binDir);
-      writeFileSync(clipboardPath, "#!/bin/sh\ncat > \"$FX_TEST_CLIPBOARD_CAPTURE\"\n");
+      writeFileSync(clipboardPath, "#!/bin/sh\ncat > \"$X1_TEST_CLIPBOARD_CAPTURE\"\n");
       chmodSync(clipboardPath, 0o755);
 
       const reply = "clipboard host sentinel\nsecond line";
@@ -199,11 +199,11 @@ describe.skipIf(!tmuxAvailable() || CLIPBOARD_PROGRAM === null)("tui: clipboard 
             HOME: homeDir,
             AI_GATEWAY_API_KEY: "clipboard-fake-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_TEST_CLIPBOARD_CAPTURE: capturePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_TEST_CLIPBOARD_CAPTURE: capturePath,
             PATH: `${binDir}:${process.env.PATH ?? ""}`,
           },
         });
@@ -238,8 +238,8 @@ describe.skipIf(!tmuxAvailable())("tui: active session transitions", () => {
   test(
     "active /clear cancels a fake Gateway turn and accepts a follow-up prompt",
     async () => {
-      const workDir = mkdtempSync(join(tmpdir(), "fx-active-clear-"));
-      const homeDir = mkdtempSync(join(tmpdir(), "fx-active-clear-home-"));
+      const workDir = mkdtempSync(join(tmpdir(), "x1-active-clear-"));
+      const homeDir = mkdtempSync(join(tmpdir(), "x1-active-clear-home-"));
       const stderrPath = join(workDir, "stderr.log");
       let requestCount = 0;
       const gateway = startDynamicFakeGateway(() => {
@@ -256,10 +256,10 @@ describe.skipIf(!tmuxAvailable())("tui: active session transitions", () => {
             HOME: homeDir,
             AI_GATEWAY_API_KEY: "active-clear-fake-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
           },
           width: 120,
           height: 40,
@@ -309,12 +309,12 @@ describe.skipIf(SKIP)("tui: extra slash commands", () => {
   test(
     "/clear resets projected history before the next prompt",
     async () => {
-      const workDir = mkdtempSync(join(tmpdir(), "fx-row03-clear-"));
-      const homeDir = mkdtempSync(join(tmpdir(), "fx-row03-clear-home-"));
+      const workDir = mkdtempSync(join(tmpdir(), "x1-row03-clear-"));
+      const homeDir = mkdtempSync(join(tmpdir(), "x1-row03-clear-home-"));
       const tracePath = join(workDir, "trace.log");
-      mkdirSync(join(homeDir, ".fx"), { recursive: true });
+      mkdirSync(join(homeDir, ".x1"), { recursive: true });
       writeFileSync(
-        join(homeDir, ".fx", "settings.json"),
+        join(homeDir, ".x1", "settings.json"),
         JSON.stringify({ permission: { ask_user_question: "deny" } }),
       );
       const gateway = startDynamicFakeGateway(() =>
@@ -328,12 +328,12 @@ describe.skipIf(SKIP)("tui: extra slash commands", () => {
             HOME: homeDir,
             AI_GATEWAY_API_KEY: "clear-fake-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_TRACE_SCOPES: TRACE_SCOPES,
-            FX_TRACE_LOG: tracePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_E2E_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_TRACE_SCOPES: TRACE_SCOPES,
+            X1_TRACE_LOG: tracePath,
           },
           width: 120,
           height: 40,
@@ -404,7 +404,7 @@ describe.skipIf(SKIP)("tui: extra slash commands", () => {
   test(
     "/usage and /cost open the same compact local usage dashboard",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-usage-empty-home-"));
+      const home = mkdtempSync(join(tmpdir(), "x1-usage-empty-home-"));
       session = await TmuxSession.create({ env: { HOME: home } });
       await session.waitForComposer(10_000);
       await session.sendText("/cost");

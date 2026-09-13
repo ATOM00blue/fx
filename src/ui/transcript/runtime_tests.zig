@@ -3160,7 +3160,7 @@ test "staged soft-wrapped presentation resumes across committed projections" {
     const stable_flow = "base\n";
     const filler_row_count: usize = @as(usize, std.math.maxInt(u16)) - 3;
     const link_url = "https://staged.example";
-    const link_params = "id=fx-42";
+    const link_params = "id=x1-42";
     const presentation_open =
         "\x1b[1;31m\x1b[9m" ++
         "\x1b]8;" ++ link_params ++ ";" ++ link_url ++ "\x1b\\";
@@ -7684,8 +7684,8 @@ test "attempt source projections leave transcript runtime and commit state uncha
 
 fn checkPrepareTranscriptSourceAllocationFailures(alloc: Allocator) !void {
     const welcome =
-        "Fx welcome banner line one\n" ++
-        "Fx welcome banner line two\n";
+        "x1 welcome banner line one\n" ++
+        "x1 welcome banner line two\n";
     const summary = "● 2 command lines folded\n";
     var runtime = TranscriptRuntime{
         .layout = transcriptTestLayout(24, 10, 6),
@@ -10006,7 +10006,7 @@ test "replaceable line with ansi wrapper does not accumulate historical entries"
     try std.testing.expectEqualStrings("start\n\x1b[38;5;245mline two\n\x1b[0m", runtime.transcript.items);
 }
 
-test "updateExtraInputRows shrink preserves pre-fx scrollback" {
+test "updateExtraInputRows shrink preserves pre-x1 scrollback" {
     var sink = try std.Io.Dir.openFileAbsolute(io_mod.getIo(), "/dev/null", .{ .mode = .write_only });
     defer sink.close(io_mod.getIo());
 
@@ -12101,7 +12101,7 @@ test "command output retention preserves its artifact detail owner" {
         .entry_id = detail_entry_id,
         .tool_name = "run_command",
         .arguments_json = "{\"command\":\"generate output\"}",
-        .result = "output_file=/tmp/fx-command-retained.log\n",
+        .result = "output_file=/tmp/x1-command-retained.log\n",
         .result_handle = "result-run-command.txt",
         .turn_id = 1,
         .call_id = "retained-command",
@@ -13474,13 +13474,22 @@ test "current compact projection groups tool rows without mutating entries" {
     const entry_count = runtime.entries.items.len;
     var compact = try runtime.prepareTranscriptSource(alloc, null);
     defer compact.deinit(alloc);
-    try std.testing.expect(std.mem.find(
-        u8,
-        compact.bytes,
-        "\x1b[38;5;255m●\x1b[0m \x1b[38;5;245m2 tool calls · 1 read · 1 edit · 1 failed\x1b[0m\n" ++
-            "\x1b[38;5;245m├ Read file\x1b[0m\n" ++
-            "\x1b[38;5;245m└ Edit failed\x1b[0m",
-    ) != null);
+    // Compact headers follow the same outcome colors as expanded; entry
+    // identity and child count stay stable so history release is not blocked.
+    const failed_header = try std.fmt.allocPrint(
+        alloc,
+        "{s}●\x1b[0m {s}2 tool calls · 1 read · 1 edit · 1 failed\x1b[0m\n" ++
+            "{s}├ Read file\x1b[0m\n" ++
+            "{s}└ Edit failed\x1b[0m",
+        .{
+            ui_render.diff_removed_marker_style,
+            ui_render.statusline_style,
+            ui_render.statusline_style,
+            ui_render.statusline_style,
+        },
+    );
+    defer alloc.free(failed_header);
+    try std.testing.expect(std.mem.find(u8, compact.bytes, failed_header) != null);
     try std.testing.expectEqual(entry_count, runtime.entries.items.len);
 }
 
@@ -14596,7 +14605,7 @@ test "transcript lifecycle terminal and finalization transitions stay batch safe
         marker_style: []const u8,
         marker: []const u8,
     }{
-        .{ .call_id = "completed", .kind = .completed, .summary = "completed", .marker_style = ui_render.system_notice_text_style, .marker = "●" },
+        .{ .call_id = "completed", .kind = .completed, .summary = "completed", .marker_style = ui_render.diff_added_marker_style, .marker = "●" },
         .{ .call_id = "denied", .kind = .denied, .summary = "denied", .marker_style = ui_render.red_style, .marker = "⊘" },
         .{ .call_id = "cancelled", .kind = .cancelled, .summary = "cancelled", .marker_style = ui_render.warning_style, .marker = "■" },
         .{ .call_id = "failed", .kind = .failed, .summary = "failed", .marker_style = ui_render.red_style, .marker = "●" },
@@ -14612,7 +14621,7 @@ test "transcript lifecycle terminal and finalization transitions stay batch safe
         const expected_line = if (case.kind == .cancelled)
             try std.fmt.bufPrint(
                 &expected,
-                "{s}{s}{s} {s}{s}{s} · What can fx do differently?\n",
+                "{s}{s}{s} {s}{s}{s} · What can x1 do differently?\n",
                 .{
                     case.marker_style,
                     case.marker,
@@ -14655,7 +14664,7 @@ test "transcript lifecycle terminal and finalization transitions stay batch safe
     try expectRawEntryBytes(&runtime, old_entry_id, try std.fmt.bufPrint(
         &late_completion_expected,
         "{s}●{s} Late completion\n",
-        .{ ui_render.system_notice_text_style, ui_render.reset_style },
+        .{ ui_render.diff_added_marker_style, ui_render.reset_style },
     ));
     try std.testing.expectEqual(
         null,
@@ -14694,10 +14703,15 @@ test "completed tool status projection keeps lifecycle styling without activity 
 
     try std.testing.expectEqual(@as(usize, 1), runtime.entries.items.len);
     try std.testing.expectEqual(RawEntryClass.tool_status, runtime.entries.items[0].raw_bytes.class);
+    var completed_expected: [256]u8 = undefined;
     try expectRawEntryBytes(
         &runtime,
         runtime.entries.items[0].raw_bytes.id,
-        "\x1b[38;5;250m●\x1b[0m Ran pwd\x1b[0m \x1b[38;5;245mpwd\x1b[0m\n",
+        try std.fmt.bufPrint(
+            &completed_expected,
+            "{s}●{s} Ran pwd\x1b[0m \x1b[38;5;245mpwd\x1b[0m\n",
+            .{ ui_render.diff_added_marker_style, ui_render.reset_style },
+        ),
     );
     try std.testing.expect(runtime.activityProjection() == .none);
     try std.testing.expectEqual(@as(usize, 0), runtime.toolActivityRecordCount());
@@ -14720,7 +14734,7 @@ test "transcript lifecycle terminal markers preserve ANSI summaries and normaliz
     try expectRawEntryBytes(&runtime, styled_entry_id, try std.fmt.bufPrint(
         &styled_expected,
         "{s}●{s} Ran command\x1b[0m\n",
-        .{ ui_render.system_notice_text_style, ui_render.reset_style },
+        .{ ui_render.diff_added_marker_style, ui_render.reset_style },
     ));
 
     const styled_cancelled_entry_id = try startLifecycle(&runtime, alloc, 1, "styled-cancelled");
@@ -14735,7 +14749,7 @@ test "transcript lifecycle terminal markers preserve ANSI summaries and normaliz
     try expectRawEntryBytes(&runtime, styled_cancelled_entry_id, try std.fmt.bufPrint(
         &styled_cancelled_expected,
         "{s}■{s}{s} Cancelled\x1b[0m \x1b[38;5;245msleep 30\x1b[0m{s}" ++
-            " · What can fx do differently?\n",
+            " · What can x1 do differently?\n",
         .{
             ui_render.warning_style,
             ui_render.reset_style,
@@ -14767,7 +14781,7 @@ test "transcript lifecycle terminal markers preserve ANSI summaries and normaliz
     var cancelled_expected: [128]u8 = undefined;
     try expectRawEntryBytes(&runtime, cancelled_entry_id, try std.fmt.bufPrint(
         &cancelled_expected,
-        "{s}■{s} {s}Tool cancelled{s} · What can fx do differently?\n",
+        "{s}■{s} {s}Tool cancelled{s} · What can x1 do differently?\n",
         .{
             ui_render.warning_style,
             ui_render.reset_style,
@@ -15116,7 +15130,7 @@ fn checkLateTerminalFallbackAllocationFailuresImpl(alloc: Allocator) !void {
     try expectRawEntryBytes(&runtime, entry_id, try std.fmt.bufPrint(
         &expected,
         "{s}●{s} Late completion\n",
-        .{ ui_render.system_notice_text_style, ui_render.reset_style },
+        .{ ui_render.diff_added_marker_style, ui_render.reset_style },
     ));
     const detail = runtime.toolDetailForEntry(entry_id).?;
     try std.testing.expectEqualStrings("late result", detail.result.?);
@@ -15337,7 +15351,7 @@ test "lifecycle pins survive low cap until batch cleanup restores prune eligibil
         try std.fmt.bufPrint(
             &first_complete_expected,
             "{s}●{s} First complete\n",
-            .{ ui_render.system_notice_text_style, ui_render.reset_style },
+            .{ ui_render.diff_added_marker_style, ui_render.reset_style },
         ),
         runtime.entries.items[0].raw_bytes.bytes,
     );
@@ -15981,13 +15995,13 @@ test "finality candidates anchor a fully grouped turn at its newest rendered gro
     const group_a_header = try std.fmt.allocPrint(
         alloc,
         "{s}●\x1b[0m {s}3 tool calls · 3 read\x1b[0m",
-        .{ user_message_card.promptMarkerStyle(), ui_render.statusline_style },
+        .{ ui_render.diff_added_marker_style, ui_render.statusline_style },
     );
     defer alloc.free(group_a_header);
     const group_b_header = try std.fmt.allocPrint(
         alloc,
         "{s}●\x1b[0m {s}1 tool call · 1 read\x1b[0m",
-        .{ user_message_card.promptMarkerStyle(), ui_render.statusline_style },
+        .{ ui_render.diff_added_marker_style, ui_render.statusline_style },
     );
     defer alloc.free(group_b_header);
     const group_a_start = std.mem.find(u8, source.bytes, group_a_header) orelse
@@ -16024,7 +16038,7 @@ test "finality candidates keep a mixed legacy turn at its earliest rendered tool
     const group_a_header = try std.fmt.allocPrint(
         alloc,
         "{s}●\x1b[0m {s}1 tool call · 1 read\x1b[0m",
-        .{ user_message_card.promptMarkerStyle(), ui_render.statusline_style },
+        .{ ui_render.diff_added_marker_style, ui_render.statusline_style },
     );
     defer alloc.free(group_a_header);
     const earliest_tool_start = std.mem.find(u8, source.bytes, group_a_header) orelse

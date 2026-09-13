@@ -32,9 +32,16 @@ pub fn buildThinkingLabel(buf: []u8, stream: StreamState, now_ms: i64) ?[]const 
     return out.buffered();
 }
 
-pub const thinking_blink_half_period_ms: i64 = 500;
+/// Quarter-circle glyphs the Thinking marker rotates through, one step per
+/// marker period, a full turn every four steps.
+pub const thinking_rotation_frames = [_][]const u8{ "◐", "◓", "◑", "◒" };
 
-/// The instant the Thinking clock reads. While fx waits on user input the
+/// Marker period: the Thinking rotation advances one quarter-circle per
+/// period, while the tool-marker blink toggles once per period, so the two
+/// markers stay on one tempo.
+pub const thinking_marker_step_ms: i64 = 500;
+
+/// The instant the Thinking clock reads. While x1 waits on user input the
 /// clock is frozen at the moment the wait began, so time spent on an approval
 /// or question never counts as thinking.
 fn thinkingClockNow(stream: StreamState, now_ms: i64) i64 {
@@ -44,22 +51,21 @@ fn thinkingClockNow(stream: StreamState, now_ms: i64) i64 {
     return now_ms;
 }
 
-/// Marker visibility locked to the elapsed counter's clock: on for the first
-/// half of every elapsed second, so the marker relights exactly when the
-/// seconds digit advances. Steady on while waiting on user input (a frozen
-/// clock would otherwise strand the marker dark). Null when no turn is being
-/// timed.
-pub fn thinkingBlinkVisible(stream: StreamState, now_ms: i64) ?bool {
+/// Marker rotation locked to the elapsed counter's clock: one quarter-circle
+/// step per half second, a full turn every two displayed seconds. Null when
+/// the model is not actively working: the stream has ended, failed, been
+/// cancelled, or is paused for user input.
+pub fn thinkingRotationFrame(stream: StreamState, now_ms: i64) ?u2 {
+    if (!stream.active or stream.waiting_since_ms > 0) return null;
     if (stream.turn_started_ms <= 0 or now_ms < stream.turn_started_ms) return null;
-    if (stream.waiting_since_ms > 0) return true;
-    const half_periods = @divTrunc(now_ms - stream.turn_started_ms, thinking_blink_half_period_ms);
-    return @mod(half_periods, 2) == 0;
+    const steps = @divTrunc(now_ms - stream.turn_started_ms, thinking_marker_step_ms);
+    return @intCast(@mod(steps, thinking_rotation_frames.len));
 }
 
 fn appendThinkingElapsedSuffix(writer: *std.Io.Writer, stream: StreamState, now_ms: i64) !void {
     if (stream.turn_started_ms <= 0 or now_ms < stream.turn_started_ms) return;
-    // One displayed second spans exactly one on/off blink period.
-    const ms_per_second = 2 * thinking_blink_half_period_ms;
+    // One displayed second spans exactly two marker steps.
+    const ms_per_second = 2 * thinking_marker_step_ms;
     const seconds = @divTrunc(thinkingClockNow(stream, now_ms) - stream.turn_started_ms, ms_per_second);
     try writer.writeAll(" (");
     try writeElapsed(writer, seconds);
@@ -83,7 +89,7 @@ fn writeElapsed(writer: *std.Io.Writer, seconds: i64) !void {
     }
 }
 
-/// Tracks whether fx is waiting on user input (approval prompt or question)
+/// Tracks whether x1 is waiting on user input (approval prompt or question)
 /// and keeps the Thinking clock honest: the clock freezes when the wait
 /// begins, and on resume the whole wait is excluded by shifting
 /// turn_started_ms forward. Call whenever the waiting state may have changed.
@@ -118,8 +124,8 @@ pub fn buildStreamingLabel(buf: []u8, stream: StreamState) []const u8 {
 }
 
 /// The response stretch is open but nothing is printing: the model is still
-/// producing output fx cannot show yet, typically a large tool payload. The row
-/// takes the marker back so it blinks and carries the turn clock, and stays
+/// producing output x1 cannot show yet, typically a large tool payload. The row
+/// takes the marker back so it rotates and carries the turn clock, and stays
 /// verbless because naming the work would mean guessing at it.
 pub fn buildQuietTurnLabel(buf: []u8, stream: StreamState, now_ms: i64) []const u8 {
     var out: std.Io.Writer = .fixed(buf);
@@ -246,7 +252,7 @@ test "buildThinkingLabel renders elapsed seconds for the running turn" {
 
 test "buildThinkingLabel renders elapsed minutes and seconds for long turns" {
     var buf: [64]u8 = undefined;
-    // 1080s of blink periods elapsed → 18m0s instead of a raw second count.
+    // 1080s elapsed → 18m0s instead of a raw second count.
     const label = buildThinkingLabel(&buf, .{
         .active = true,
         .turn_started_ms = 1_000,
@@ -274,24 +280,40 @@ test "buildThinkingLabel renders elapsed seconds before the token suffix" {
     try std.testing.expectEqualStrings("• Thinking (12s) (↑10 ↓20)", label.?);
 }
 
-test "thinking blink relights exactly when the seconds digit advances" {
+test "thinking rotation advances one quarter-circle per half second" {
     const stream: StreamState = .{ .active = true, .turn_started_ms = 1_000 };
-    try std.testing.expectEqual(@as(?bool, true), thinkingBlinkVisible(stream, 1_000));
-    try std.testing.expectEqual(@as(?bool, true), thinkingBlinkVisible(stream, 1_499));
-    try std.testing.expectEqual(@as(?bool, false), thinkingBlinkVisible(stream, 1_500));
-    try std.testing.expectEqual(@as(?bool, false), thinkingBlinkVisible(stream, 1_999));
-    try std.testing.expectEqual(@as(?bool, true), thinkingBlinkVisible(stream, 2_000));
+    try std.testing.expectEqual(@as(?u2, 0), thinkingRotationFrame(stream, 1_000));
+    try std.testing.expectEqual(@as(?u2, 0), thinkingRotationFrame(stream, 1_499));
+    try std.testing.expectEqual(@as(?u2, 1), thinkingRotationFrame(stream, 1_500));
+    try std.testing.expectEqual(@as(?u2, 1), thinkingRotationFrame(stream, 1_999));
+    try std.testing.expectEqual(@as(?u2, 2), thinkingRotationFrame(stream, 2_000));
+    try std.testing.expectEqual(@as(?u2, 3), thinkingRotationFrame(stream, 2_500));
+    // A full turn spans two displayed seconds.
+    try std.testing.expectEqual(@as(?u2, 0), thinkingRotationFrame(stream, 3_000));
 
     var label_buf: [64]u8 = undefined;
-    const at_relight = buildThinkingLabel(&label_buf, stream, 2_000).?;
-    try std.testing.expectEqualStrings("• Thinking (1s)", at_relight);
+    const at_step = buildThinkingLabel(&label_buf, stream, 2_000).?;
+    try std.testing.expectEqualStrings("• Thinking (1s)", at_step);
 }
 
-test "thinking blink has no clock without a running turn" {
-    try std.testing.expectEqual(@as(?bool, null), thinkingBlinkVisible(.{ .active = true }, 5_000));
+test "thinking rotation has no clock without a running turn" {
+    try std.testing.expectEqual(@as(?u2, null), thinkingRotationFrame(.{ .active = true }, 5_000));
     try std.testing.expectEqual(
-        @as(?bool, null),
-        thinkingBlinkVisible(.{ .active = true, .turn_started_ms = 6_000 }, 5_000),
+        @as(?u2, null),
+        thinkingRotationFrame(.{ .active = true, .turn_started_ms = 6_000 }, 5_000),
+    );
+}
+
+test "thinking rotation stops when the stream is idle or waiting on the user" {
+    const running: StreamState = .{ .active = true, .turn_started_ms = 1_000 };
+    try std.testing.expectEqual(@as(?u2, 0), thinkingRotationFrame(running, 1_000));
+    try std.testing.expectEqual(
+        @as(?u2, null),
+        thinkingRotationFrame(.{ .active = false, .turn_started_ms = 1_000 }, 1_000),
+    );
+    try std.testing.expectEqual(
+        @as(?u2, null),
+        thinkingRotationFrame(.{ .active = true, .turn_started_ms = 1_000, .waiting_since_ms = 1_500 }, 2_000),
     );
 }
 
@@ -303,7 +325,7 @@ test "thinking clock freezes while waiting on user input and excludes the wait" 
     try std.testing.expectEqual(@as(i64, 5_000), stream.waiting_since_ms);
 
     try std.testing.expectEqualStrings("• Thinking (4s)", buildThinkingLabel(&buf, stream, 900_000).?);
-    try std.testing.expectEqual(@as(?bool, true), thinkingBlinkVisible(stream, 900_000));
+    try std.testing.expectEqual(@as(?u2, null), thinkingRotationFrame(stream, 900_000));
 
     syncWaitingClock(&stream, false, 900_000);
     try std.testing.expectEqual(@as(i64, 0), stream.waiting_since_ms);

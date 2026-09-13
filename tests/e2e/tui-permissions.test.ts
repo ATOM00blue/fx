@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { X1_BIN, runx1 } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText as finalText,
@@ -64,16 +64,16 @@ afterEach(async () => {
 function createIsolatedRoot(): IsolatedRoot {
   const tempRoot = existsSync("/private/tmp") ? "/private/tmp" : tmpdir();
   const root = realpathSync(
-    mkdtempSync(join(tempRoot, "fx-file-approval-e2e-")),
+    mkdtempSync(join(tempRoot, "x1-file-approval-e2e-")),
   );
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   const external = join(root, "external");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".x1"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   mkdirSync(external, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".x1", "settings.json"),
     JSON.stringify({
       sandbox: "none",
       permission_mode: "ask",
@@ -98,11 +98,11 @@ function gatewayEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-file-approval-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_PERMISSION_MODE: "ask",
-    FX_AUTO_UPGRADE: "0",
+    X1_GATEWAY_BASE_URL: gateway.baseUrl,
+    X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+    X1_MODEL: FAKE_GATEWAY_MODEL,
+    X1_PERMISSION_MODE: "ask",
+    X1_AUTO_UPGRADE: "0",
     NO_COLOR: "1",
     ...overrides,
   };
@@ -117,7 +117,7 @@ async function launch(
   const stderrPath = join(root.root, "stderr.log");
   writeFileSync(stderrPath, "");
   activeSession = await TmuxSession.create({
-    cmd: FX_BIN,
+    cmd: X1_BIN,
     cwd: root.workspace,
     env: gatewayEnv(root, gateway, envOverrides),
     stderrPath,
@@ -186,7 +186,7 @@ function expectAtomicApprovalExit(tapePath: string, frameStart: number) {
 }
 
 function sessionIdFromHome(root: IsolatedRoot): string {
-  const sessionsRoot = join(root.home, ".fx", "sessions");
+  const sessionsRoot = join(root.home, ".x1", "sessions");
   const sessionIds = readdirSync(sessionsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name !== "latest")
     .map((entry) => entry.name);
@@ -260,7 +260,7 @@ function expectApprovalControls(
   for (const oldCopy of [
     "1. Yes, proceed",
     "2. Yes, and don't ask again",
-    "3. No, and tell fx",
+    "3. No, and tell x1",
     "This action changes files in your workspace.",
   ]) {
     expect(block).not.toContain(oldCopy);
@@ -435,7 +435,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
         root,
         gateway,
         {},
-        { FX_RECORD: tapePath, FX_SYNC_UPDATES: "1" },
+        { X1_RECORD: tapePath, X1_SYNC_UPDATES: "1" },
       );
 
       await session.sendText("Run the file approval pacing fixture.");
@@ -498,10 +498,10 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
         gateway,
         { width: 80, height: 14 },
         {
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "input,permission",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "input,permission",
         },
       );
 
@@ -612,7 +612,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
       const scrollback = await session.captureFullScrollback();
       expect(scrollback).not.toContain("Apply this change?");
       expect(scrollback).not.toContain("+ review-line-15");
-      const replay = await runFx(["replay", tapePath, "--frames"], {
+      const replay = await runx1(["replay", tapePath, "--frames"], {
         cwd: root.workspace,
         env: { HOME: root.home },
       });
@@ -714,7 +714,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
         root,
         gateway,
         { width: 80, height: 30 },
-        { FX_RECORD: tapePath, FX_SYNC_UPDATES: "1" },
+        { X1_RECORD: tapePath, X1_SYNC_UPDATES: "1" },
       );
 
       await session.sendText("Create the short review fixture.");
@@ -726,7 +726,9 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
       });
       expect(approval).not.toContain("Wheel Scroll");
       const grid = await session.capturePaneGrid();
-      expect(grid[0]).toContain("Run /help for commands");
+      expect(grid[0]).toMatch(/┌/);
+      expect(grid.some((row) => row.includes("X1"))).toBe(true);
+      expect(grid.some((row) => row.includes("layerx1.com"))).toBe(true);
       const bottomDividerRow = grid.findLastIndex((row) =>
         /^─+$/.test(row.trim()),
       );
@@ -796,7 +798,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
         required: ["amended-review.txt", "+ amended review content"],
       });
       await session.sendKeys("Tab");
-      await session.waitForText("Apply once, and tell fx what to do next", TIMEOUT);
+      await session.waitForText("Apply once, and tell x1 what to do next", TIMEOUT);
       await session.sendLiteralText(feedback);
       await session.waitForText(`Apply once, ${feedback}`, TIMEOUT);
 
@@ -828,14 +830,14 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
 
       const sessionId = sessionIdFromHome(root);
       const events = readFileSync(
-        join(root.home, ".fx", "sessions", sessionId, "events.jsonl"),
+        join(root.home, ".x1", "sessions", sessionId, "events.jsonl"),
         "utf8",
       );
       expect(events).toContain('"permission_feedback"');
       expect(events).toContain(feedback);
 
       const resumedGateway = startFakeGateway([finalText("amended review resume complete")]);
-      const resumed = await runFx(
+      const resumed = await runx1(
         [
           "ask",
           "--auto",
@@ -1005,7 +1007,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
         root,
         gateway,
         {},
-        { FX_RECORD: tapePath, FX_SYNC_UPDATES: "1" },
+        { X1_RECORD: tapePath, X1_SYNC_UPDATES: "1" },
       );
 
       await launched.session.sendText("Create the cancellation fixture.");
@@ -1082,7 +1084,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
           root,
           gateway,
           { width: 120, height: 40 },
-          { FX_THEME: "dark", NO_COLOR: undefined },
+          { X1_THEME: "dark", NO_COLOR: undefined },
         );
 
         await launched.session.sendText(`Create the ${testCase.name} marker fixture.`);
@@ -1124,7 +1126,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
         const content = "private-value\n";
         writeFileSync(target, content);
         writeFileSync(
-          join(root.home, ".fx", "settings.json"),
+          join(root.home, ".x1", "settings.json"),
           JSON.stringify({
             sandbox: "none",
             permission: {
@@ -1229,7 +1231,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
           root,
           gateway,
           { width: 120, height: 40 },
-          { FX_THEME: theme, NO_COLOR: undefined },
+          { X1_THEME: theme, NO_COLOR: undefined },
         );
 
         await launched.session.sendText(
@@ -1336,7 +1338,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
       const stderrPath = join(root.root, "stderr.log");
       writeFileSync(stderrPath, "");
       activeSession = await TmuxSession.create({
-        cmd: `${FX_BIN} --record`,
+        cmd: `${X1_BIN} --record`,
         cwd: root.workspace,
         env: gatewayEnv(root, gateway),
         stderrPath,
@@ -1411,7 +1413,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
       );
       expectCleanStderr(stderrPath);
 
-      const replay = await runFx(["replay", tapePath, "--frames"], {
+      const replay = await runx1(["replay", tapePath, "--frames"], {
         cwd: root.workspace,
         env: { HOME: root.home },
       });
@@ -1444,7 +1446,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
         root,
         gateway,
         { width: 72, height: 40 },
-        { FX_RECORD: tapePath },
+        { X1_RECORD: tapePath },
       );
 
       await session.sendText("Replace the wrapped fixture value.");
@@ -1483,7 +1485,7 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
 
       expect(session.isAlive()).toBe(true);
       expectCleanStderr(stderrPath);
-      const replay = await runFx(["replay", tapePath, "--frames"], {
+      const replay = await runx1(["replay", tapePath, "--frames"], {
         cwd: root.workspace,
         env: { HOME: root.home },
       });
@@ -1735,8 +1737,8 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
     "hostile path stays encoded through approval transcript changes and undo",
     async () => {
       const root = createIsolatedRoot();
-      const hostileName = "name\x1b]2;FX_PWN\x07\nfile.txt";
-      const encodedName = "name\\x1b]2;FX_PWN\\x07\\x0afile.txt";
+      const hostileName = "name\x1b]2;X1_PWN\x07\nfile.txt";
+      const encodedName = "name\\x1b]2;X1_PWN\\x07\\x0afile.txt";
       const target = join(root.workspace, hostileName);
       const gateway = startFakeGateway([
         toolCall("hostile_write", "write_file", {
@@ -1762,12 +1764,12 @@ describe.skipIf(!tmuxAvailable())("tui: file permissions", () => {
 
       expect(readFileSync(target, "utf8")).toBe("hostile\n");
       expect(settled).toContain(encodedName);
-      expect(settled).not.toContain("\x1b]2;FX_PWN\x07");
+      expect(settled).not.toContain("\x1b]2;X1_PWN\x07");
 
       await session.sendText("/undo");
       settled = await session.waitForText("Deleted", TIMEOUT);
       expect(settled).toContain(encodedName);
-      expect(settled).not.toContain("\x1b]2;FX_PWN\x07");
+      expect(settled).not.toContain("\x1b]2;X1_PWN\x07");
       expect(existsSync(target)).toBe(false);
       expectCleanStderr(stderrPath);
     },

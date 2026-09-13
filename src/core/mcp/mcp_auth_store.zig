@@ -358,7 +358,7 @@ fn openOrCreateLockedDir() !LockedDir {
 fn openOrCreateLockedDirControlled(
     cancel_flag: ?*const std.atomic.Value(bool),
 ) !LockedDir {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var home_dir = io_mod.VerifiedDir{
         .dir = try std.Io.Dir.openDirAbsolute(io_mod.getIo(), home, .{ .iterate = true }),
     };
@@ -397,7 +397,7 @@ fn openExistingLockedDir() !?LockedDir {
 fn openExistingLockedDirControlled(
     cancel_flag: ?*const std.atomic.Value(bool),
 ) !?LockedDir {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var home_dir = io_mod.VerifiedDir{
         .dir = try std.Io.Dir.openDirAbsolute(io_mod.getIo(), home, .{
             .iterate = true,
@@ -467,15 +467,15 @@ fn openExistingPrivateChild(
 fn normalizeAndVerifyPrivateDir(dir: std.Io.Dir) !void {
     const initial = try dir.stat(io_mod.getIo());
     if (initial.kind != .directory) return error.DurablePathUnsafe;
-    if (initial.permissions.toMode() & 0o200 == 0) {
+    if (!io_mod.permissionsWritable(initial.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
     try dir.setPermissions(
         io_mod.getIo(),
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     const stat = try dir.stat(io_mod.getIo());
-    if (stat.kind != .directory or stat.permissions.toMode() & 0o777 != 0o700) {
+    if (stat.kind != .directory or !io_mod.permissionsPrivateDirectory(stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
 }
@@ -551,7 +551,7 @@ fn loadFromDir(alloc: Allocator, dir: *io_mod.VerifiedDir) !?Store {
     defer file.close(io_mod.getIo());
     const stat = try file.stat(io_mod.getIo());
     if (stat.kind != .file or stat.nlink != 1) return error.DurablePathUnsafe;
-    if (stat.permissions.toMode() & 0o777 != 0o600) {
+    if (!io_mod.permissionsPrivateFile(stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
     const bytes = try io_mod.readFileToEnd(alloc, &file, max_store_bytes);
@@ -1089,7 +1089,7 @@ const TestHome = struct {
         };
         errdefer result.map.deinit();
         try result.map.put("HOME", home);
-        try result.map.put("FX_DISABLE_KEYCHAIN", "1");
+        try result.map.put("X1_DISABLE_KEYCHAIN", "1");
         return result;
     }
 
@@ -1426,7 +1426,7 @@ test "credential store is private atomic and supports restart deletion" {
     defer loaded.deinit(alloc);
     try std.testing.expectEqualStrings("access-secret", loaded.access_token);
 
-    var root = try tmp.dir.openDir(std.testing.io, "home/.fx", .{ .iterate = true });
+    var root = try tmp.dir.openDir(std.testing.io, "home/.x1", .{ .iterate = true });
     defer root.close(std.testing.io);
     const root_stat = try root.stat(std.testing.io);
     try std.testing.expectEqual(

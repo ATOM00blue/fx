@@ -24,8 +24,8 @@ const workspace_pathing = @import("../workspace/pathing.zig");
 
 const Allocator = std.mem.Allocator;
 
-const launcher_mode = "--fx-internal-terminal-launcher";
-const control_mode = "--fx-internal-terminal-control";
+const launcher_mode = "--x1-internal-terminal-launcher";
+const control_mode = "--x1-internal-terminal-control";
 
 const max_sessions: usize = 16;
 const max_read_bytes: usize = 64 * 1024;
@@ -41,7 +41,7 @@ const marker_ack_timeout_ms: i64 = tmux_session.marker_acknowledgement_timeout_m
 const command_release_byte: u8 = 2;
 const control_nonce_len: usize = 32;
 const marker_frame_len: usize = control_nonce_len + 1;
-const private_file_permissions = std.Io.File.Permissions.fromMode(0o600);
+const private_file_permissions = io_mod.permissionsFromMode(0o600);
 const default_dimensions: contracts.Dimensions = .{
     .rows = 24,
     .columns = 80,
@@ -323,9 +323,9 @@ pub fn runControlMarker(raw_args: []const [*:0]const u8) !void {
     const tmux_failure = if (std.mem.startsWith(
         u8,
         control_path,
-        "/tmp/fx-tmux-marker-",
+        "/tmp/x1-tmux-marker-",
     ))
-        io_mod.getenv("FX_TERMINAL_TEST_TMUX_MARKER_FAILURE")
+        io_mod.getenv("X1_TERMINAL_TEST_TMUX_MARKER_FAILURE")
     else
         null;
     if (tmux_failure) |failure| {
@@ -947,7 +947,7 @@ const SupportedRegistry = struct {
             return;
         }
 
-        if (io_mod.getenv("FX_TERMINAL_TEST_FAIL_CANCELLATION_OPEN") != null) {
+        if (io_mod.getenv("X1_TERMINAL_TEST_FAIL_CANCELLATION_OPEN") != null) {
             return error.InjectedCancellationOpenFailure;
         }
         const durable = try self.profile.open_terminal(session_id);
@@ -2474,7 +2474,7 @@ fn monitorOperationName(operation_value: contracts.MonitorOperation) []const u8 
 }
 
 fn monitorOperationFailure(operation_name: []const u8, boundary: []const u8) bool {
-    const requested = io_mod.getenv("FX_TERMINAL_TEST_FAIL_MONITOR_OPERATION") orelse
+    const requested = io_mod.getenv("X1_TERMINAL_TEST_FAIL_MONITOR_OPERATION") orelse
         return false;
     var buffer: [64]u8 = undefined;
     const expected = std.fmt.bufPrint(
@@ -2487,14 +2487,14 @@ fn monitorOperationFailure(operation_name: []const u8, boundary: []const u8) boo
 
 fn monitorScreenProjectionAllocationFailure() bool {
     const requested = io_mod.getenv(
-        "FX_TERMINAL_TEST_FAIL_MONITOR_SCREEN_PROJECTION_ALLOCATION",
+        "X1_TERMINAL_TEST_FAIL_MONITOR_SCREEN_PROJECTION_ALLOCATION",
     ) orelse return false;
     return std.mem.eql(u8, requested, "1");
 }
 
 fn monitorOutputScreenProjectionAllocationFailure() bool {
     const requested = io_mod.getenv(
-        "FX_TERMINAL_TEST_FAIL_MONITOR_OUTPUT_SCREEN_PROJECTION_ALLOCATION",
+        "X1_TERMINAL_TEST_FAIL_MONITOR_OUTPUT_SCREEN_PROJECTION_ALLOCATION",
     ) orelse return false;
     return std.mem.eql(u8, requested, "1");
 }
@@ -2996,7 +2996,7 @@ fn monitorSequence(monitor_id: []const u8) ?u64 {
 }
 
 fn monitorInstallFailure(point: []const u8) bool {
-    const requested = io_mod.getenv("FX_TERMINAL_TEST_FAIL_MONITOR_INSTALL") orelse
+    const requested = io_mod.getenv("X1_TERMINAL_TEST_FAIL_MONITOR_INSTALL") orelse
         return false;
     return std.mem.eql(u8, requested, point);
 }
@@ -3570,7 +3570,7 @@ const Session = struct {
             self.tmux_backend = null;
             return err;
         };
-        maybeDelayForTest("FX_TERMINAL_TEST_TMUX_PREPARED_RELEASE_DELAY_MS");
+        maybeDelayForTest("X1_TERMINAL_TEST_TMUX_PREPARED_RELEASE_DELAY_MS");
         self.tmux_backend.?.release() catch |err| {
             self.tmux_backend.?.killSession();
             return err;
@@ -3810,20 +3810,20 @@ const Session = struct {
         const path_suffix = std.fmt.bytesToHex(path_bytes, .lower);
         const control_path = try std.fmt.allocPrint(
             self.alloc,
-            "/tmp/fx-terminal-{s}.sock",
+            "/tmp/x1-terminal-{s}.sock",
             .{path_suffix},
         );
         defer self.alloc.free(control_path);
         const bootstrap_path = try std.fmt.allocPrint(
             self.alloc,
-            "/tmp/fx-terminal-{s}.bootstrap",
+            "/tmp/x1-terminal-{s}.bootstrap",
             .{path_suffix},
         );
         defer self.alloc.free(bootstrap_path);
         const command_path = if (request.command != null)
             try std.fmt.allocPrint(
                 self.alloc,
-                "/tmp/fx-terminal-{s}.command",
+                "/tmp/x1-terminal-{s}.command",
                 .{path_suffix},
             )
         else
@@ -4796,7 +4796,7 @@ const Session = struct {
 
     fn commitStartupBoundary(self: *Session) void {
         if (self.command != null) {
-            maybeDelayForTest("FX_TERMINAL_TEST_COMMAND_BOUNDARY_DELAY_MS");
+            maybeDelayForTest("X1_TERMINAL_TEST_COMMAND_BOUNDARY_DELAY_MS");
         }
         const zio = io_mod.getIo();
         self.mutex.lockUncancelable(zio);
@@ -5157,8 +5157,8 @@ fn writeAction(
     defer session.write_mutex.unlock(zio);
     if (cancelled.load(.acquire)) return error.Cancelled;
     if (request.lease == .use) {
-        signalTestBarrier("FX_TERMINAL_TEST_WRITE_BARRIER_PATH");
-        maybeDelayForTest("FX_TERMINAL_TEST_WRITE_DELAY_MS");
+        signalTestBarrier("X1_TERMINAL_TEST_WRITE_BARRIER_PATH");
+        maybeDelayForTest("X1_TERMINAL_TEST_WRITE_DELAY_MS");
     }
 
     const authorization = switch (request.lease) {
@@ -5485,7 +5485,7 @@ fn resizeAction(
 
 fn tmuxResizeCheckpointFailure() bool {
     const value = io_mod.getenv(
-        "FX_TERMINAL_TEST_TMUX_RESIZE_CHECKPOINT_FAILURE",
+        "X1_TERMINAL_TEST_TMUX_RESIZE_CHECKPOINT_FAILURE",
     ) orelse return false;
     return std.mem.eql(u8, value, "allocation") or
         std.mem.eql(u8, value, "storage") or
@@ -5494,11 +5494,11 @@ fn tmuxResizeCheckpointFailure() bool {
 
 fn tmuxRecoveryFailure(session_id: []const u8, point: []const u8) bool {
     const value = io_mod.getenv(
-        "FX_TERMINAL_TEST_TMUX_RECOVERY_FAILURE",
+        "X1_TERMINAL_TEST_TMUX_RECOVERY_FAILURE",
     ) orelse return false;
     if (!std.mem.eql(u8, value, point)) return false;
     const selected_session = io_mod.getenv(
-        "FX_TERMINAL_TEST_TMUX_RECOVERY_SESSION_ID",
+        "X1_TERMINAL_TEST_TMUX_RECOVERY_SESSION_ID",
     ) orelse return true;
     return std.mem.eql(u8, selected_session, session_id);
 }
@@ -5675,7 +5675,7 @@ test "terminal signaling accepts a process group that exited during descendant d
 }
 
 fn failSignalStageForTest(stage: []const u8) bool {
-    const requested = io_mod.getenv("FX_TERMINAL_TEST_FAIL_SIGNAL_STAGE") orelse
+    const requested = io_mod.getenv("X1_TERMINAL_TEST_FAIL_SIGNAL_STAGE") orelse
         return false;
     return std.mem.eql(u8, requested, stage);
 }
@@ -5705,7 +5705,7 @@ fn closeAction(
         return err;
     };
     if (session.durable.record.backend == .tmux and
-        io_mod.getenv("FX_TERMINAL_TEST_INTERRUPT_CLOSE_AFTER_COMMIT") != null)
+        io_mod.getenv("X1_TERMINAL_TEST_INTERRUPT_CLOSE_AFTER_COMMIT") != null)
     {
         owner.mutex.unlock(zio);
         session.write_mutex.unlock(zio);
@@ -6088,7 +6088,7 @@ fn tmuxControlMain(session: *Session) void {
             }
             if (control.kind == .shell_ready) {
                 maybeDelayForTest(
-                    "FX_TERMINAL_TEST_TMUX_SHELL_READY_HOST_DELAY_MS",
+                    "X1_TERMINAL_TEST_TMUX_SHELL_READY_HOST_DELAY_MS",
                 );
             }
             session.handleControl(control);
@@ -6103,7 +6103,7 @@ fn tmuxControlMain(session: *Session) void {
         thread.join();
         session.output_thread = null;
     }
-    maybeDelayForTest("FX_TERMINAL_TEST_BACKEND_CLEANUP_DELAY_MS");
+    maybeDelayForTest("X1_TERMINAL_TEST_BACKEND_CLEANUP_DELAY_MS");
     const zio = io_mod.getIo();
     session.write_mutex.lockUncancelable(zio);
     if (session.tmux_capture) |stream| stream.close(zio);
@@ -6168,7 +6168,7 @@ fn controlMain(session: *Session) void {
         session.output_thread = null;
     }
 
-    maybeDelayForTest("FX_TERMINAL_TEST_BACKEND_CLEANUP_DELAY_MS");
+    maybeDelayForTest("X1_TERMINAL_TEST_BACKEND_CLEANUP_DELAY_MS");
 
     const zio = io_mod.getIo();
     session.write_mutex.lockUncancelable(zio);
@@ -6465,9 +6465,9 @@ const TestDurableFixture = struct {
             .{ .iterate = true, .follow_symlinks = false },
         ) };
         defer root.close();
-        var fx = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".fx");
-        defer fx.close();
-        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&fx, "sessions");
+        var x1 = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".x1");
+        defer x1.close();
+        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&x1, "sessions");
         defer sessions.close();
         var owner = try io_mod.openOrCreateVerifiedPrivateDir(
             &sessions,

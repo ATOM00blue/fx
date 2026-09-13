@@ -13,28 +13,12 @@ pub const Entry = struct {
 
 pub const entries = [_]Entry{
     .{
-        .id = .gateway,
-        .slug = "vercel",
-        .aliases = &.{ "gateway", "ai-gateway" },
-        .name = "Vercel AI Gateway",
-        .route_name = "Vercel AI Gateway",
-        .description = "Vercel account or AI Gateway billing",
-        .subscription = false,
-    },
-    .{
-        .id = .codex,
-        .slug = "codex",
-        .name = "Codex",
-        .route_name = "Codex subscription",
-        .description = "ChatGPT Plus, Pro, Business, Enterprise, or Edu subscription",
-        .subscription = true,
-    },
-    .{
-        .id = .grok,
-        .slug = "grok",
-        .name = "Grok",
-        .route_name = "Grok subscription",
-        .description = "SuperGrok or X Premium subscription",
+        .id = .layerx1,
+        .slug = "x1",
+        .aliases = &.{"layerx1"},
+        .name = "X1",
+        .route_name = "X1",
+        .description = "X1 platform subscription",
         .subscription = true,
     },
 };
@@ -57,13 +41,14 @@ pub fn label(id: model_provider.ProviderId) []const u8 {
 }
 
 test "auth provider catalog uses the model provider identity and explicit aliases" {
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, parse("vercel").?);
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, parse("gateway").?);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, parse("codex").?);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, parse("grok").?);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, parse("layerx1").?);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, parse("x1").?);
+    try std.testing.expect(parse("vercel") == null);
+    try std.testing.expect(parse("gateway") == null);
+    try std.testing.expect(parse("codex") == null);
+    try std.testing.expect(parse("grok") == null);
     try std.testing.expect(parse("openai-codex") == null);
     try std.testing.expect(parse("chatgpt") == null);
     try std.testing.expect(parse("unknown") == null);
-    try std.testing.expect(find(.codex).subscription);
-    try std.testing.expect(find(.grok).subscription);
+    try std.testing.expect(find(.layerx1).subscription);
 }

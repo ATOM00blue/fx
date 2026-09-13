@@ -35,7 +35,10 @@ extern "c" fn unlockpt(fd: c_int) c_int;
 extern "c" fn ptsname(fd: c_int) ?[*:0]u8;
 
 pub const supports_resize_signal = resize_runtime.supports_resize_signal;
+pub const supports_resize_detection = resize_runtime.supports_resize_detection;
 pub const ResizeHandler = if (builtin.os.tag == .wasi)
+    *const fn () callconv(.c) void
+else if (builtin.os.tag == .windows)
     *const fn () callconv(.c) void
 else
     std.posix.Sigaction.handler_fn;
@@ -54,6 +57,248 @@ pub const PollResult = struct {
 
 pub const CursorPosition = cursor_probe.Position;
 
+const windows_enable_processed_input: u32 = 0x0001;
+const windows_enable_line_input: u32 = 0x0002;
+const windows_enable_echo_input: u32 = 0x0004;
+const windows_enable_virtual_terminal_input: u32 = 0x0200;
+const windows_wait_object_0: u32 = 0;
+const windows_wait_timeout: u32 = 258;
+
+extern "kernel32" fn GetConsoleMode(
+    handle: std.os.windows.HANDLE,
+    mode: *u32,
+) callconv(.winapi) std.os.windows.BOOL;
+extern "kernel32" fn SetConsoleMode(
+    handle: std.os.windows.HANDLE,
+    mode: u32,
+) callconv(.winapi) std.os.windows.BOOL;
+extern "kernel32" fn WaitForSingleObject(
+    handle: std.os.windows.HANDLE,
+    milliseconds: u32,
+) callconv(.winapi) u32;
+
+const WindowsSmallRect = extern struct {
+    left: i16,
+    top: i16,
+    right: i16,
+    bottom: i16,
+};
+
+const WindowsConsoleScreenBufferInfo = extern struct {
+    size: std.os.windows.COORD,
+    cursor_position: std.os.windows.COORD,
+    attributes: u16,
+    window: WindowsSmallRect,
+    maximum_window_size: std.os.windows.COORD,
+};
+
+/// Shared Windows console-control handler. A single
+/// `SetConsoleCtrlHandler` registration serves two independent layers:
+///
+///   * abnormal-exit restore (app_lifecycle): CLOSE, BREAK, LOGOFF, and
+///     SHUTDOWN write the terminal restore bytes and exit, mirroring the
+///     POSIX SIGTERM/SIGHUP abnormal-exit handler's write(2) plus
+///     re-raise;
+///   * headless interrupt (cli_ask): CTRL_C routes into the ask
+///     cancellation flag so headless runs cancel gracefully instead of
+///     dying through the default CRT handler.
+///
+/// Interactive raw mode clears ENABLE_PROCESSED_INPUT, so no CTRL_C_EVENT
+/// is generated while the TUI owns the console and Ctrl+C stays a raw
+/// input byte. A CTRL_C that arrives in cooked mode falls through to the
+/// CRT default disposition, matching POSIX (no SIGINT handler installed
+/// for the interactive app either).
+pub const console_control = if (builtin.os.tag == .windows) struct {
+    const ctrl_c_event: std.os.windows.DWORD = 0;
+    const ctrl_break_event: std.os.windows.DWORD = 1;
+    const ctrl_close_event: std.os.windows.DWORD = 2;
+    const ctrl_logoff_event: std.os.windows.DWORD = 5;
+    const ctrl_shutdown_event: std.os.windows.DWORD = 6;
+
+    /// Termination-like events restore-and-exit with the code a POSIX shell
+    /// reports for a SIGTERM re-raise; Ctrl+Break matches SIGINT's report.
+    const termination_exit_code: u32 = 143;
+    const interrupt_exit_code: u32 = 130;
+
+    const std_output_handle: std.os.windows.DWORD =
+        std.math.maxInt(std.os.windows.DWORD) - 10; // (DWORD)-11
+
+    pub const RequestFn = *const fn () callconv(.c) void;
+
+    extern "kernel32" fn SetConsoleCtrlHandler(
+        handler_routine: ?*const fn (std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL,
+        add: std.os.windows.BOOL,
+    ) callconv(.winapi) std.os.windows.BOOL;
+    extern "kernel32" fn GetStdHandle(
+        n_std_handle: std.os.windows.DWORD,
+    ) callconv(.winapi) std.os.windows.HANDLE;
+    extern "kernel32" fn WriteFile(
+        handle: std.os.windows.HANDLE,
+        buffer: [*]const u8,
+        bytes_to_write: std.os.windows.DWORD,
+        bytes_written: ?*std.os.windows.DWORD,
+        overlapped: ?*anyopaque,
+    ) callconv(.winapi) std.os.windows.BOOL;
+    extern "kernel32" fn ExitProcess(exit_code: u32) callconv(.winapi) noreturn;
+
+    var registered = false;
+    // The restore sequences are comptime constants, so publishing the
+    // pointer (release) after the length is sufficient; a null pointer
+    // means the layer is disarmed.
+    var abnormal_restore_ptr = std.atomic.Value(?[*]const u8).init(null);
+    var abnormal_restore_len: usize = 0;
+    var headless_request = std.atomic.Value(?RequestFn).init(null);
+
+    fn refreshRegistration() void {
+        const needed = abnormal_restore_ptr.load(.acquire) != null or
+            headless_request.load(.acquire) != null;
+        if (needed and !registered) {
+            if (SetConsoleCtrlHandler(&ctrlHandler, .TRUE).toBool()) registered = true;
+        } else if (!needed and registered) {
+            if (SetConsoleCtrlHandler(&ctrlHandler, .FALSE).toBool()) registered = false;
+        }
+    }
+
+    /// Arm or disarm terminal restoration for CLOSE, BREAK, LOGOFF, and
+    /// SHUTDOWN. Passing null disarms the layer.
+    pub fn setAbnormalExitRestore(restore: ?[]const u8) void {
+        if (restore) |bytes| {
+            abnormal_restore_len = bytes.len;
+            abnormal_restore_ptr.store(bytes.ptr, .release);
+        } else {
+            abnormal_restore_ptr.store(null, .release);
+        }
+        refreshRegistration();
+    }
+
+    /// Arm or disarm CTRL_C cancellation routing for headless runs.
+    /// Passing null disarms the layer.
+    pub fn setHeadlessInterruptRequest(request: ?RequestFn) void {
+        headless_request.store(request, .release);
+        refreshRegistration();
+    }
+
+    fn writeRestoreBytes(restore: []const u8) void {
+        const stdout_handle = GetStdHandle(std_output_handle);
+        if (stdout_handle == std.os.windows.INVALID_HANDLE_VALUE or
+            @intFromPtr(stdout_handle) == 0)
+        {
+            return;
+        }
+        var bytes_written: std.os.windows.DWORD = 0;
+        _ = WriteFile(
+            stdout_handle,
+            restore.ptr,
+            @intCast(restore.len),
+            &bytes_written,
+            null,
+        );
+    }
+
+    fn ctrlHandler(ctrl_type: std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL {
+        switch (ctrl_type) {
+            ctrl_c_event => {
+                // Handled only while a headless layer armed cancellation;
+                // otherwise fall through to the CRT default disposition.
+                const request = headless_request.load(.acquire) orelse return .FALSE;
+                request();
+                return .TRUE;
+            },
+            ctrl_break_event,
+            ctrl_close_event,
+            ctrl_logoff_event,
+            ctrl_shutdown_event,
+            => {
+                const restore_ptr = abnormal_restore_ptr.load(.acquire) orelse return .FALSE;
+                // Minimal restore plus exit inside the console-control
+                // time budget, like the POSIX abnormal-exit path.
+                writeRestoreBytes(restore_ptr[0..abnormal_restore_len]);
+                ExitProcess(if (ctrl_type == ctrl_break_event)
+                    interrupt_exit_code
+                else
+                    termination_exit_code);
+            },
+            else => return .FALSE,
+        }
+    }
+} else struct {};
+
+/// Windows has no SIGWINCH; this poller samples the console size on a
+/// named background thread and invokes the installed resize handler,
+/// which notes the resize into the approval interlock exactly like the
+/// POSIX SIGWINCH handler. Install starts the thread; uninstall sets the
+/// stop flag and joins. A process that exits without uninstalling simply
+/// has its poller thread terminated by process exit.
+const windows_resize_poller = if (builtin.os.tag == .windows) struct {
+    const poll_interval_ms: u32 = 250;
+    const wake_slice_ms: u32 = 50;
+    const thread_name = "x1-resize-poller";
+
+    extern "kernel32" fn GetConsoleScreenBufferInfo(
+        handle: std.os.windows.HANDLE,
+        info: *WindowsConsoleScreenBufferInfo,
+    ) callconv(.winapi) std.os.windows.BOOL;
+    extern "kernel32" fn Sleep(milliseconds: std.os.windows.DWORD) callconv(.winapi) void;
+
+    const ConsoleSize = struct { rows: u16, cols: u16 };
+
+    var handler: ?ResizeHandler = null;
+    var poller_thread: ?std.Thread = null;
+    var stop_requested = std.atomic.Value(bool).init(false);
+
+    fn sampleConsoleSize() ?ConsoleSize {
+        var info: WindowsConsoleScreenBufferInfo = undefined;
+        if (!GetConsoleScreenBufferInfo(std.Io.File.stdout().handle, &info).toBool()) {
+            return null;
+        }
+        const rows_signed = @as(i32, info.window.bottom) - @as(i32, info.window.top) + 1;
+        const cols_signed = @as(i32, info.window.right) - @as(i32, info.window.left) + 1;
+        if (rows_signed <= 0 or cols_signed <= 0) return null;
+        return .{ .rows = @intCast(rows_signed), .cols = @intCast(cols_signed) };
+    }
+
+    fn start(resize_handler: ResizeHandler) void {
+        if (poller_thread != null) return;
+        // A redirected stdout has no console to sample and never resizes.
+        if (sampleConsoleSize() == null) return;
+        handler = resize_handler;
+        stop_requested.store(false, .release);
+        poller_thread = std.Thread.spawn(.{}, pollLoop, .{}) catch {
+            handler = null;
+            return;
+        };
+        if (poller_thread) |*thread| thread.setName(io_mod.getIo(), thread_name) catch {};
+    }
+
+    /// The loop never holds a lock: it sleeps in short slices checking the
+    /// stop flag, samples the console only on the poll-interval boundary,
+    /// and the installed handler itself only performs an atomic bit set.
+    fn pollLoop() void {
+        var last = sampleConsoleSize() orelse return;
+        var elapsed_ms: u32 = 0;
+        while (!stop_requested.load(.acquire)) {
+            Sleep(wake_slice_ms);
+            if (stop_requested.load(.acquire)) return;
+            elapsed_ms += wake_slice_ms;
+            if (elapsed_ms < poll_interval_ms) continue;
+            elapsed_ms = 0;
+            const size = sampleConsoleSize() orelse continue;
+            if (size.rows == last.rows and size.cols == last.cols) continue;
+            last = size;
+            if (handler) |resize_handler| resize_handler();
+        }
+    }
+
+    fn stop() void {
+        if (poller_thread) |*thread| {
+            stop_requested.store(true, .release);
+            thread.join();
+            poller_thread = null;
+            handler = null;
+        }
+    }
+} else struct {};
+
 pub const AlternateScreenOwner = enum {
     none,
     file_approval,
@@ -64,14 +309,17 @@ pub const AlternateScreenOwner = enum {
 };
 
 pub const TerminalState = struct {
-    stdin_fd: std.posix.fd_t = std.posix.STDIN_FILENO,
-    original_termios: std.posix.termios = undefined,
+    stdin_fd: std.posix.fd_t = if (builtin.os.tag == .windows)
+        undefined
+    else
+        std.posix.STDIN_FILENO,
+    original_termios: if (builtin.os.tag == .windows) u32 else std.posix.termios = undefined,
     raw_enabled: bool = false,
     alternate_screen_owner: AlternateScreenOwner = .none,
     alternate_frame_layout: frame_layout.CommittedLayoutSnapshot = .{},
     alternate_mouse_tracking_active: bool = false,
     signal_handler_installed: bool = false,
-    old_winch_action: ?std.posix.Sigaction = null,
+    old_winch_action: if (builtin.os.tag == .windows) void else ?std.posix.Sigaction = if (builtin.os.tag == .windows) {} else null,
 
     pub fn fileApprovalScreenActive(self: TerminalState) bool {
         return self.alternate_screen_owner == .file_approval;
@@ -95,6 +343,15 @@ pub const TerminalState = struct {
 
     pub fn ensureInteractive(self: TerminalState) !void {
         if (comptime builtin.os.tag == .wasi) return;
+        if (comptime builtin.os.tag == .windows) {
+            const stdin_file = std.Io.File{ .handle = self.stdin_fd, .flags = .{ .nonblocking = false } };
+            if (!(try stdin_file.isTty(io_mod.getIo())) or
+                !(try std.Io.File.stdout().isTty(io_mod.getIo())))
+            {
+                return error.NotATerminal;
+            }
+            return;
+        }
         if (std.c.isatty(self.stdin_fd) == 0 or std.c.isatty(std.posix.STDOUT_FILENO) == 0) {
             return error.NotATerminal;
         }
@@ -102,11 +359,27 @@ pub const TerminalState = struct {
 
     pub fn captureOriginalTermios(self: *TerminalState) !void {
         if (comptime builtin.os.tag == .wasi) return;
+        if (comptime builtin.os.tag == .windows) {
+            if (!GetConsoleMode(self.stdin_fd, &self.original_termios).toBool()) {
+                return error.NotATerminal;
+            }
+            return;
+        }
         self.original_termios = try std.posix.tcgetattr(self.stdin_fd);
     }
 
     pub fn enableRawMode(self: *TerminalState) !void {
         if (comptime builtin.os.tag == .wasi) {
+            self.raw_enabled = true;
+            return;
+        }
+        if (comptime builtin.os.tag == .windows) {
+            const disabled = windows_enable_processed_input |
+                windows_enable_line_input |
+                windows_enable_echo_input;
+            const mode = (self.original_termios & ~disabled) | windows_enable_virtual_terminal_input;
+            if (!SetConsoleMode(self.stdin_fd, mode).toBool()) return error.NotATerminal;
+            std.Io.File.stdout().enableAnsiEscapeCodes(io_mod.getIo()) catch {};
             self.raw_enabled = true;
             return;
         }
@@ -141,33 +414,46 @@ pub const TerminalState = struct {
 
     pub fn disableRawMode(self: *TerminalState) void {
         if (!self.raw_enabled) return;
-        if (comptime builtin.os.tag != .wasi) {
+        if (comptime builtin.os.tag == .windows) {
+            _ = SetConsoleMode(self.stdin_fd, self.original_termios);
+        } else if (comptime builtin.os.tag != .wasi) {
             std.posix.tcsetattr(self.stdin_fd, .FLUSH, self.original_termios) catch {};
         }
         self.raw_enabled = false;
     }
 
     pub fn installResizeSignal(self: *TerminalState, handler: ResizeHandler) void {
-        if (!supports_resize_signal) return;
+        if (!supports_resize_detection) return;
+        if (comptime builtin.os.tag == .windows) {
+            windows_resize_poller.start(handler);
+            self.signal_handler_installed = true;
+            return;
+        } else {
+            const act: std.posix.Sigaction = .{
+                .handler = .{ .handler = handler },
+                .mask = std.posix.sigemptyset(),
+                .flags = std.posix.SA.RESTART,
+            };
 
-        const act: std.posix.Sigaction = .{
-            .handler = .{ .handler = handler },
-            .mask = std.posix.sigemptyset(),
-            .flags = std.posix.SA.RESTART,
-        };
-
-        var old: std.posix.Sigaction = undefined;
-        std.posix.sigaction(std.posix.SIG.WINCH, &act, &old);
-        self.old_winch_action = old;
-        self.signal_handler_installed = true;
+            var old: std.posix.Sigaction = undefined;
+            std.posix.sigaction(std.posix.SIG.WINCH, &act, &old);
+            self.old_winch_action = old;
+            self.signal_handler_installed = true;
+        }
     }
 
     pub fn uninstallResizeSignal(self: *TerminalState) void {
-        if (!supports_resize_signal or !self.signal_handler_installed) return;
-        if (self.old_winch_action) |old| {
-            std.posix.sigaction(std.posix.SIG.WINCH, &old, null);
+        if (!supports_resize_detection or !self.signal_handler_installed) return;
+        if (comptime builtin.os.tag == .windows) {
+            windows_resize_poller.stop();
+            self.signal_handler_installed = false;
+            return;
+        } else {
+            if (self.old_winch_action) |old| {
+                std.posix.sigaction(std.posix.SIG.WINCH, &old, null);
+            }
+            self.signal_handler_installed = false;
         }
-        self.signal_handler_installed = false;
     }
 
     pub fn queryLayout(self: TerminalState, footer_rows: u16) !Layout {
@@ -250,8 +536,12 @@ pub const TerminalState = struct {
     }
 
     pub fn read(self: TerminalState, out: []u8) !usize {
-        if (comptime builtin.os.tag == .wasi) {
-            return std.Io.File.stdin().readStreaming(io_mod.getIo(), &.{out});
+        if (comptime builtin.os.tag == .wasi or builtin.os.tag == .windows) {
+            const input = if (comptime builtin.os.tag == .windows)
+                std.Io.File{ .handle = self.stdin_fd, .flags = .{ .nonblocking = false } }
+            else
+                std.Io.File.stdin();
+            return input.readStreaming(io_mod.getIo(), &.{out});
         }
         return std.posix.read(self.stdin_fd, out);
     }
@@ -262,6 +552,14 @@ pub const TerminalState = struct {
                 1 => .{ .readable = true },
                 -1 => .{ .hung_up = true },
                 else => .{},
+            };
+        }
+        if (comptime builtin.os.tag == .windows) {
+            const timeout: u32 = if (timeout_ms < 0) std.math.maxInt(u32) else @intCast(timeout_ms);
+            return switch (WaitForSingleObject(self.stdin_fd, timeout)) {
+                windows_wait_object_0 => .{ .readable = true },
+                windows_wait_timeout => .{},
+                else => error.InputPollFailed,
             };
         }
         var fds = [_]std.posix.pollfd{.{
@@ -344,16 +642,7 @@ test "tmux history clear failure does not escape the reset boundary" {
 }
 
 pub fn detectSyncUpdatesEnabled(_: Allocator) bool {
-    const override = io_mod.getenv("FX_SYNC_UPDATES");
-
-    const fallback_override = if (override == null)
-        io_mod.getenv("FLASH_SYNC_UPDATES")
-    else
-        null;
-
-    const term = io_mod.getenv("TERM");
-
-    return syncUpdatesEnabledForValues(override orelse fallback_override, term);
+    return syncUpdatesEnabledForValues(io_mod.getenv("X1_SYNC_UPDATES"), io_mod.getenv("TERM"));
 }
 
 pub fn detectHistoryResetUsesRis(_: Allocator) bool {

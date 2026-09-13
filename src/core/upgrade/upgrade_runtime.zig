@@ -2,6 +2,7 @@ const std = @import("std");
 const io_mod = @import("../shared/io.zig");
 const output_contracts = @import("../output/output_contracts.zig");
 const helpers = @import("upgrade_helpers.zig");
+const auto_upgrade = @import("auto_upgrade.zig");
 const update_target = @import("update_target.zig");
 
 const Allocator = std.mem.Allocator;
@@ -189,11 +190,11 @@ fn upgradeWorkerInner(
     progress.markUpdateFound();
     if (show_progress) io_mod.sleep(found_hold_ns);
 
-    const tmp_base: []const u8 = io_mod.getenv("TMPDIR") orelse "/tmp";
+    const tmp_base: []const u8 = io_mod.tempDir();
     var rand_buf: [8]u8 = undefined;
     io_mod.getIo().random(&rand_buf);
     const rand_hex = std.fmt.bytesToHex(rand_buf, .lower);
-    const tmp_dir = try std.fmt.allocPrint(alloc, "{s}/fx-upgrade-{s}", .{ tmp_base, rand_hex });
+    const tmp_dir = try std.fmt.allocPrint(alloc, "{s}/x1-upgrade-{s}", .{ tmp_base, rand_hex });
     defer alloc.free(tmp_dir);
     defer std.Io.Dir.cwd().deleteTree(io_mod.getIo(), tmp_dir) catch {};
 
@@ -202,10 +203,10 @@ fn upgradeWorkerInner(
         return;
     };
 
-    const archive_path = try std.fmt.allocPrint(alloc, "{s}/fx.tar.gz", .{tmp_dir});
+    const archive_path = try std.fmt.allocPrint(alloc, "{s}/x1.tar.gz", .{tmp_dir});
     defer alloc.free(archive_path);
 
-    const archive_url = try std.fmt.allocPrint(alloc, "{s}/{s}/fx-{s}.tar.gz", .{ cdn_base, target.artifactRef(), helpers.platform });
+    const archive_url = try std.fmt.allocPrint(alloc, "{s}/{s}/x1-{s}.tar.gz", .{ cdn_base, target.artifactRef(), helpers.platform });
     defer alloc.free(archive_url);
 
     var client: std.http.Client = .{ .allocator = alloc, .io = io_mod.getIo() };
@@ -221,7 +222,7 @@ fn upgradeWorkerInner(
     };
     progress.markFinishing();
 
-    const checksum_url = try std.fmt.allocPrint(alloc, "{s}/{s}/fx-{s}.tar.gz.sha256", .{ cdn_base, target.artifactRef(), helpers.platform });
+    const checksum_url = try std.fmt.allocPrint(alloc, "{s}/{s}/x1-{s}.tar.gz.sha256", .{ cdn_base, target.artifactRef(), helpers.platform });
     defer alloc.free(checksum_url);
 
     helpers.verifyChecksum(&client, archive_path, checksum_url) catch |err| {
@@ -237,7 +238,7 @@ fn upgradeWorkerInner(
         return;
     };
 
-    const extracted_bin = try std.fmt.allocPrint(alloc, "{s}/fx", .{tmp_dir});
+    const extracted_bin = try std.fmt.allocPrint(alloc, "{s}/" ++ auto_upgrade.extracted_binary_name, .{tmp_dir});
     defer alloc.free(extracted_bin);
 
     var self_exe_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -364,7 +365,7 @@ fn formatProgressStatusLine(buf: []u8, snapshot: ProgressSnapshot, current: []co
         .found => blk: {
             const latest = latest_label orelse return null;
             var out: std.Io.Writer = .fixed(buf);
-            out.print("fx {s} -> {s}", .{ current, versionLabel(latest) }) catch return out.buffered();
+            out.print("x1 {s} -> {s}", .{ current, versionLabel(latest) }) catch return out.buffered();
             break :blk out.buffered();
         },
         .downloading_known => if (snapshot.total > 0)
@@ -542,7 +543,7 @@ test "formatProgressStatusLine renders found update before download starts" {
     var buf: [128]u8 = undefined;
 
     try std.testing.expectEqualStrings(
-        "fx 0.3.39 -> 0.3.40",
+        "x1 0.3.39 -> 0.3.40",
         formatProgressStatusLine(&buf, .{
             .phase = .found,
             .downloaded = 0,

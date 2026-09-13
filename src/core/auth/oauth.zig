@@ -4,10 +4,7 @@ const secret = @import("secret.zig");
 
 const Allocator = std.mem.Allocator;
 
-// Sign in with Vercel supports exactly openid, email, profile and offline_access,
-// and silently filters anything else. fx only needs identity plus a refresh token,
-// so it asks for those two and nothing more. An earlier `use:ai-gateway` entry was
-// never a real scope: it was dropped on every grant and bought nothing.
+// X1 needs identity plus a refresh token for its browser sign-in flow.
 pub const default_scope = "openid offline_access";
 
 /// Returns the first requested scope the issuer did not grant. A silently reduced
@@ -525,7 +522,7 @@ test "a reduced grant names the scope the issuer withheld" {
         "offline_access",
         missingGrantedScope("openid offline_access", "openid").?,
     );
-    // The scope fx used to request was never advertised, so every grant dropped it.
+    // The scope x1 used to request was never advertised, so every grant dropped it.
     try std.testing.expectEqualStrings(
         "use:ai-gateway",
         missingGrantedScope("openid offline_access use:ai-gateway", "openid offline_access").?,

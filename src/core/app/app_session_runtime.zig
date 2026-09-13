@@ -351,7 +351,7 @@ pub const SessionPreferencePatch = struct {
             .fast_mode = self.fast_mode,
         };
         if (self.model) |model| patch.model_preference = .{
-            .provider = self.provider orelse .gateway,
+            .provider = self.provider orelse .layerx1,
             .model = model,
         };
         return patch;
@@ -3551,7 +3551,7 @@ pub fn Runtime(comptime App: type) type {
                 .upgrade => |version| {
                     const body = try std.fmt.allocPrint(
                         app.alloc,
-                        "fx has been updated to v{s}",
+                        "x1 has been updated to v{s}",
                         .{version},
                     );
                     defer app.alloc.free(body);
@@ -5536,7 +5536,7 @@ test "js-host resume restores transcript context preferences usage and revision"
     defer app.deinit();
     try Runtime(TestApp).configureStartupPreferences(
         &app,
-        .gateway,
+        .layerx1,
         "startup/model",
         .user_global,
         "startup/model",
@@ -5592,7 +5592,7 @@ test "js-host resume store failures and missing records fall back to fresh sessi
         defer app.deinit();
         try Runtime(TestApp).configureStartupPreferences(
             &app,
-            .gateway,
+            .layerx1,
             "fresh/model",
             .user_global,
             "fresh/model",
@@ -5609,7 +5609,7 @@ test "js-host resume store failures and missing records fall back to fresh sessi
         try std.testing.expect(!std.mem.eql(u8, "unusable-session", owner.state.id));
         try std.testing.expectEqual(@as(usize, 0), owner.state.history.len);
         try std.testing.expect(owner.revision == null);
-        try std.testing.expect(std.mem.find(u8, app.transcript.items, "Run /help for commands") != null);
+        try std.testing.expect(std.mem.find(u8, app.transcript.items, "layerx1.com") != null);
     }
 }
 
@@ -5621,7 +5621,7 @@ test "js-host picker request stays unsupported and starts fresh" {
     defer app.deinit();
     try Runtime(TestApp).configureStartupPreferences(
         &app,
-        .gateway,
+        .layerx1,
         "fresh/model",
         .user_global,
         "fresh/model",
@@ -5646,7 +5646,7 @@ test "js-host completed and interrupted turns propagate revisions preserve owner
     defer app.deinit();
     try Runtime(TestApp).configureStartupPreferences(
         &app,
-        .gateway,
+        .layerx1,
         "fresh/model",
         .user_global,
         "fresh/model",
@@ -5713,7 +5713,7 @@ test "js-host preference changes snapshot the updated session preferences" {
     defer app.deinit();
     try Runtime(TestApp).configureStartupPreferences(
         &app,
-        .gateway,
+        .layerx1,
         "fresh/model",
         .user_global,
         "fresh/model",
@@ -5797,7 +5797,7 @@ test "session runtime owns temporary interactive image snapshot capture" {
 }
 
 fn testPaths(alloc: Allocator, tmp: *std.testing.TmpDir) !struct { home: []u8, workspace: []u8 } {
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     return .{
         .home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home"),
@@ -5808,7 +5808,7 @@ fn testPaths(alloc: Allocator, tmp: *std.testing.TmpDir) !struct { home: []u8, w
 fn configureTestPreferences(app: *TestApp) !void {
     try Runtime(TestApp).configureStartupPreferences(
         app,
-        .gateway,
+        .layerx1,
         "configured/model",
         .user_workspace,
         "configured/model",
@@ -6713,7 +6713,7 @@ test "resume falls back to saved command output when replay contains an empty fr
     const saved_output =
         "exit_code=0\n<stdout>\nFALLBACK_STDOUT_MARKER\n</stdout>\n" ++
         "<stderr>\n</stderr>\n";
-    const replay_handle = "fx-command-replay-empty-frame.bin";
+    const replay_handle = "x1-command-replay-empty-frame.bin";
     var empty_replay = [_]u8{0} ** ("FXRPLY01".len + 9);
     @memcpy(empty_replay[0.."FXRPLY01".len], "FXRPLY01");
 
@@ -7402,7 +7402,7 @@ test "resume view persistence waits for main frame and retries failed writes" {
     try loaded.log.dir.dir.createDir(
         std.testing.io,
         "resume-view.bin",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     Runtime(TestApp).persistResumeViewAfterFrame(&app);
     try std.testing.expect(loaded.resume_view_stale);
@@ -7438,7 +7438,7 @@ test "upgrade resume restores active session with the installed version notice" 
     try configureTestPreferences(&app);
     try Runtime(TestApp).configureStartupPreferences(
         &app,
-        .gateway,
+        .layerx1,
         "configured/model",
         .process_override,
         "env/model",
@@ -7468,7 +7468,7 @@ test "upgrade resume restores active session with the installed version notice" 
         .id = 41,
         .path = @constCast("/tmp/resumed.png"),
         .media_type = @constCast("image/png"),
-        .snapshot_path = @constCast("/tmp/fx-session/images/image-41-0123456789abcdef.bin"),
+        .snapshot_path = @constCast("/tmp/x1-session/images/image-41-0123456789abcdef.bin"),
         .snapshot_sha256 = @constCast("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
     }};
     const history = [_]types.HistoryTurn{
@@ -7529,7 +7529,7 @@ test "upgrade resume restores active session with the installed version notice" 
     try std.testing.expectEqualStrings("inspect file", context[1].assistant.user.text);
     try std.testing.expectEqualStrings("run server", context[2].background_command.user.text);
     try std.testing.expectEqual(@as(usize, 3), app.notices.items.len);
-    try std.testing.expectEqualStrings("● fx has been updated to v9.9.9", app.notices.items[0]);
+    try std.testing.expectEqualStrings("● x1 has been updated to v9.9.9", app.notices.items[0]);
     try std.testing.expect(std.mem.find(u8, app.notices.items[1], "older context") != null);
     try std.testing.expect(std.mem.find(u8, app.notices.items[2], "Re-check runtime context") != null);
     try std.testing.expectEqual(@as(usize, 2), app.completed_tool_statuses.items.len);
@@ -7600,7 +7600,7 @@ test "resumed recovery checkpoint replays its unfinished turn once" {
             .assistant_source = @constCast("Partial output before EOF."),
             .cause = .response_interrupted,
             .action = .continuing_response,
-            .authority = .{ .provider = .gateway, .model = @constCast("saved/model") },
+            .authority = .{ .provider = .layerx1, .model = @constCast("saved/model") },
             .requested_fast_mode = false,
             .fast_mode = false,
             .max_provider_attempts = 10,
@@ -8241,7 +8241,7 @@ test "cancelled command presentation survives a persisted session restart" {
             .{ .terminal = .{
                 .id = lifecycle_id,
                 .outcome = .{ .kind = .cancelled, .summary = "Cancelled slow" },
-                .command_artifact_handle = "fx-command-cancelled.log",
+                .command_artifact_handle = "x1-command-cancelled.log",
             } },
             true,
         );
@@ -8275,7 +8275,7 @@ test "cancelled command presentation survives a persisted session restart" {
     try std.testing.expectEqual(@as(usize, 1), resumed.cancelled_command_detail_count);
     try std.testing.expect(resumed.cancelled_command_replayed_output);
     try std.testing.expectEqualStrings(
-        "fx-command-cancelled.log",
+        "x1-command-cancelled.log",
         resumed.cancelled_command_artifact_handle.?,
     );
     try std.testing.expectEqualSlices(
@@ -8376,7 +8376,7 @@ fn expectAuthoritativeCancelledReplayIsSoleArtifact() !void {
         .{ .terminal = .{
             .id = lifecycle_id,
             .outcome = .{ .kind = .cancelled, .summary = "Cancelled" },
-            .command_artifact_handle = "fx-command-cancelled.log",
+            .command_artifact_handle = "x1-command-cancelled.log",
         } },
         true,
     );
@@ -8403,7 +8403,7 @@ fn expectAuthoritativeCancelledReplayIsSoleArtifact() !void {
     };
     try std.testing.expectEqualStrings(descriptor.handle, stored.handle);
     try std.testing.expectEqualStrings(
-        "fx-command-cancelled.log",
+        "x1-command-cancelled.log",
         history[0].interrupted.cancelled_command.?
             .command_artifact_handle orelse return error.TestExpectedArtifactHandle,
     );
@@ -8880,7 +8880,7 @@ test "fresh interactive session retains one writable schema-v3 handle" {
 
     try Runtime(TestApp).configureStartupPreferences(
         &app,
-        .gateway,
+        .layerx1,
         "configured/model",
         .user_workspace,
         "configured/model",
@@ -8954,7 +8954,7 @@ test "combined preference patch writes user defaults cleans legacy fields and ap
         .{paths.workspace},
     );
     defer alloc.free(fixture);
-    var settings_file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/settings.json", .{ .truncate = true });
+    var settings_file = try tmp.dir.createFile(io_mod.getIo(), "home/.x1/settings.json", .{ .truncate = true });
     try settings_file.writeStreamingAll(io_mod.getIo(), fixture);
     settings_file.close(io_mod.getIo());
 
@@ -8989,10 +8989,10 @@ test "combined preference patch writes user defaults cleans legacy fields and ap
 
     var detailed = try config_runtime.loadMergedSettingsDetailed(alloc, paths.workspace);
     defer detailed.deinit(alloc);
-    try std.testing.expectEqualStrings("user/model", detailed.settings.models.get(.gateway).?);
+    try std.testing.expectEqualStrings("user/model", detailed.settings.models.get(.layerx1).?);
     try std.testing.expectEqual(types.ReasoningEffort.literal("high"), detailed.settings.effort.?);
     try std.testing.expectEqual(false, detailed.settings.fast_mode.?);
-    try std.testing.expectEqual(config_runtime.ConfigSource.user_global, detailed.sources.models.get(.gateway));
+    try std.testing.expectEqual(config_runtime.ConfigSource.user_global, detailed.sources.models.get(.layerx1));
     try std.testing.expectEqual(config_runtime.ConfigSource.user_global, detailed.sources.effort);
     try std.testing.expectEqual(config_runtime.ConfigSource.user_global, detailed.sources.fast_mode);
 }
@@ -9250,7 +9250,7 @@ test "session picker current mode filters workspace and all mode includes every 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace-a");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace-b");
     const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -9874,21 +9874,21 @@ const ReconciliationOriginApp = struct {
 };
 
 test "resumed sessions install provider-scoped usage reconciliation authority" {
-    var chatgpt = ReconciliationOriginApp{
-        .auth = .{ .source = .chatgpt_subscription },
-        .selected_provider = .codex,
+    var x1_origin = ReconciliationOriginApp{
+        .auth = .{ .source = .layerx1_subscription },
+        .selected_provider = .layerx1,
     };
-    Runtime(ReconciliationOriginApp).startResumedSessionReconciliation(&chatgpt);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, chatgpt.session.usage.replaced_provider.?);
-    try std.testing.expectEqual(types.CredentialSource.chatgpt_subscription, chatgpt.session.usage.replaced_source.?);
+    Runtime(ReconciliationOriginApp).startResumedSessionReconciliation(&x1_origin);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, x1_origin.session.usage.replaced_provider.?);
+    try std.testing.expectEqual(types.CredentialSource.layerx1_subscription, x1_origin.session.usage.replaced_source.?);
 
     var gateway = ReconciliationOriginApp{
-        .auth = .{ .source = .ai_gateway_api_key },
-        .selected_provider = .gateway,
+        .auth = .{ .source = .layerx1_subscription },
+        .selected_provider = .layerx1,
     };
     Runtime(ReconciliationOriginApp).startResumedSessionReconciliation(&gateway);
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, gateway.session.usage.replaced_provider.?);
-    try std.testing.expectEqual(types.CredentialSource.ai_gateway_api_key, gateway.session.usage.replaced_source.?);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, gateway.session.usage.replaced_provider.?);
+    try std.testing.expectEqual(types.CredentialSource.layerx1_subscription, gateway.session.usage.replaced_source.?);
 }
 
 test "ensureCachedSessionTitle derives from the first prompt and then freezes" {
@@ -9909,7 +9909,7 @@ test "ensureCachedSessionTitle derives from the first prompt and then freezes" {
     try std.testing.expect(Runtime(TestApp).cachedSessionTitle(&app) == null);
 
     try app.session.appendHistoryEntry(alloc, .{ .assistant = .{
-        .user = .{ .text = @constCast("add a session name display to the bottom status row in fx") },
+        .user = .{ .text = @constCast("add a session name display to the bottom status row in x1") },
         .assistant = @constCast("ok"),
         .execution = .{},
     } });

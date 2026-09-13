@@ -1,5 +1,26 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../../core/shared/types.zig");
+
+const WindowsSmallRect = extern struct {
+    left: i16,
+    top: i16,
+    right: i16,
+    bottom: i16,
+};
+
+const WindowsConsoleScreenBufferInfo = extern struct {
+    size: std.os.windows.COORD,
+    cursor_position: std.os.windows.COORD,
+    attributes: u16,
+    window: WindowsSmallRect,
+    maximum_window_size: std.os.windows.COORD,
+};
+
+extern "kernel32" fn GetConsoleScreenBufferInfo(
+    handle: std.os.windows.HANDLE,
+    info: *WindowsConsoleScreenBufferInfo,
+) callconv(.winapi) std.os.windows.BOOL;
 
 pub const interactive_mode_enable_sequence = "\x1b[>4;2m\x1b[>1u\x1b[?2004h\x1b[?7l";
 const tmux_interactive_mode_enable_sequence = "\x1b[>4;2m\x1b[?2004h\x1b[?7l";
@@ -34,14 +55,25 @@ pub fn interactiveModeEnableSequence(tmux: ?[]const u8) []const u8 {
 }
 
 pub fn queryLayout(fd: std.posix.fd_t, footer_rows: u16) !types.Layout {
-    var ws: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
+    if (comptime builtin.os.tag == .windows) {
+        var info: WindowsConsoleScreenBufferInfo = undefined;
+        if (!GetConsoleScreenBufferInfo(std.Io.File.stdout().handle, &info).toBool()) {
+            return error.UnableToReadTerminalSize;
+        }
+        const rows_signed = @as(i32, info.window.bottom) - @as(i32, info.window.top) + 1;
+        const cols_signed = @as(i32, info.window.right) - @as(i32, info.window.left) + 1;
+        if (rows_signed <= 0 or cols_signed <= 0) return error.UnableToReadTerminalSize;
+        return layoutFromSize(@intCast(rows_signed), @intCast(cols_signed), footer_rows);
+    } else {
+        var ws: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
 
-    const req: c_int = @intCast(std.c.T.IOCGWINSZ);
-    const rc = std.c.ioctl(fd, req, &ws);
-    if (rc == -1 or ws.row == 0 or ws.col == 0) {
-        return error.UnableToReadTerminalSize;
+        const req: c_int = @intCast(std.c.T.IOCGWINSZ);
+        const rc = std.c.ioctl(fd, req, &ws);
+        if (rc == -1 or ws.row == 0 or ws.col == 0) {
+            return error.UnableToReadTerminalSize;
+        }
+        return layoutFromSize(ws.row, ws.col, footer_rows);
     }
-    return layoutFromSize(ws.row, ws.col, footer_rows);
 }
 
 pub fn layoutFromSize(rows: u16, cols: u16, footer_rows: u16) !types.Layout {

@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, HAS_API_KEY } from "../evals/eval-helpers";
+import { X1_BIN } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -21,7 +21,7 @@ import {
 } from "./tmux-helpers";
 
 const TMUX_SKIP = !tmuxAvailable();
-const SKIP = TMUX_SKIP || !HAS_API_KEY;
+const SKIP = TMUX_SKIP;
 const TIMEOUT = 30_000;
 
 let session: TmuxSession | null = null;
@@ -37,7 +37,7 @@ afterEach(async () => {
 });
 
 async function launchAndWait(): Promise<TmuxSession> {
-  const root = mkdtempSync(join(tmpdir(), "fx-slash-commands-"));
+  const root = mkdtempSync(join(tmpdir(), "x1-slash-commands-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   mkdirSync(home);
@@ -55,7 +55,7 @@ async function launchNoKeyAndWait(): Promise<{
   terminal: TmuxSession;
   stderrPath: string;
 }> {
-  const root = mkdtempSync(join(tmpdir(), "fx-slash-commands-no-key-"));
+  const root = mkdtempSync(join(tmpdir(), "x1-slash-commands-no-key-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   const stderrPath = join(root, "stderr.log");
@@ -68,10 +68,10 @@ async function launchNoKeyAndWait(): Promise<{
     env: {
       HOME: home,
       AI_GATEWAY_API_KEY: undefined,
-      FX_AUTO_UPGRADE: "0",
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_PERMISSION_MODE: undefined,
-      FX_SKIP_ONBOARDING: "1",
+      X1_AUTO_UPGRADE: "0",
+      X1_DISABLE_KEYCHAIN: "1",
+      X1_PERMISSION_MODE: undefined,
+      X1_SKIP_ONBOARDING: "1",
       VERCEL_OIDC_TOKEN: undefined,
     },
   });
@@ -94,7 +94,7 @@ describe.skipIf(TMUX_SKIP)("tui: no-key slash commands", () => {
   test(
     "/undo refuses an unavailable copy preimage before exposing older history",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-undo-unavailable-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-undo-unavailable-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
@@ -129,13 +129,13 @@ describe.skipIf(TMUX_SKIP)("tui: no-key slash commands", () => {
           HOME: home,
           AI_GATEWAY_API_KEY: "undo-e2e-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_PERMISSION_MODE: "yolo",
+          X1_AUTO_UPGRADE: "0",
+          X1_DISABLE_KEYCHAIN: "1",
+          X1_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+          X1_GATEWAY_BASE_URL: gateway.baseUrl,
+          X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+          X1_MODEL: FAKE_GATEWAY_MODEL,
+          X1_PERMISSION_MODE: "yolo",
         },
       });
       await session.waitForComposer(10_000);
@@ -160,7 +160,7 @@ describe.skipIf(TMUX_SKIP)("tui: no-key slash commands", () => {
       expect(await session.captureFullScrollback()).toContain("older.txt");
       expect(existsSync(olderPath)).toBe(false);
       expect(readFileSync(destinationPath, "utf8")).toBe("small source");
-      expect(await session.waitForComposer(5_000)).toContain("Run /help for commands");
+      expect(await session.waitForComposer(5_000)).toContain("layerx1.com");
       expect(readFileSync(stderrPath, "utf8")).toBe("");
     },
     TIMEOUT,
@@ -194,7 +194,7 @@ describe.skipIf(TMUX_SKIP)("tui: no-key slash commands", () => {
   test(
     "compact status notice preserves native scrollback",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-status-compact-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-status-compact-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const stderrPath = join(root, "stderr.log");
@@ -212,17 +212,17 @@ describe.skipIf(TMUX_SKIP)("tui: no-key slash commands", () => {
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: "status-compact-key",
-          FX_AUTO_UPGRADE: "0",
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_PERMISSION_MODE: "auto",
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
+          X1_AUTO_UPGRADE: "0",
+          X1_DISABLE_KEYCHAIN: "1",
+          X1_PERMISSION_MODE: "auto",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
           VERCEL_OIDC_TOKEN: undefined,
           NO_COLOR: "1",
         },
       });
       await session.waitForComposer(10_000);
-      expect((await session.captureFullScrollback()).split("Run /help for commands")).toHaveLength(2);
+      expect((await session.captureFullScrollback()).split("layerx1.com")).toHaveLength(2);
 
       await session.sendText("/status");
       await session.waitForText("agent_step_limit=", 5_000);
@@ -230,7 +230,7 @@ describe.skipIf(TMUX_SKIP)("tui: no-key slash commands", () => {
       const scrollback = await session.captureFullScrollback();
 
       for (const field of [
-        "Run /help for commands",
+        "layerx1.com",
         "auth_refreshable=",
         "permission_mode=auto",
       ]) {
@@ -243,7 +243,7 @@ describe.skipIf(TMUX_SKIP)("tui: no-key slash commands", () => {
       expect(await session.waitForSessionEnd(5_000)).toBe(true);
       session = null;
 
-      const replay = JSON.parse(execFileSync(FX_BIN, ["replay", tapePath, "--json"], {
+      const replay = JSON.parse(execFileSync(X1_BIN, ["replay", tapePath, "--json"], {
         encoding: "utf8",
       }));
       expect(replay.frame_count).toBeGreaterThan(0);

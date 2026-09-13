@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const runtime_profile = @import("../hosts/runtime_profile.zig");
 const app_permission_runtime = @import("app_permission_runtime.zig");
 const app_session_runtime = @import("app_session_runtime.zig");
@@ -18,6 +19,8 @@ const settings_catalog = @import("../config/settings_catalog.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const feedback_runtime = @import("../feedback/runtime.zig");
 const output_contracts = @import("../output/output_contracts.zig");
+
+extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) u32;
 const diagnostics = @import("../workspace/diagnostics.zig");
 const workspace_commands = @import("../workspace/workspace_commands.zig");
 const image_commands = @import("../images/image_commands.zig");
@@ -146,13 +149,13 @@ fn formatMcpIssuerMismatch(
             try std.json.Stringify.value(returned.bytes, .{}, &out.writer);
             try out.writer.writeAll(". Add \"oauth\":{\"issuer\":");
             try std.json.Stringify.value(returned.bytes, .{}, &out.writer);
-            try out.writer.writeAll("} to this server's entry in ~/.fx/mcp.json and retry.");
+            try out.writer.writeAll("} to this server's entry in ~/.x1/mcp.json and retry.");
         },
         .authorization_response => {
             try out.writer.writeAll(" but the authorization response returned issuer ");
             try std.json.Stringify.value(returned.bytes, .{}, &out.writer);
             try out.writer.writeAll(
-                ". fx stopped before token exchange. Contact the MCP server provider; changing oauth.issuer is not a safe workaround.",
+                ". x1 stopped before token exchange. Contact the MCP server provider; changing oauth.issuer is not a safe workaround.",
             );
         },
     }
@@ -537,14 +540,14 @@ pub fn Handlers(comptime App: type) type {
                 try app.writeDomainNotice(.{
                     .topic = "",
                     .tone = .neutral,
-                    .body = "Opened https://fx.sh/feedback.",
+                    .body = "Opened https://layerx1.com/feedback.",
                 }, true);
                 return;
             }
             try app.writeDomainNotice(.{
                 .topic = "",
                 .tone = .@"error",
-                .body = "Could not open https://fx.sh/feedback. Open it manually.",
+                .body = "Could not open https://layerx1.com/feedback. Open it manually.",
             }, true);
         }
 
@@ -563,7 +566,6 @@ pub fn Handlers(comptime App: type) type {
             };
             defer app.alloc.free(report);
 
-            const builtin = @import("builtin");
             const report_path: ?[]u8 = writeTraceReportFile(app.alloc, report) catch null;
             defer if (report_path) |path| app.alloc.free(path);
             const disposition: TraceReportDisposition = if (report_path) |path| blk: {
@@ -1058,7 +1060,7 @@ pub fn Handlers(comptime App: type) type {
             if (scope == .session) {
                 return app.session.usage.reportSnapshot(app.alloc);
             }
-            const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+            const home = io_mod.homeDir() orelse return error.HomeNotSet;
             const availability = try app.session.ensureProfileUsageReadable(
                 app.alloc,
                 home,
@@ -1140,7 +1142,7 @@ pub fn Handlers(comptime App: type) type {
         fn commandHandleMcp(ctx: *anyopaque, rest: []const u8) !void {
             const app: *App = @ptrCast(@alignCast(ctx));
             const result = try app.mcpCommandProvider().handle(app.alloc, rest, .{
-                .home = io_mod.getenv("HOME"),
+                .home = io_mod.homeDir(),
                 .list_ctx = @ptrCast(app),
                 .summarize_servers = summarizeMcpServers,
                 .list_servers_and_tools = listMcpServersAndTools,
@@ -1699,6 +1701,10 @@ pub fn Handlers(comptime App: type) type {
                 else
                     null,
                 .tenant = app.auth.gatewayTeam(),
+                .account_id = if (comptime @hasDecl(@TypeOf(app.auth), "accountId"))
+                    app.auth.accountId()
+                else
+                    null,
             });
             defer snapshot.deinit(app.alloc);
             const text = snapshot.renderInteractiveBody(app.alloc) catch {
@@ -1804,15 +1810,14 @@ pub fn Handlers(comptime App: type) type {
 const trace_transcript_max_line_bytes: usize = 300;
 
 fn traceFilePermissions() std.Io.File.Permissions {
-    const builtin = @import("builtin");
     return switch (builtin.os.tag) {
         .windows => .default_file,
-        else => std.Io.File.Permissions.fromMode(0o600),
+        else => io_mod.permissionsFromMode(0o600),
     };
 }
 
 fn writeTraceReportFile(alloc: std.mem.Allocator, contents: []const u8) ![]u8 {
-    const tmp_dir = io_mod.getenv("TMPDIR") orelse "/tmp";
+    const tmp_dir = io_mod.tempDir();
     const trimmed = std.mem.trimEnd(u8, tmp_dir, "/");
     const now_ms = io_mod.milliTimestamp();
     const now_secs: i64 = @max(@divFloor(now_ms, 1000), 0);
@@ -1825,7 +1830,7 @@ fn writeTraceReportFile(alloc: std.mem.Allocator, contents: []const u8) ![]u8 {
         var random_bytes: [6]u8 = undefined;
         io_mod.getIo().random(&random_bytes);
         const random_hex = std.fmt.bytesToHex(random_bytes, .lower);
-        const path = try std.fmt.allocPrint(alloc, "{s}/fx-trace-{d}-{d:0>2}-{d:0>2}-{d:0>2}{d:0>2}{d:0>2}-{s}.md", .{
+        const path = try std.fmt.allocPrint(alloc, "{s}/x1-trace-{d}-{d:0>2}-{d:0>2}-{d:0>2}{d:0>2}{d:0>2}-{s}.md", .{
             trimmed,
             year_day.year,
             month_day.month.numeric(),
@@ -1859,12 +1864,11 @@ fn writeTraceReportFile(alloc: std.mem.Allocator, contents: []const u8) ![]u8 {
 
 fn buildTraceReport(app: anytype) ![]u8 {
     const App = @TypeOf(app.*);
-    const builtin = @import("builtin");
 
     var out: std.Io.Writer.Allocating = .init(app.alloc);
     defer out.deinit();
 
-    try out.writer.writeAll("# fx trace\n\n");
+    try out.writer.writeAll("# x1 trace\n\n");
     try out.writer.writeAll("Private diagnostic report. It may include prompts, file paths, command output, and file snippets.\n\n");
 
     try out.writer.writeAll("## Summary\n");
@@ -1911,7 +1915,7 @@ fn buildTraceReport(app: anytype) ![]u8 {
         try out.writer.writeAll("\n## Transcript Timeline\n(empty)\n");
     }
 
-    const trace_path: ?[]const u8 = debug_trace.activeLogPath() orelse io_mod.getenv("FX_TRACE_LOG");
+    const trace_path: ?[]const u8 = debug_trace.activeLogPath() orelse io_mod.getenv("X1_TRACE_LOG");
     if (trace_path) |path| {
         try writeTraceLogTail(&out.writer, app.alloc, path);
     }
@@ -2033,29 +2037,32 @@ fn writeCurrentStateSummary(writer: *std.Io.Writer, app: anytype, alloc: std.mem
 }
 
 fn writeProcessSummary(writer: *std.Io.Writer, alloc: std.mem.Allocator) !void {
-    const pid = std.c.getpid();
-    try writer.print("process: pid={d}", .{pid});
-    if (countOpenFileDescriptors()) |fd_count| try writer.print(" open_fds={d}", .{fd_count});
-    try writer.writeByte('\n');
+    if (comptime builtin.os.tag == .windows) {
+        try writer.print("process: pid={d}\n", .{GetCurrentProcessId()});
+    } else {
+        const pid = std.c.getpid();
+        try writer.print("process: pid={d}", .{pid});
+        if (countOpenFileDescriptors()) |fd_count| try writer.print(" open_fds={d}", .{fd_count});
+        try writer.writeByte('\n');
 
-    const ps = processMemorySnapshot(alloc, pid) catch null;
-    if (ps) |text| {
-        defer alloc.free(text);
-        const trimmed = std.mem.trim(u8, text, " \t\r\n");
-        if (trimmed.len > 0) {
-            try writer.writeAll("process_memory:\n");
-            var it = std.mem.splitScalar(u8, trimmed, '\n');
-            while (it.next()) |line| {
-                try writer.writeAll("  ");
-                try writer.writeAll(std.mem.trimEnd(u8, line, " \t\r"));
-                try writer.writeByte('\n');
+        const ps = processMemorySnapshot(alloc, pid) catch null;
+        if (ps) |text| {
+            defer alloc.free(text);
+            const trimmed = std.mem.trim(u8, text, " \t\r\n");
+            if (trimmed.len > 0) {
+                try writer.writeAll("process_memory:\n");
+                var it = std.mem.splitScalar(u8, trimmed, '\n');
+                while (it.next()) |line| {
+                    try writer.writeAll("  ");
+                    try writer.writeAll(std.mem.trimEnd(u8, line, " \t\r"));
+                    try writer.writeByte('\n');
+                }
             }
         }
     }
 }
 
 fn countOpenFileDescriptors() ?usize {
-    const builtin = @import("builtin");
     const fd_dir = switch (builtin.os.tag) {
         .linux => "/proc/self/fd",
         .macos => "/dev/fd",
@@ -2088,8 +2095,8 @@ fn processMemorySnapshot(alloc: std.mem.Allocator, pid: std.c.pid_t) ![]u8 {
 }
 
 fn writeDebugEnvSummary(writer: *std.Io.Writer, alloc: std.mem.Allocator) !void {
-    try writer.print("FX_TRACE: {s}\n", .{if (envTruthy("FX_TRACE")) "on" else "off"});
-    if (debug_trace.activeLogPath() orelse io_mod.getenv("FX_TRACE_LOG")) |path| {
+    try writer.print("X1_TRACE: {s}\n", .{if (envTruthy("X1_TRACE")) "on" else "off"});
+    if (debug_trace.activeLogPath() orelse io_mod.getenv("X1_TRACE_LOG")) |path| {
         try writer.writeAll("trace_log: ");
         try writeMaskedInline(writer, alloc, path);
         try writer.writeByte('\n');
@@ -3453,7 +3460,7 @@ const McpCommandFakeApp = struct {
             .display = .{
                 .line = try alloc.dupe(
                     u8,
-                    "Waiting for MCP authentication for 'fixture'. You can continue using fx while the browser flow completes.",
+                    "Waiting for MCP authentication for 'fixture'. You can continue using x1 while the browser flow completes.",
                 ),
             },
         };
@@ -3747,7 +3754,7 @@ test "trace report file uses private randomized markdown path" {
     defer alloc.free(path);
     defer std.Io.Dir.deleteFileAbsolute(std.testing.io, path) catch {};
 
-    try std.testing.expect(std.mem.find(u8, path, "fx-trace-") != null);
+    try std.testing.expect(std.mem.find(u8, path, "x1-trace-") != null);
     try std.testing.expect(std.mem.endsWith(u8, path, ".md"));
 
     var file = try std.Io.Dir.openFileAbsolute(std.testing.io, path, .{});
@@ -3774,7 +3781,7 @@ test "trace auth summary preserves missing and loaded status text" {
 
     var credential = credentials.Credential{
         .token = try alloc.dupe(u8, "token"),
-        .source = .fx_login,
+        .source = .layerx1_subscription,
     };
     defer credential.deinit(alloc);
     _ = app.auth.adoptCredential(alloc, &credential);
@@ -3782,7 +3789,7 @@ test "trace auth summary preserves missing and loaded status text" {
     defer loaded.deinit();
     try writeAuthStateSummary(&loaded.writer, &app);
     try std.testing.expectEqualStrings(
-        "auth: source=fx login refreshable=true gateway_team=unset\n",
+        "auth: source=X1 subscription refreshable=true gateway_team=unset\n",
         loaded.written(),
     );
 }
@@ -3826,7 +3833,7 @@ test "trace successful tool calls use compact result previews" {
     var call: diagnostics.ToolCallMetric = .{ .started_at_ms = 3000, .duration_ms = 1, .ok = true };
     call.setName("read_file");
     call.setArgs("{\"path\":\"README.md\"}");
-    call.setResult("<path>README.md</path>\n<content>\n# fx\n\nlong body line\n</content>");
+    call.setResult("<path>README.md</path>\n<content>\n# x1\n\nlong body line\n</content>");
     diagnostics.recordToolCall(call);
 
     var out: std.Io.Writer.Allocating = .init(alloc);
@@ -3835,7 +3842,7 @@ test "trace successful tool calls use compact result previews" {
     const text = out.written();
 
     try std.testing.expect(std.mem.find(u8, text, "recent successes (compact):") != null);
-    try std.testing.expect(std.mem.find(u8, text, "result_preview: # fx") != null);
+    try std.testing.expect(std.mem.find(u8, text, "result_preview: # x1") != null);
     try std.testing.expect(std.mem.find(u8, text, "<path>README.md</path>") == null);
     try std.testing.expect(std.mem.find(u8, text, "long body line") == null);
 }
@@ -4067,7 +4074,7 @@ test "app_commands preserves command display after implicit MCP reload" {
     try std.testing.expectEqualStrings("mcp", app.last_topic.?);
     try std.testing.expectEqual(types.NoticeTone.neutral, app.last_tone.?);
     try std.testing.expectEqualStrings(
-        "Waiting for MCP authentication for 'fixture'. You can continue using fx while the browser flow completes.",
+        "Waiting for MCP authentication for 'fixture'. You can continue using x1 while the browser flow completes.",
         app.notice_body.items,
     );
     try Handlers(McpCommandFakeApp).collectMcpAuthenticationFacts(&app);
@@ -4186,7 +4193,7 @@ test "skills list opens menu without transcript inventory" {
             .name = "managed",
             .description = "managed skill",
             .path = "/tmp/managed/SKILL.md",
-            .source = .global_fx,
+            .source = .global_x1,
         },
         .{
             .name = "workspace",
@@ -4248,7 +4255,7 @@ test "skills show focuses matching menu row without transcript body" {
             .name = "managed",
             .description = "managed skill",
             .path = "/tmp/managed/SKILL.md",
-            .source = .global_fx,
+            .source = .global_x1,
         },
         .{
             .name = "workspace",
@@ -4278,7 +4285,7 @@ test "skills show exposes duplicate rows without focusing a precedence winner" {
             .name = "review",
             .description = "managed review",
             .path = "/tmp/managed/review",
-            .source = .global_fx,
+            .source = .global_x1,
         },
         .{
             .name = "review",
@@ -4309,12 +4316,12 @@ test "skills remove prefers a managed match after a workspace duplicate" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try writeTempSkillFile(&tmp, "home/.fx/skills/review/SKILL.md", "---\nname: review\n---\nmanaged body\n");
+    try writeTempSkillFile(&tmp, "home/.x1/skills/review/SKILL.md", "---\nname: review\n---\nmanaged body\n");
     try writeTempSkillFile(&tmp, "home/workspace/.agents/skills/review/SKILL.md", "---\nname: review\n---\nworkspace body\n");
 
-    const managed_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const managed_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.x1/skills");
     defer alloc.free(managed_root);
-    const managed_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills/review");
+    const managed_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.x1/skills/review");
     defer alloc.free(managed_skill);
     const workspace_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace/.agents/skills/review");
     defer alloc.free(workspace_skill);
@@ -4329,7 +4336,7 @@ test "skills remove prefers a managed match after a workspace duplicate" {
             .name = "review",
             .description = "managed review",
             .path = managed_skill,
-            .source = .global_fx,
+            .source = .global_x1,
         },
     };
     var app = SkillsInstallReplayApp{
@@ -4346,7 +4353,7 @@ test "skills remove prefers a managed match after a workspace duplicate" {
     try std.testing.expectEqual(@as(usize, 2), app.reload_count);
     try std.testing.expectError(
         error.FileNotFound,
-        tmp.dir.access(io_mod.getIo(), "home/.fx/skills/review", .{}),
+        tmp.dir.access(io_mod.getIo(), "home/.x1/skills/review", .{}),
     );
     try tmp.dir.access(io_mod.getIo(), "home/workspace/.agents/skills/review/SKILL.md", .{});
 }
@@ -4357,7 +4364,7 @@ test "skills show missing name keeps not found notice" {
         .name = "managed",
         .description = "managed skill",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = SkillsInstallReplayApp{ .alloc = alloc, .skills = .{ .items = @constCast(&skills) } };
     defer app.deinit();

@@ -149,11 +149,11 @@ function isCanonicalBuiltin(name: string): boolean {
   );
 }
 
-function isFxOwnedSystemText(text: string): boolean {
+function isx1OwnedSystemText(text: string): boolean {
   return text.startsWith("# Identity and context\n") ||
-    /^You are a (?:read-only )?(?:Explore|Plan|Verify|Web) subagent inside fx\./.test(text) ||
+    /^You are a (?:read-only )?(?:Explore|Plan|Verify|Web) subagent inside x1\./.test(text) ||
     text === WEB_SEARCH_GUIDANCE ||
-    text.startsWith("<fx-turn-context>") ||
+    text.startsWith("<x1-turn-context>") ||
     text.startsWith("Runtime context:");
 }
 
@@ -179,7 +179,7 @@ export function fxOwnedGuidanceFragments(request: GatewayRequest): GuidanceFragm
   for (const [index, message] of (request.prompt ?? []).entries()) {
     if (message.role !== "system") continue;
     const text = contentText(message.content);
-    if (isFxOwnedSystemText(text)) {
+    if (isx1OwnedSystemText(text)) {
       fragments.push({ source: `system[${index}]`, text });
     }
   }

@@ -29,6 +29,7 @@ const expectBodyContains = test_support.expectBodyContains;
 const expectBodyNotContains = test_support.expectBodyNotContains;
 const expectBodyContainsInOrder = test_support.expectBodyContainsInOrder;
 const expectGatewayPromptFinalUserText = test_support.expectGatewayPromptFinalUserText;
+const requestMessageItems = test_support.requestMessageItems;
 const readTraceFile = test_support.readTraceFile;
 const logIndex = test_support.logIndex;
 const toolCall = test_support.toolCall;
@@ -76,20 +77,22 @@ fn expectGatewayPromptRoleContentKinds(gateway: *const FakeGateway, index: usize
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
+    const instructions = parsed.value.object.get("instructions") orelse return error.TestExpectedPromptMessageMissing;
+    try std.testing.expect(instructions == .string);
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
     for (prompt) |entry| {
         try std.testing.expect(entry == .object);
-        const role = entry.object.get("role") orelse return error.TestExpectedPromptRoleMissing;
-        try std.testing.expect(role == .string);
-        const content = entry.object.get("content") orelse return error.TestExpectedPromptMessageMissing;
-        if (std.mem.eql(u8, role.string, "system")) {
-            try std.testing.expect(content == .string);
-        } else if (std.mem.eql(u8, role.string, "user") or
-            std.mem.eql(u8, role.string, "assistant") or
-            std.mem.eql(u8, role.string, "tool"))
-        {
+        if (entry.object.get("role")) |role| {
+            try std.testing.expect(role == .string);
+            const content = entry.object.get("content") orelse return error.TestExpectedPromptMessageMissing;
             try std.testing.expect(content == .array);
-        } else {
+            continue;
+        }
+        const entry_type = entry.object.get("type") orelse return error.TestExpectedPromptRoleMissing;
+        if (entry_type != .string or
+            (!std.mem.eql(u8, entry_type.string, "function_call") and
+                !std.mem.eql(u8, entry_type.string, "function_call_output")))
+        {
             return error.TestUnexpectedPromptRole;
         }
     }
@@ -388,7 +391,7 @@ test "processQueuedPrompt projects no-output interrupted turn as closed before f
     };
     try expectBodyContainsInOrder(&gateway, 0, &expected_order);
     try expectBodyNotContains(&gateway, 0, session_runtime.aborted_tool_output);
-    try expectBodyNotContains(&gateway, 0, "\"toolCallId\"");
+    try expectBodyNotContains(&gateway, 0, "\"call_id\"");
     try expectBodyNotContains(&gateway, 0, removed_direct_question_guidance);
     try expectBodyNotContains(&gateway, 0, removed_resume_guidance);
 
@@ -477,8 +480,8 @@ test "processQueuedPrompt persists interrupted turn with aborted tool output for
 
     try expectBodyContains(&follow_gateway, 0, "<turn_aborted>");
     try expectBodyContains(&follow_gateway, 0, session_runtime.aborted_tool_output);
-    try expectBodyContains(&follow_gateway, 0, "\"toolName\":\"browser_snapshot\"");
-    try expectBodyContains(&follow_gateway, 0, "\"toolCallId\":\"call_browser\"");
+    try expectBodyContains(&follow_gateway, 0, "\"name\":\"browser_snapshot\"");
+    try expectBodyContains(&follow_gateway, 0, "\"call_id\":\"call_browser\"");
     try expectBodyNotContains(&follow_gateway, 0, "Continue from where you left off.");
     try expectBodyNotContains(&follow_gateway, 0, removed_direct_question_guidance);
     try expectBodyNotContains(&follow_gateway, 0, removed_resume_guidance);
@@ -495,7 +498,7 @@ test "processQueuedPrompt retains cancelled command replay in interrupted histor
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -519,8 +522,8 @@ test "processQueuedPrompt retains cancelled command replay in interrupted histor
     defer debug_trace.resetForTest();
     try debug_trace.configureForTestWithScopes(alloc, trace_path, "interrupt");
 
-    const artifact_path = "/tmp/session/logs/commands/fx-command-cancelled.log";
-    const artifact_handle = "fx-command-cancelled.log";
+    const artifact_path = "/tmp/session/logs/commands/x1-command-cancelled.log";
+    const artifact_handle = "x1-command-cancelled.log";
     const result_output = "RESULT-ONLY-OUTPUT-SENTINEL\nTERM-TAIL-SENTINEL\n";
     const result_json =
         "{\"kind\":\"foreground\",\"command\":\"sleep 5\",\"cwd\":\"/tmp/RESULT-JSON-ONLY-SENTINEL\",\"exit_code\":null,\"signal\":15,\"timed_out\":false,\"duration_ms\":7,\"stdout_bytes\":49,\"stderr_bytes\":0,\"truncated\":false,\"output_file\":\"" ++ artifact_path ++ "\",\"stdout_file\":null,\"stderr_file\":null}";
@@ -623,8 +626,8 @@ test "processQueuedPrompt retains cancelled command replay in interrupted histor
 
     try expectBodyContains(&follow_gateway, 0, "<turn_aborted>");
     try expectBodyContains(&follow_gateway, 0, session_runtime.aborted_tool_output);
-    try expectBodyContains(&follow_gateway, 0, "\"toolName\":\"terminal\"");
-    try expectBodyContains(&follow_gateway, 0, "\"toolCallId\":\"call_cancelled_command\"");
+    try expectBodyContains(&follow_gateway, 0, "\"name\":\"terminal\"");
+    try expectBodyContains(&follow_gateway, 0, "\"call_id\":\"call_cancelled_command\"");
     try expectBodyNotContains(&follow_gateway, 0, "RESULT-ONLY-OUTPUT-SENTINEL");
     try expectBodyNotContains(&follow_gateway, 0, "RESULT-JSON-ONLY-SENTINEL");
     try expectBodyNotContains(&follow_gateway, 0, "TERM-TAIL-SENTINEL");
@@ -716,8 +719,8 @@ test "processQueuedPrompt cancellation during permission persists active tool ca
 
     try expectBodyContains(&follow_gateway, 0, "<turn_aborted>");
     try expectBodyContains(&follow_gateway, 0, session_runtime.aborted_tool_output);
-    try expectBodyContains(&follow_gateway, 0, "\"toolName\":\"write_file\"");
-    try expectBodyContains(&follow_gateway, 0, "\"toolCallId\":\"call_write\"");
+    try expectBodyContains(&follow_gateway, 0, "\"name\":\"write_file\"");
+    try expectBodyContains(&follow_gateway, 0, "\"call_id\":\"call_write\"");
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, follow_gateway.request_bodies.items[0], "<turn_aborted>"));
 }
 
@@ -742,7 +745,7 @@ test "interrupted write follow-up defers write_file until explicit continue" {
     try runFakePrompt(&follow_gateway, &follow_hooks, follow_fixture.config(), follow_job);
 
     try expectBodyContains(&follow_gateway, 0, "<turn_aborted>");
-    try expectBodyContains(&follow_gateway, 0, "\"toolName\":\"write_file\"");
+    try expectBodyContains(&follow_gateway, 0, "\"name\":\"write_file\"");
     try std.testing.expectEqual(@as(usize, 0), follow_hooks.executed_names.items.len);
 
     const continue_calls = [_]ToolCall{write_call};

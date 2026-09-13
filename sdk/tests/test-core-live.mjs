@@ -3,30 +3,29 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxAgent, supportsJspi } from "../node.js";
+import { createX1Agent, supportsJspi } from "../node.js";
 
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultWasm = resolve(scriptDir, "../../zig-out/bin/fx-core.wasm");
+const defaultWasm = resolve(scriptDir, "../../zig-out/bin/x1-core.wasm");
 const wasmPath = resolve(process.argv[2] || defaultWasm);
-const apiKey = process.env.AI_GATEWAY_API_KEY || process.env.FX_API_KEY;
+const apiKey = process.env.X1_API_KEY;
 
 if (!supportsJspi()) {
   console.error("Node JSPI is disabled. Run with: node --experimental-wasm-jspi sdk/scripts/test-core-live.mjs");
   process.exit(2);
 }
 if (!apiKey) {
-  console.error("Set AI_GATEWAY_API_KEY or FX_API_KEY to run the live gateway smoke test");
+  console.error("Set X1_API_KEY to run the live LayerX1 smoke test");
   process.exit(2);
 }
 
-const nonce = `FXWASMLIVE${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`;
+const nonce = `X1WASMLIVE${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`;
 const startedAt = performance.now();
 let fetchCalls = 0;
 let responseStatus = null;
 let firstResponseBodyChunkAt = null;
 let responseBodyChunks = 0;
 let requestedSessionId = null;
-let requestedSessionAffinity = null;
 const responsePreviewChunks = [];
 let responsePreviewBytes = 0;
 
@@ -35,7 +34,6 @@ const tracedFetch = async (url, init) => {
   fetchCalls++;
   const headers = new Headers(init.headers);
   requestedSessionId = headers.get("x-session-id");
-  requestedSessionAffinity = headers.get("x-session-affinity");
   const response = await fetch(url, init);
   responseStatus = response.status;
   if (!response.body) return response;
@@ -69,8 +67,8 @@ const tracedFetch = async (url, init) => {
 };
 
 const agent = await Promise.race([
-  createFxAgent({ wasm: await readFile(wasmPath), fetch: tracedFetch, env: { AI_GATEWAY_API_KEY: apiKey } }),
-  new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for fx-core initialize")), 5000)),
+  createX1Agent({ wasm: await readFile(wasmPath), fetch: tracedFetch, env: { X1_API_KEY: apiKey } }),
+  new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for x1-core initialize")), 5000)),
 ]);
 
 try {
@@ -101,7 +99,6 @@ try {
   if (responseStatus !== 200) throw new Error(`live gateway returned HTTP ${responseStatus}`);
   if (fetchCalls !== 1) throw new Error(`expected one live gateway fetch, got ${fetchCalls}`);
   if (requestedSessionId !== session.id) throw new Error(`live gateway request used unexpected session id: ${requestedSessionId}`);
-  if (requestedSessionAffinity !== session.id) throw new Error(`live gateway request used unexpected session affinity: ${requestedSessionAffinity}`);
   if (!text.includes(nonce)) {
     const responsePreview = new TextDecoder().decode(Buffer.concat(responsePreviewChunks.map((chunk) => Buffer.from(chunk))));
     throw new Error(`live model response did not include the per-run nonce; ACP text=${JSON.stringify(text.slice(0, 500))}; SSE preview=${JSON.stringify(responsePreview.slice(0, 1000))}`);

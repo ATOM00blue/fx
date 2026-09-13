@@ -242,7 +242,7 @@ fn composeItemRow(
     errdefer row.deinit(alloc);
     const indent: usize = if (width <= 2) 0 else 2;
     if (indent > 0) try row.appendSlice(alloc, "  ");
-    try row.appendSlice(alloc, if (selected) ui_render.selected_completion_style else ui_render.dim_style);
+    try row.appendSlice(alloc, ui_render.pickerSelectionStyle(selected));
     try row_text.appendSingleLineEllipsized(
         alloc,
         &row,
@@ -303,7 +303,7 @@ fn composeModelRow(
     var row: std.ArrayList(u8) = .empty;
     errdefer row.deinit(alloc);
     try row_text.appendSpacesToColumn(alloc, &row, value_col);
-    try row.appendSlice(alloc, if (display_index == selected) ui_render.selected_completion_style else ui_render.dim_style);
+    try row.appendSlice(alloc, ui_render.pickerSelectionStyle(display_index == selected));
     try row_text.appendSingleLineEllipsized(alloc, &row, model.id, @as(usize, width) -| value_col);
     try row.appendSlice(alloc, ui_render.reset_style);
     return row;
@@ -387,6 +387,28 @@ test "settings menu renders each setting on one row at wide and narrow widths" {
     defer narrow_item.deinit(alloc);
     try std.testing.expect(std.mem.find(u8, narrow_item.items, "Status line") != null);
     try std.testing.expect(display_width.visibleWidthIgnoringAnsi(narrow_item.items) <= 24);
+}
+
+test "settings menu colors only the selected setting label" {
+    const alloc = std.testing.allocator;
+    ui_render.initTheme(false, null);
+    defer ui_render.initTheme(false, null);
+
+    const projection: render_input.SettingsMenuProjection = .{
+        .active = true,
+        .snapshot = test_snapshot,
+    };
+    const rows = menuRowCount(projection, 100, 40);
+
+    var selected = try composeSettingsMenuRow(alloc, projection, 2, 100, rows);
+    defer selected.deinit(alloc);
+    var inactive = try composeSettingsMenuRow(alloc, projection, 3, 100, rows);
+    defer inactive.deinit(alloc);
+
+    try std.testing.expect(std.mem.find(u8, selected.items, ui_render.x1_accent_style) != null);
+    try std.testing.expect(std.mem.find(u8, selected.items, "Status line context") != null);
+    try std.testing.expect(std.mem.find(u8, inactive.items, ui_render.x1_accent_style) == null);
+    try std.testing.expect(std.mem.find(u8, inactive.items, ui_render.dim_style) != null);
 }
 
 test "settings menu values follow the widest matching setting label" {

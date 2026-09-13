@@ -57,7 +57,7 @@ const tool_runtime = @import("../core/tooling/tool_runtime.zig");
 const command_output_content = @import("../core/tooling/command_output_content.zig");
 const builtin_tools = @import("../builtins/tools.zig");
 const test_builtin_gateway = if (std_builtin.is_test)
-    @import("../builtins/gateway.zig")
+    @import("../builtins/x1.zig")
 else
     struct {};
 const types = @import("../core/shared/types.zig");
@@ -205,7 +205,7 @@ const AcpContext = struct {
     fn toolContext(self: *AcpContext) tool_runtime.Context {
         const session = if (self.state.active_session) |*active| active else unreachable;
         const provider_capabilities = self.state.cfg.provider_set.select(session.provider).capabilities;
-        if (provider_capabilities.fx_search) {
+        if (provider_capabilities.provider_search) {
             self.state.web_search_runtime.configure(.{
                 .api_key = session.api_key,
                 .credential_source = session.credential_source,
@@ -281,7 +281,7 @@ const AcpContext = struct {
             .web_fetch_artifact_store = session.session_rt.webFetchArtifactStore(),
             .web_fetch_artifact_error = session.session_rt.webFetchArtifactError(),
             .web_search_runtime_ready = false,
-            .web_search_backend = if (provider_capabilities.fx_search) self.state.web_search_runtime.dispatchBackend() else null,
+            .web_search_backend = if (provider_capabilities.provider_search) self.state.web_search_runtime.dispatchBackend() else null,
             .model_capability_resolver = .{
                 .ctx = @ptrCast(self),
                 .resolve_fn = resolveModelCapabilities,
@@ -443,12 +443,7 @@ pub fn handlePrompt(
     if (!try server.selectCredentialForProvider(state, session.provider)) {
         return .{ .rpc_error = .{
             .code = ErrorCode.invalid_request,
-            .message = if (session.provider == .codex)
-                credentials.missing_chatgpt_credential_message
-            else if (session.provider == .grok)
-                credentials.missing_grok_credential_message
-            else
-                credentials.missing_credential_message,
+            .message = credentials.missing_layerx1_credential_message,
         } };
     }
 
@@ -820,9 +815,9 @@ fn parsePromptInput(alloc: Allocator, params_json: []const u8) !ParsedPromptInpu
     const continue_recovery = blk: {
         const meta = parsed.value.object.get("_meta") orelse break :blk false;
         if (meta != .object) break :blk false;
-        const fx = meta.object.get("fx") orelse break :blk false;
-        if (fx != .object) break :blk false;
-        const value = fx.object.get("continueRecovery") orelse break :blk false;
+        const x1 = meta.object.get("x1") orelse break :blk false;
+        if (x1 != .object) break :blk false;
+        const value = x1.object.get("continueRecovery") orelse break :blk false;
         break :blk value == .bool and value.bool;
     };
 
@@ -2076,7 +2071,7 @@ fn requestAcpElicitation(
 
     var id_buffer: [48]u8 = undefined;
     const url_id = if (input_request.mode == .url)
-        try std.fmt.bufPrint(&id_buffer, "fx-{d}", .{outbound_id})
+        try std.fmt.bufPrint(&id_buffer, "x1-{d}", .{outbound_id})
     else
         null;
     const legacy_source_id = if (origin.wire.isLegacy() and input_request.mode == .url)
@@ -2204,12 +2199,12 @@ fn formatAcpElicitationMessage(
     return switch (request.mode) {
         .form => std.fmt.allocPrint(
             alloc,
-            "Fx received a form request from MCP server {s}. {s}",
+            "x1 received a form request from MCP server {s}. {s}",
             .{ server_name, request.message },
         ),
         .url => std.fmt.allocPrint(
             alloc,
-            "Fx received a URL request from MCP server {s} for host {s}. {s}",
+            "x1 received a URL request from MCP server {s} for host {s}. {s}",
             .{ server_name, request.url_host orelse "unknown", request.message },
         ),
         .unknown => error.McpInputRequired,
@@ -2799,7 +2794,7 @@ test "parsePromptInput handles empty prompt array" {
 test "parsePromptInput accepts explicit recovery continuation metadata" {
     const alloc = std.testing.allocator;
     const params =
-        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"fx\":{\"continueRecovery\":true}}}";
+        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"x1\":{\"continueRecovery\":true}}}";
     var result = try parsePromptInput(alloc, params);
     defer result.deinit(alloc);
     try std.testing.expectEqual(@as(usize, 0), result.text.len);
@@ -2816,14 +2811,14 @@ test "parsePromptInput preserves resource text and accepts only local absolute f
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(std.testing.io, "Fx Project/src");
-    var file = try tmp.dir.createFile(std.testing.io, "Fx Project/src/main.zig", .{});
+    try tmp.dir.createDirPath(std.testing.io, "x1 Project/src");
+    var file = try tmp.dir.createFile(std.testing.io, "x1 Project/src/main.zig", .{});
     file.close(std.testing.io);
     const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(root);
-    const expected_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "Fx Project/src/main.zig");
+    const expected_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "x1 Project/src/main.zig");
     defer alloc.free(expected_path);
-    const local_uri = try std.fmt.allocPrint(alloc, "file://{s}/Fx%20Project/src/main.zig", .{root});
+    const local_uri = try std.fmt.allocPrint(alloc, "file://{s}/x1%20Project/src/main.zig", .{root});
     defer alloc.free(local_uri);
     const remote_uri = "https://example.test/reference.txt";
     const params = try std.fmt.allocPrint(
@@ -3001,22 +2996,6 @@ test "ACP permission arguments are validated and reserialized before emission" {
     try std.testing.expectEqual(@as(usize, 0), malformed.written().len);
 }
 
-test "acp exposes web_search progress updates" {
-    const alloc = std.testing.allocator;
-    var out: std.Io.Writer.Allocating = .init(alloc);
-    defer out.deinit();
-
-    try writeWebSearchProgressUpdate(alloc, &out.writer, "call_search", .{ .results_received = .{
-        .query = "current news",
-        .result_count = 4,
-    } });
-
-    try std.testing.expect(std.mem.find(u8, out.written(), "\"toolCallId\":\"call_search\"") != null);
-    try std.testing.expect(std.mem.find(u8, out.written(), "\"status\":\"in_progress\"") != null);
-    try std.testing.expect(std.mem.find(u8, out.written(), "Found 4 results for current news") != null);
-    try std.testing.expectEqual(acp_types.ToolCallKind.search, mapToolKind("web_search"));
-}
-
 test "ACP tool notifications preserve UTF-8 for clipped and unsafe output" {
     const alloc = std.testing.allocator;
     var model_output: [202]u8 = undefined;
@@ -3085,7 +3064,7 @@ test "ACP stream adapter strips ANSI from agent chunks and suppresses writer fai
     const alloc = arena_state.allocator();
     const spans = [_][]const u8{
         "\x1b[1mbold\x1b[22m and \x1b[3mitalic\x1b[23m\n",
-        "\x1b]8;id=fx-1;https://example.com\x1b\\docs\x1b]8;;\x1b\\\n",
+        "\x1b]8;id=x1-1;https://example.com\x1b\\docs\x1b]8;;\x1b\\\n",
         "\x1b[2m\xe2\x94\x82 \x1b[22mconst x = **literal**;\n",
     };
     const expected_spans = [_][]const u8{
@@ -3176,14 +3155,14 @@ test "ACP auth failure emits a valid detail-free JSON-RPC notification" {
     var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
     defer state.deinit();
     state.writer = .{ .stdout = capture };
-    state.active_session.?.credential_source = .vercel_oidc_token;
+    state.active_session.?.credential_source = .layerx1_subscription;
     var ctx = AcpContext{
         .alloc = alloc,
         .state = &state,
         .session_id = "session_1",
     };
     try std.testing.expectEqual(
-        types.CredentialSource.vercel_oidc_token,
+        types.CredentialSource.layerx1_subscription,
         ctx.toolContext().credential_source.?,
     );
 
@@ -3208,7 +3187,7 @@ test "ACP auth failure emits a valid detail-free JSON-RPC notification" {
     const update = parsed.value.object.get("params").?.object.get("update").?.object;
     const content = update.get("content").?.object;
     try std.testing.expectEqualStrings(
-        "VERCEL_OIDC_TOKEN authentication failed · HTTP 401",
+        "X1 subscription authentication failed · HTTP 401",
         content.get("text").?.string,
     );
     try std.testing.expect(std.mem.find(u8, captured, "access-token-secret") == null);
@@ -3238,7 +3217,7 @@ test "ACP tool updates preserve typed permission failures without truncation" {
 
 test "ACP plan mode validates registered tools against mode policy" {
     const alloc = std.testing.allocator;
-    var state = try initTestAcpState(alloc, "/tmp/fx-acp-plan-mode", .ask);
+    var state = try initTestAcpState(alloc, "/tmp/x1-acp-plan-mode", .ask);
     defer state.deinit();
     state.active_session.?.mode = "plan";
     var ctx = AcpContext{
@@ -3341,7 +3320,7 @@ fn testServerConfig() server.Config {
         .gateway_chat_url = "http://127.0.0.1",
         .gateway_models_path = "/models",
         .gateway_provider = test_builtin_gateway.provider,
-        .provider_set = provider_set.gateway_only(test_builtin_gateway.provider_bundle),
+        .provider_set = provider_set.x1Only(test_builtin_gateway.provider_bundle),
         .secret_store = host.unavailable_secret_store,
         .prompt_policy = .{
             .system_prompt = "test",
@@ -3377,17 +3356,15 @@ fn initTestAcpState(alloc: Allocator, workspace_root: []const u8, mode: Permissi
         .writer = jsonrpc.Writer.init(),
         .workspace_root = owned_workspace,
         .api_key = api_key,
-        .credential_source = .ai_gateway_api_key,
-        .web_search_runtime = @import("../core/tooling/web_search_runtime.zig").Runtime.init(.{
-            .provider = cfg.provider_set.gateway.fx_search.?,
-        }),
+        .credential_source = .layerx1_subscription,
+        .web_search_runtime = @import("../core/tooling/web_search_runtime.zig").Runtime.init(.{}),
         .active_session = .{
             .session_id = session_id,
             .model = model,
             .mode = "normal",
             .workspace_root = owned_workspace,
             .api_key = api_key,
-            .credential_source = .ai_gateway_api_key,
+            .credential_source = .layerx1_subscription,
             .agent_step_limit = 4,
             .max_tool_result_bytes = 1024 * 1024,
             .fast_mode = false,
@@ -3416,7 +3393,7 @@ test "stripAnsiAlloc returns the original slice for clean text and strips escape
 
 test "stripAnsiAlloc converts OSC-8 hyperlinks with params and BEL terminators" {
     const alloc = std.testing.allocator;
-    const with_params = try stripAnsiAlloc(alloc, "\x1b]8;id=fx-1;https://ziglang.org/download/\x1b\\Zig downloads\x1b]8;;\x1b\\ ready");
+    const with_params = try stripAnsiAlloc(alloc, "\x1b]8;id=x1-1;https://ziglang.org/download/\x1b\\Zig downloads\x1b]8;;\x1b\\ ready");
     defer alloc.free(with_params);
     try std.testing.expectEqualStrings("[Zig downloads](https://ziglang.org/download/) ready", with_params);
 
@@ -3710,123 +3687,13 @@ test "ACP finalization maps failed turns and provider length" {
     }
 }
 
-test "ACP deps reject malformed native web_search calls" {
-    const alloc = std.testing.allocator;
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
-    defer state.deinit();
-    var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1" };
-
-    const deps = agentRuntimeDeps(&ctx);
-    const validate = deps.validate_tool_call orelse return error.TestExpectedEqual;
-    const result = try validate(deps.ctx, arena, .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"x\"}",
-    });
-    try std.testing.expectEqualStrings("web_search field \"query\" must contain at least two characters", result.failure);
-}
-
-test "ACP prompt projection configures web search then blocks native execution" {
-    const alloc = std.testing.allocator;
-    const web_search_contract = @import("../core/tooling/web_search_contract.zig");
-    const web_search_runtime = @import("../core/tooling/web_search_runtime.zig");
-    const ProviderState = struct {
-        calls: usize = 0,
-    };
-    const FailingWebSearchProvider = struct {
-        fn execute(
-            raw_ctx: ?*anyopaque,
-            _: Allocator,
-            _: web_search_runtime.Inputs,
-            _: web_search_contract.ProviderRequest,
-            _: ?web_search_contract.ProgressFn,
-            _: ?*anyopaque,
-        ) anyerror!web_search_contract.ProviderResponse {
-            const state: *ProviderState = @ptrCast(@alignCast(raw_ctx orelse return error.TestWebSearchProvider));
-            state.calls += 1;
-            return error.TestWebSearchProvider;
-        }
-    };
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-web-runtime-timing.jsonl", .{});
-    defer capture.close(io_mod.getIo());
-    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
-    defer state.deinit();
-    state.writer = .{ .stdout = capture };
-    var ctx = AcpContext{ .alloc = arena, .state = &state, .session_id = "session_1" };
-    var provider_state = ProviderState{};
-    var provider = state.web_search_runtime.provider orelse return error.TestExpectedEqual;
-    provider.context = @ptrCast(&provider_state);
-    provider.execute_fn = FailingWebSearchProvider.execute;
-    state.web_search_runtime = web_search_runtime.Runtime.init(.{
-        .provider = provider,
-    });
-
-    state.web_search_runtime.configure(.{
-        .api_key = "stale-key",
-        .worker_model = "stale-model",
-        .gateway_retry_count = 99,
-        .gateway_chat_url = "https://stale.invalid/chat",
-    });
-
-    var messages: std.ArrayList(ChatMessage) = .empty;
-    defer messages.deinit(arena);
-    const deps = agentRuntimeDeps(&ctx);
-    const append_static = deps.append_static_context orelse return error.TestExpectedEqual;
-    try append_static(deps.ctx, arena, &messages);
-    try deps.append_runtime_context(deps.ctx, arena, &messages);
-
-    try std.testing.expectEqualStrings("stale-key", state.web_search_runtime.api_key);
-
-    const validate = deps.validate_tool_call orelse return error.TestExpectedEqual;
-    const validation = try validate(deps.ctx, arena, .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"x\"}",
-    });
-    const session = state.active_session orelse return error.TestExpectedEqual;
-    try std.testing.expectEqualStrings("web_search field \"query\" must contain at least two characters", validation.failure);
-    try std.testing.expectEqualStrings(session.api_key, state.web_search_runtime.api_key);
-    try std.testing.expectEqualStrings(session.model, state.web_search_runtime.worker_model);
-    try std.testing.expectEqual(state.cfg.gateway_retry_count, state.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(state.cfg.gateway_chat_url, state.web_search_runtime.gateway_chat_url);
-
-    const execute = deps.execute_tool_call;
-    const execution = try execute(deps.ctx, .{
-        .call_allocator = arena,
-        .result_allocator = arena,
-        .call = .{
-            .id = "search-execute",
-            .name = "web_search",
-            .arguments_json = "{\"query\":\"current Zig release\"}",
-        },
-        .authority = .ordinary,
-        .session_grants = &.{},
-        .advertised_dynamic_tool_names = &.{},
-        .max_tool_result_bytes = session.max_tool_result_bytes,
-    });
-    try std.testing.expectEqualStrings(session.api_key, state.web_search_runtime.api_key);
-    try std.testing.expectEqualStrings(session.model, state.web_search_runtime.worker_model);
-    try std.testing.expectEqual(state.cfg.gateway_retry_count, state.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(state.cfg.gateway_chat_url, state.web_search_runtime.gateway_chat_url);
-    try std.testing.expectEqual(.failure, execution.status);
-    try std.testing.expectEqual(@as(usize, 0), provider_state.calls);
-}
-
-test "ACP ChatGPT route removes Gateway-backed auxiliary capabilities" {
+test "ACP X1 route removes Gateway-backed auxiliary capabilities" {
     const alloc = std.testing.allocator;
     var state = try initTestAcpState(alloc, "/tmp/workspace", .auto);
     defer state.deinit();
-    state.active_session.?.credential_source = .chatgpt_subscription;
-    state.active_session.?.provider = .codex;
-    state.active_session.?.api_key = "chatgpt-secret";
+    state.active_session.?.credential_source = .layerx1_subscription;
+    state.active_session.?.provider = .layerx1;
+    state.active_session.?.api_key = "x1-secret";
     var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1" };
 
     const tool_ctx = ctx.toolContext();
@@ -4185,24 +4052,6 @@ test "ACP permission rejects semantic_search outside workspace target" {
     try std.testing.expectEqual(ToolPermissionDecision.policy_denied, decision);
 }
 
-test "ACP admits default-safe web_search before execution" {
-    const alloc = std.testing.allocator;
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    var state = try initTestAcpState(alloc, "/tmp/workspace", .auto);
-    defer state.deinit();
-    var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1" };
-
-    const decision = (try requestToolPermissionOutcome(&ctx, arena, .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    }, .auto, &.{}, &.{})).decision;
-
-    try std.testing.expectEqual(ToolPermissionDecision.once, decision);
-}
-
 test "ACP admits default-safe web_fetch before execution" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
@@ -4221,16 +4070,13 @@ test "ACP admits default-safe web_fetch before execution" {
     try std.testing.expectEqual(ToolPermissionDecision.once, decision);
 }
 
-test "ACP full advertisement includes direct provider search with explicit permission" {
-    var rules = [_]types.PermissionRule{
-        .{ .permission = @constCast("web_search"), .pattern = @constCast("*"), .action = .allow },
-    };
+test "ACP advertisement omits the removed provider search tool" {
     var projection = try tool_projection_mod.buildModelToolProjectionForSet(std.testing.allocator, builtin_tools.advertisement_set, .{
-        .permission_rules = .{ .rules = &rules },
+        .permission_rules = .{},
     });
     defer projection.deinit(std.testing.allocator);
-    try std.testing.expect(tool_projection_mod.containsName(projection.advertised_names, "web_search"));
-    try std.testing.expectEqualStrings(builtin_tools.web_search.description, projection.custom_guidance);
+    try std.testing.expect(!tool_projection_mod.containsName(projection.advertised_names, "web_search"));
+    try std.testing.expectEqualStrings("", projection.custom_guidance);
 }
 
 test "ACP prompt agent config carries request options from active session" {
@@ -4270,14 +4116,9 @@ test "ACP prompt agent config carries request options from active session" {
     var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1" };
     const tool_ctx = ctx.toolContext();
     try std.testing.expect(!tool_ctx.web_search_runtime_ready);
-    try std.testing.expect(tool_ctx.web_search_backend != null);
-    try std.testing.expect(state.web_search_runtime.provider.?.execute_fn == state.cfg.provider_set.gateway.fx_search.?.execute_fn);
-    try std.testing.expect(state.web_search_runtime.provider.?.preferred_backends_fn == state.cfg.provider_set.gateway.fx_search.?.preferred_backends_fn);
+    try std.testing.expect(tool_ctx.web_search_backend == null);
+    try std.testing.expect(state.web_search_runtime.provider == null);
     try std.testing.expect(tool_ctx.web_fetch_runtime.? == &state.web_fetch_runtime);
     try std.testing.expectEqualStrings("team_123", tool_ctx.gateway_team.?);
-    try std.testing.expectEqualStrings("team_123", state.web_search_runtime.gateway_team.?);
-    try std.testing.expectEqualStrings(session.model, state.web_search_runtime.worker_model);
-    try std.testing.expectEqual(state.cfg.gateway_retry_count, state.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(state.cfg.gateway_chat_url, state.web_search_runtime.gateway_chat_url);
     try std.testing.expectEqualStrings("/models", tool_ctx.gateway_models_path);
 }

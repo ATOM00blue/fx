@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN } from "../evals/eval-helpers";
+import { X1_BIN } from "../evals/eval-helpers";
 import {
   analyzeRun,
   readQuiescence,
@@ -38,11 +38,11 @@ test("render-lab lists gated Plan B native scenarios", () => {
   expect(output).toContain("native-terminal-app-relaunch");
   expect(output).toContain("native-terminal-app-command-k");
   expect(output).toContain("native-warp-relaunch");
-  expect(output).toContain("FX_RENDER_LAB_NATIVE=1");
+  expect(output).toContain("X1_RENDER_LAB_NATIVE=1");
 });
 
-test.skipIf(!existsSync(FX_BIN))("buffer-system frame benchmark writes timing artifact", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-frame-bench-test-"));
+test.skipIf(!existsSync(X1_BIN))("buffer-system frame benchmark writes timing artifact", () => {
+  outDir = mkdtempSync(join(tmpdir(), "x1-frame-bench-test-"));
   const output = execFileSync(
     "bun",
     [
@@ -79,8 +79,8 @@ test.skipIf(!existsSync(FX_BIN))("buffer-system frame benchmark writes timing ar
   expect(benchmark.sizes[0].allocations.instrumentation).toBe("unavailable");
 });
 
-test.skipIf(!existsSync(FX_BIN))("buffer-system p95 gate rejects undersampled runs", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-frame-bench-samples-test-"));
+test.skipIf(!existsSync(X1_BIN))("buffer-system p95 gate rejects undersampled runs", () => {
+  outDir = mkdtempSync(join(tmpdir(), "x1-frame-bench-samples-test-"));
   const result = spawnSync(
     "bun",
     [
@@ -108,11 +108,11 @@ test.skipIf(!existsSync(FX_BIN))("buffer-system p95 gate rejects undersampled ru
 });
 
 test("native render-lab scenarios require explicit opt-in", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-gate-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-gate-test-"));
   const env = { ...process.env };
-  delete env.FX_RENDER_LAB_NATIVE;
-  delete env.FX_RENDER_LAB_NATIVE_COMMAND_K;
-  delete env.FX_RENDER_LAB_NATIVE_ALLOW_CLIPBOARD;
+  delete env.X1_RENDER_LAB_NATIVE;
+  delete env.X1_RENDER_LAB_NATIVE_COMMAND_K;
+  delete env.X1_RENDER_LAB_NATIVE_ALLOW_CLIPBOARD;
 
   const result = spawnSync(
     "bun",
@@ -136,11 +136,11 @@ test("native render-lab scenarios require explicit opt-in", () => {
   );
 
   expect(result.status).not.toBe(0);
-  expect(result.stderr).toContain("FX_RENDER_LAB_NATIVE=1");
+  expect(result.stderr).toContain("X1_RENDER_LAB_NATIVE=1");
 });
 
 test("render-lab analyzer flags excess gap before transient activity", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "content",
     "",
@@ -159,7 +159,7 @@ test("render-lab analyzer flags excess gap before transient activity", () => {
 });
 
 test("render-lab analyzer treats thinking token counters as activity rows", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "content",
     "",
@@ -177,8 +177,29 @@ test("render-lab analyzer treats thinking token counters as activity rows", () =
   expect(failures).toContain("activity-footer-extra-blank");
 });
 
-test("render-lab analyzer recognizes the real Fx prompt glyph", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+test("render-lab analyzer treats the boxed X1 banner as one logo", () => {
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
+  const manifest = writeAnalyzerFixture(outDir, [
+    "┌─────────────┐",
+    "│     X1      │",
+    "│   v0.0.6    │",
+    "│ layerx1.com │",
+    "└─────────────┘",
+    "────────────────",
+    "❯",
+    "────────────────",
+    "model",
+  ]);
+
+  const failures = analyzeRun(manifest).failures.map((failure) => failure.invariant);
+
+  expect(failures).not.toContain("footer-missing");
+  expect(failures).not.toContain("input-missing");
+  expect(failures).not.toContain("single-active-logo");
+});
+
+test("render-lab analyzer recognizes the real x1 prompt glyph", () => {
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "────────────────",
@@ -194,7 +215,7 @@ test("render-lab analyzer recognizes the real Fx prompt glyph", () => {
 });
 
 test("render-lab analyzer recognizes tint footer chrome", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "❯",
@@ -209,7 +230,7 @@ test("render-lab analyzer recognizes tint footer chrome", () => {
 });
 
 test("render-lab analyzer flags missing footer and input chrome", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "permission_mode",
@@ -223,14 +244,14 @@ test("render-lab analyzer flags missing footer and input chrome", () => {
 });
 
 test("render-lab analyzer rejects damaged multiline footer with real hint and cursor", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "────────────────",
     "  transcript row one",
     "  transcript row two",
     "────────────────",
-    "run fx login · opus 4.7 · default",
+    "run x1 login · opus 4.7 · default",
   ], { row: 3, col: 8 });
 
   const failures = analyzeRun(manifest).failures.map((failure) => failure.invariant);
@@ -240,14 +261,14 @@ test("render-lab analyzer rejects damaged multiline footer with real hint and cu
 });
 
 test("render-lab analyzer recognizes clipped multiline input continuation rows", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "────────────────",
     "  wrapped input continuation",
     "  clipped input tail",
     "────────────────",
-    "run fx login · opus 4.7 · default",
+    "run x1 login · opus 4.7 · default",
   ], { row: 3, col: 20 }, ["clipped input tail"], "overflow-long-prompt-editor-tail-visible");
 
   const failures = analyzeRun(manifest).failures.map((failure) => failure.invariant);
@@ -257,7 +278,7 @@ test("render-lab analyzer recognizes clipped multiline input continuation rows",
 });
 
 test("render-lab analyzer recognizes compact multiline footer status", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "────────────────",
@@ -274,7 +295,7 @@ test("render-lab analyzer recognizes compact multiline footer status", () => {
 });
 
 test("render-lab analyzer rejects a blank multiline footer status row", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "────────────────",
@@ -291,7 +312,7 @@ test("render-lab analyzer rejects a blank multiline footer status row", () => {
 });
 
 test("render-lab analyzer flags missing required gap before thinking", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "content",
     "thinking",
@@ -307,7 +328,7 @@ test("render-lab analyzer flags missing required gap before thinking", () => {
 });
 
 test("render-lab analyzer fails when the trace log is missing", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "content",
     "",
@@ -325,7 +346,7 @@ test("render-lab analyzer fails when the trace log is missing", () => {
 });
 
 test("render-lab analyzer enforces active-tool placement and uniqueness", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const cases = [
     {
       event: "active-tool-visible",
@@ -364,7 +385,7 @@ test("render-lab analyzer enforces active-tool placement and uniqueness", () => 
 });
 
 test("render-lab analyzer rejects activity marker corruption", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const submitted = "exercise one active command placement";
   const group = "● 1 tool call · 1 command";
   const activity = "└ Running sleep 1; i=1";
@@ -420,7 +441,7 @@ test("render-lab analyzer rejects activity marker corruption", () => {
 });
 
 test("render-lab analyzer rejects expanded command marker corruption", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const commandLines = Array.from(
     { length: 32 },
     (_, index) => `│ ACTIVE_TOOL_LINE_${String(index + 1).padStart(2, "0")}`,
@@ -481,7 +502,7 @@ test("render-lab analyzer rejects expanded command marker corruption", () => {
 });
 
 test("render-lab analyzer rejects duplicate permission UI", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const prompt = "Would you like to run the following command?";
   for (const [name, prompts, rejected] of [
     ["single", [prompt], false],
@@ -512,7 +533,7 @@ test("render-lab analyzer rejects duplicate permission UI", () => {
 });
 
 test("render-lab analyzer rejects reordered observability scrollback", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const markers = ["OBSERVABILITY_PROMPT_HEAD", "OBSERVABILITY_PROMPT_TAIL"];
   for (const [name, transcript, rejected] of [
     [
@@ -557,7 +578,7 @@ test("render-lab analyzer rejects reordered observability scrollback", () => {
 });
 
 test("render-lab analyzer reports trace counters and rejects quiescent work", () => {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-analyzer-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-analyzer-test-"));
   const manifest = writeAnalyzerFixture(outDir, [
     "Run /help for commands",
     "────────────────",
@@ -646,7 +667,7 @@ describe.skipIf(SKIP)("tui: render lab", () => {
   test(
     "same-shell relaunch artifacts pass analyzer without an API key",
     () => {
-      outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-test-"));
+      outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-test-"));
       const env = { ...process.env };
       delete env.AI_GATEWAY_API_KEY;
       delete env.VERCEL_OIDC_TOKEN;
@@ -674,7 +695,7 @@ describe.skipIf(SKIP)("tui: render lab", () => {
 
       expect(output).toContain("same-shell-relaunch");
       expect(output).toContain("run-");
-      expect(FX_BIN).toContain("zig-out/bin/fx");
+      expect(X1_BIN).toContain("zig-out/bin/x1");
       const runDir = output.trim().split(/\s+/).at(-1)!;
       const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
       const replay = JSON.parse(readFileSync(join(runDir, "replay-summary.json"), "utf8"));
@@ -769,7 +790,7 @@ function runScenarioArtifacts(scenario: string): {
   stderr: string;
   gatewayRequests: string[];
 } {
-  outDir = mkdtempSync(join(tmpdir(), "fx-render-lab-overflow-test-"));
+  outDir = mkdtempSync(join(tmpdir(), "x1-render-lab-overflow-test-"));
   const env = { ...process.env };
   delete env.AI_GATEWAY_API_KEY;
   delete env.VERCEL_OIDC_TOKEN;
@@ -814,7 +835,7 @@ function writeAnalyzerFixture(
     timestampMs: 0,
     width: 80,
     height: grid.length,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256: "test",
     grid,
     escapes: "",
@@ -833,7 +854,7 @@ function writeAnalyzerFixture(
     completedAt: null,
     repoRoot: import.meta.dirname,
     artifactDir,
-    binaryPath: FX_BIN,
+    binaryPath: X1_BIN,
     binarySha256: "test",
     traceLogPath: join(artifactDir, "trace.log"),
     tapePath: join(artifactDir, "render.fxtape"),

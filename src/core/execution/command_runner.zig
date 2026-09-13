@@ -17,8 +17,11 @@ const text_utils = @import("../shared/text_utils.zig");
 const types = @import("../shared/types.zig");
 const shell_resolver = @import("../terminal/shell_resolver.zig");
 const darwin_process_spawn = @import("../shared/darwin_process_spawn.zig");
+const windows_jobs = @import("../shared/windows_jobs.zig");
 
 const Allocator = std.mem.Allocator;
+
+extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) u32;
 pub const CommandOutputStream = command_contract.CommandOutputStream;
 pub const CommandOutputCallback = command_contract.CommandOutputCallback;
 pub const CommandExecutionResult = command_contract.RunCommandResult;
@@ -47,8 +50,8 @@ pub const CallbackProjection = enum {
     raw,
 };
 
-const command_artifact_file_prefix = "fx-command-";
-const command_artifact_fallback_dir_name = "fx-command-output";
+const command_artifact_file_prefix = "x1-command-";
+const command_artifact_fallback_dir_name = "x1-command-output";
 const command_artifact_log_suffix = ".log";
 const command_artifact_stdout_suffix = ".stdout.log";
 const command_artifact_stderr_suffix = ".stderr.log";
@@ -70,11 +73,23 @@ const foreground_session_replace_failure_exit_code: u8 = 125;
 const foreground_session_failure_nonce_bytes: usize = 16;
 const foreground_session_failure_nonce_hex_bytes: usize = foreground_session_failure_nonce_bytes * 2;
 const foreground_session_control_bytes = foreground_session_failure_nonce_hex_bytes + 1;
-const foreground_session_replace_failure_prefix = "\x00FX_FOREGROUND_EXEC_FAILED:";
+const foreground_session_replace_failure_prefix = "\x00X1_FOREGROUND_EXEC_FAILED:";
 const foreground_session_replace_failure_marker_bytes =
     foreground_session_replace_failure_prefix.len +
     foreground_session_failure_nonce_hex_bytes + 1;
 const foreground_session_force_signal = std.posix.SIG.USR1;
+/// Captured children are controlled as a unit: through a POSIX process group
+/// on Unix targets, and through a Windows Job Object (which spans the whole
+/// descendant tree) on Windows. `ProcessScope` is the optional handle passed
+/// through collection and teardown; `ProcessScopeTarget` its unwrapped form.
+const ProcessScope = if (builtin.os.tag == .windows)
+    ?*windows_jobs.Job
+else
+    ?std.posix.pid_t;
+const ProcessScopeTarget = if (builtin.os.tag == .windows)
+    *windows_jobs.Job
+else
+    std.posix.pid_t;
 const ForegroundSessionTerminationRequest = enum(std.c.sig_atomic_t) {
     none,
     graceful,
@@ -973,11 +988,38 @@ fn executeProcessWithInput(
         .stderr = .pipe,
         .cwd = .{ .path = cwd },
         .pgid = if (isolate_process_group and builtin.os.tag != .windows and builtin.os.tag != .wasi) 0 else null,
+        .start_suspended = builtin.os.tag == .windows,
     });
     if (child.stdin) |input| {
         input.close(io_mod.getIo());
         child.stdin = null;
     }
+
+    // Windows has no process groups; the child and its entire descendant tree
+    // are tracked with a Job Object so timeouts and cleanup cannot orphan the
+    // grandchildren under cmd.exe/powershell. The child starts suspended so it
+    // cannot escape the job before the assignment completes.
+    var windows_job: if (builtin.os.tag == .windows) windows_jobs.Job else void = undefined;
+    defer if (comptime builtin.os.tag == .windows) windows_job.close();
+
+    const process_group_id: ProcessScope = if (comptime builtin.os.tag == .windows) blk: {
+        windows_job = windows_jobs.Job.forProcess(child.id.?) catch |err| {
+            // Tree control is unavailable; the child still runs and remains
+            // directly killable, matching the pre-job behavior.
+            debug_trace.logf(
+                "core",
+                "windows job assignment failed; falling back to direct child control err={s}",
+                .{@errorName(err)},
+            );
+            windows_jobs.resumeProcessThread(child.thread_handle);
+            break :blk null;
+        };
+        windows_jobs.resumeProcessThread(child.thread_handle);
+        break :blk &windows_job;
+    } else if (isolate_process_group and builtin.os.tag != .wasi)
+        child.id
+    else
+        null;
 
     var output = OutputCollector.init(scratch, cfg);
     defer output.deinit();
@@ -985,11 +1027,6 @@ fn executeProcessWithInput(
     var child_needs_cleanup = true;
     errdefer if (child_needs_cleanup) cleanupChild(&child);
 
-    const process_group_id = if (isolate_process_group and
-        builtin.os.tag != .windows and builtin.os.tag != .wasi)
-        child.id
-    else
-        null;
     var leader_term: ?std.process.Child.Term = null;
     const source = try collectOutputForProcess(
         scratch,
@@ -1161,7 +1198,7 @@ fn executeProcessWithDetachedSession(
 
 fn foregroundSessionExecutable(scratch: Allocator) ![]const u8 {
     if (comptime builtin.is_test) {
-        const path_z = std.c.getenv("FX_TEST_PRODUCT_EXE") orelse
+        const path_z = std.c.getenv("X1_TEST_PRODUCT_EXE") orelse
             return error.TestProductExecutableMissing;
         return std.mem.sliceTo(path_z, 0);
     }
@@ -1463,13 +1500,14 @@ fn artifactPath(alloc: Allocator, dir: []const u8, stem: []const u8, suffix: []c
 }
 
 fn fallbackCommandArtifactDir(alloc: Allocator) ![]u8 {
-    const temp_root = io_mod.getenv("TMPDIR") orelse "/tmp";
+    const temp_root = io_mod.tempDir();
     const pid_text = try std.fmt.allocPrint(alloc, "{d}", .{currentProcessId()});
     defer alloc.free(pid_text);
     return std.fs.path.join(alloc, &.{ temp_root, command_artifact_fallback_dir_name, pid_text });
 }
 
 fn currentProcessId() u64 {
+    if (comptime builtin.os.tag == .windows) return GetCurrentProcessId();
     return @intCast(std.c.getpid());
 }
 
@@ -1503,6 +1541,14 @@ fn executeRawBashWithResultCommand(
     cwd: []const u8,
 ) !command_contract.RunCommandResult {
     if (builtin.os.tag == .windows) {
+        // Route through the resolved default shell (powershell when found,
+        // otherwise the COMSPEC shell) for consistency with explicit shell
+        // environments, keeping the plain `cmd /C` fallback when nothing
+        // resolves.
+        if (try shell_resolver.defaultShellCommandInvocation(scratch, execution_command)) |invocation| {
+            const result = try executeProcess(scratch, cfg, invocation.argv(), cwd);
+            return formatCollectedOutput(alloc, result_command, cwd, result);
+        }
         const argv = [_][]const u8{ "cmd", "/C", execution_command };
         const result = try executeProcess(scratch, cfg, &argv, cwd);
         return formatCollectedOutput(alloc, result_command, cwd, result);
@@ -1531,7 +1577,14 @@ fn executeRawInvocation(
     cwd: []const u8,
     invocation: *const shell_resolver.Invocation,
 ) !command_contract.RunCommandResult {
-    if (builtin.os.tag == .windows or builtin.os.tag == .wasi) {
+    if (comptime builtin.os.tag == .windows) {
+        // The resolved invocation already carries the per-shell command flag
+        // and the command itself (e.g. `pwsh --NonInteractive -Command ...`),
+        // so it runs directly instead of through a stdin script.
+        const result = try executeProcess(scratch, cfg, invocation.argv(), cwd);
+        return formatCollectedOutput(alloc, command, cwd, result);
+    }
+    if (comptime builtin.os.tag == .wasi) {
         return error.InvalidCommandEnvironment;
     }
     const result = try executeProcessWithScript(
@@ -1627,7 +1680,7 @@ test "zsh user profile reports natural SIGTERM after alias-safe startup" {
         try zshrc.writeStreamingAll(
             io_mod.getIo(),
             "alias builtin='print -r -- INTERCEPTED'\n" ++
-                "TRAPDEBUG() { print -r -- \"$ZSH_DEBUG_CMD\" >> \"$FX_SIGTERM_DEBUG_LOG\"; }\n",
+                "TRAPDEBUG() { print -r -- \"$ZSH_DEBUG_CMD\" >> \"$X1_SIGTERM_DEBUG_LOG\"; }\n",
         );
     }
     {
@@ -1639,13 +1692,13 @@ test "zsh user profile reports natural SIGTERM after alias-safe startup" {
         defer wrapper.close(io_mod.getIo());
         const source = try std.fmt.allocPrint(
             arena,
-            "#!/bin/sh\nexport HOME={s}\nexport ZDOTDIR={s}\nexport FX_SIGTERM_DEBUG_LOG={s}\nexec /bin/zsh \"$@\"\n",
+            "#!/bin/sh\nexport HOME={s}\nexport ZDOTDIR={s}\nexport X1_SIGTERM_DEBUG_LOG={s}\nexec /bin/zsh \"$@\"\n",
             .{ quoted_home, quoted_home, quoted_debug_log },
         );
         try wrapper.writeStreamingAll(io_mod.getIo(), source);
         try wrapper.setPermissions(
             io_mod.getIo(),
-            std.Io.File.Permissions.fromMode(0o700),
+            io_mod.permissionsFromMode(0o700),
         );
     }
 
@@ -2087,7 +2140,7 @@ fn collectOutput(
     cfg: Config,
     source: *TerminationSource,
     launch_failure_probe: ?*ForegroundLaunchFailureProbe,
-    process_group_id: ?std.posix.pid_t,
+    process_group_id: ProcessScope,
     termination_protocol: TerminationProtocol,
     leader_term: *?std.process.Child.Term,
 ) !TerminationSource {
@@ -2201,7 +2254,7 @@ fn collectOutputForProcess(
     output: *OutputCollector,
     cfg: Config,
     launch_failure_probe: ?*ForegroundLaunchFailureProbe,
-    process_group_id: ?std.posix.pid_t,
+    process_group_id: ProcessScope,
     termination_protocol: TerminationProtocol,
     leader_term: *?std.process.Child.Term,
 ) !TerminationSource {
@@ -2223,7 +2276,7 @@ fn collectOutputForProcess(
 fn waitForCollectedProcess(
     child: *std.process.Child,
     source: TerminationSource,
-    process_group_id: ?std.posix.pid_t,
+    process_group_id: ProcessScope,
     leader_term: ?std.process.Child.Term,
 ) !std.process.Child.Term {
     if (leader_term) |term| {
@@ -2294,7 +2347,7 @@ fn mapTerminationError(
 
 fn updateTerminationSignal(
     child: *std.process.Child,
-    process_group_id: ?std.posix.pid_t,
+    process_group_id: ProcessScope,
     termination_protocol: TerminationProtocol,
     cfg: Config,
     started_ms: i64,
@@ -2355,11 +2408,23 @@ fn emitOutputChunk(
 
 fn signalChild(
     child: *std.process.Child,
-    process_group_id: ?std.posix.pid_t,
+    process_group_id: ProcessScope,
     protocol: TerminationProtocol,
     intent: TerminationIntent,
 ) !void {
-    if (builtin.os.tag == .windows or builtin.os.tag == .wasi) {
+    if (builtin.os.tag == .windows) {
+        // Windows offers no cooperative group signal, so both termination
+        // stages request a whole-tree TerminateJobObject; the direct child is
+        // still reaped through `wait` in `waitForCollectedProcess`, and the
+        // job handle stays open until the cleanup paths close it.
+        if (process_group_id) |job| {
+            job.terminate();
+        } else {
+            child.kill(io_mod.getIo());
+        }
+        return;
+    }
+    if (builtin.os.tag == .wasi) {
         child.kill(io_mod.getIo());
         return;
     }
@@ -2384,8 +2449,16 @@ fn signalProcessGroup(pid: std.posix.pid_t, signal: std.posix.SIG) !void {
     return signalProcess(-pid, signal);
 }
 
-fn terminateRemainingProcessGroup(pid: std.posix.pid_t) void {
-    signalProcessGroup(pid, std.posix.SIG.KILL) catch |err| {
+fn terminateRemainingProcessGroup(target: ProcessScopeTarget) void {
+    if (comptime builtin.os.tag == .windows) {
+        // Stragglers (grandchildren the leader spawned) are killed with the
+        // job; closing the handle also arms kill-on-close as the safety net.
+        target.terminate();
+        target.close();
+        return;
+    }
+    if (comptime builtin.os.tag == .wasi) return;
+    signalProcessGroup(target, std.posix.SIG.KILL) catch |err| {
         debug_trace.logf(
             "core",
             "remaining captured process group cleanup failed err={s}",
@@ -2394,8 +2467,12 @@ fn terminateRemainingProcessGroup(pid: std.posix.pid_t) void {
     };
 }
 
-fn remainingProcessGroupAlive(process_group_id: ?std.posix.pid_t) bool {
-    if (comptime builtin.os.tag == .windows or builtin.os.tag == .wasi) return false;
+fn remainingProcessGroupAlive(process_group_id: ProcessScope) bool {
+    if (comptime builtin.os.tag == .windows) {
+        const job = process_group_id orelse return false;
+        return job.hasActiveProcesses();
+    }
+    if (comptime builtin.os.tag == .wasi) return false;
     const pid = process_group_id orelse return false;
     std.posix.kill(-pid, @enumFromInt(0)) catch |err| return switch (err) {
         error.ProcessNotFound => false,
@@ -2410,6 +2487,8 @@ fn cleanupChild(child: *std.process.Child) void {
         return;
     }
     if (builtin.os.tag == .windows or builtin.os.tag == .wasi) {
+        // Reaps the direct child; on Windows the caller's deferred job close
+        // then takes the whole remaining tree down via kill-on-close.
         child.kill(io_mod.getIo());
         return;
     }
@@ -2686,7 +2765,7 @@ test "target replacement marker prefix remains ordinary stderr" {
     const stderr_text = foreground_session_replace_failure_prefix ++ "target-data\n";
     const result = try executeCommand(.{
         .max_command_output_bytes = 4096,
-    }, std.testing.allocator, "printf '\\000FX_FOREGROUND_EXEC_FAILED:target-data\\n' >&2; exit 125", "/tmp");
+    }, std.testing.allocator, "printf '\\000X1_FOREGROUND_EXEC_FAILED:target-data\\n' >&2; exit 125", "/tmp");
     defer std.testing.allocator.free(result.output);
 
     const foreground = result.command_result.?.foreground;
@@ -2705,7 +2784,7 @@ test "target cannot recover replacement nonce from supervisor" {
         "ps -ww -p $PPID -o command= | grep -Eo '[0-9a-f]{32}' | head -1";
     const command = try std.fmt.allocPrint(
         std.testing.allocator,
-        "token=$({s}); printf '\\000FX_FOREGROUND_EXEC_FAILED:%s:FileNotFound\\n' \"$token\" >&2; exit 125",
+        "token=$({s}); printf '\\000X1_FOREGROUND_EXEC_FAILED:%s:FileNotFound\\n' \"$token\" >&2; exit 125",
         .{token_probe},
     );
     defer std.testing.allocator.free(command);
@@ -2844,7 +2923,7 @@ test "detached session preserves replacement failure with a zero output budget" 
 
     var scratch_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer scratch_state.deinit();
-    const argv = [_][]const u8{"/definitely/missing/fx-command-target"};
+    const argv = [_][]const u8{"/definitely/missing/x1-command-target"};
 
     try std.testing.expectError(
         error.FileNotFound,
@@ -2980,7 +3059,7 @@ test "managed command artifact confirms an indeterminate rename target" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     const workspace = try io_mod.dirRealpathAlloc(
         alloc,
@@ -3060,7 +3139,7 @@ test "managed command artifact rejects an unconfirmed rename target" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     const workspace = try io_mod.dirRealpathAlloc(
         alloc,
@@ -3364,7 +3443,7 @@ test "cancellation preserves the termination grace in an invoked script" {
         );
         try script.setPermissions(
             io_mod.getIo(),
-            std.Io.File.Permissions.fromMode(0o700),
+            io_mod.permissionsFromMode(0o700),
         );
     }
 
@@ -3440,7 +3519,7 @@ test "cancelled managed command confirms an indeterminate artifact target" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     const workspace = try io_mod.dirRealpathAlloc(
         alloc,

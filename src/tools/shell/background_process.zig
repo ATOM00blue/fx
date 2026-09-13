@@ -12,6 +12,11 @@ const host = @import("../../core/hosts/host.zig");
 const process_supervisor = @import(
     "../../core/background/process_supervisor.zig",
 );
+const shell_resolver = @import("../../core/terminal/shell_resolver.zig");
+const background_windows = if (builtin.os.tag == .windows)
+    @import("background_process_windows.zig")
+else
+    struct {};
 
 const Allocator = std.mem.Allocator;
 
@@ -36,6 +41,27 @@ const blocked_background_wrapper_command = std.fmt.comptimePrint(
     .{ background_ready_byte, background_exit_marker },
 );
 
+/// PowerShell equivalent of `blocked_background_wrapper_command`: emits the
+/// ready byte on stderr, validates the release byte, reads the command script
+/// from stdin to EOF, runs it, and appends the exit marker to stdout. After
+/// the handshake, PowerShell-level errors are rerouted to stdout because the
+/// stderr pipe dies with the x1 process; native descendants that inherit the
+/// original stderr handle may lose output written after x1 exits.
+const windows_background_wrapper_command = std.fmt.comptimePrint(
+    "[Console]::Error.Write([char]82);" ++
+        "$b=[Console]::In.Read();$n=[Console]::In.Read();" ++
+        "if(($b -ne {d}) -or ($n -ne 10)){{exit 125}};" ++
+        "$script_text=[Console]::In.ReadToEnd();" ++
+        "[Console]::SetError([Console]::Out);" ++
+        "$status=0;" ++
+        "try{{Invoke-Expression $script_text;" ++
+        "if($null -ne $LASTEXITCODE){{$status=$LASTEXITCODE}}}}" ++
+        "catch{{[Console]::Out.WriteLine($_.ToString());$status=1}};" ++
+        "[Console]::Out.Write(\"`n{s}\" + $status + \"`n\");" ++
+        "exit $status",
+    .{ background_release_byte, background_exit_marker },
+);
+
 pub const provider = background_process_provider.Provider{
     .spawn_prepared_fn = spawnPrepared,
     .capture_token_fn = captureToken,
@@ -58,13 +84,17 @@ fn spawnPrepared(
     alloc: Allocator,
     request: background_process_provider.SpawnRequest,
 ) background_process_provider.ProviderError!background_process_provider.PreparedProcess {
+    if (comptime builtin.os.tag == .windows) {
+        if (!host.current().background_processes) return error.Unsupported;
+        return spawnPreparedWindows(alloc, request);
+    }
     if (!host.current().background_processes) return error.Unsupported;
 
     const direct_argv = [_][]const u8{
         "sh",
         "-lc",
         blocked_background_wrapper_command,
-        "fx-background",
+        "x1-background",
     };
     const argv: []const []const u8 = &direct_argv;
     var child = try std.process.spawn(io_mod.getIo(), .{
@@ -152,6 +182,113 @@ fn cleanupFailedHandshake(
     ) == .confirmed) return cause;
     _ = handshake.detachUnreleasedReaper(alloc);
     return error.BackgroundProcessIdentityIndeterminate;
+}
+
+/// Windows twin of the spawn path above: a PowerShell wrapper provides the
+/// same ready/release handshake and exit-marker contract. `create_no_window`
+/// detaches the wrapper from this console so it survives console close (the
+/// PowerShell analogue of `trap '' HUP`).
+fn spawnPreparedWindows(
+    alloc: Allocator,
+    request: background_process_provider.SpawnRequest,
+) background_process_provider.ProviderError!background_process_provider.PreparedProcess {
+    var shell_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const shell = shell_resolver.windowsPowerShellPath(&shell_buf) orelse {
+        debug_trace.logf(
+            "background",
+            "powershell not found; windows background wrapper unavailable",
+            .{},
+        );
+        return error.Unsupported;
+    };
+
+    const argv = [_][]const u8{
+        shell,
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        windows_background_wrapper_command,
+    };
+    var child = std.process.spawn(io_mod.getIo(), .{
+        .argv = &argv,
+        .cwd = .{ .path = request.cwd },
+        .stdin = .pipe,
+        .stdout = .{ .file = background_launch_output.Output
+            .childStdioFileForProvider(request.output) },
+        .stderr = .pipe,
+        .create_no_window = true,
+    }) catch |err| return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.SpawnFailed,
+    };
+    var child_owned = true;
+    errdefer if (child_owned) {
+        if (child.stdin) |stdin| stdin.close(io_mod.getIo());
+        if (child.stderr) |stderr| stderr.close(io_mod.getIo());
+        child.stdin = null;
+        child.stderr = null;
+        _ = child.wait(io_mod.getIo()) catch {};
+    };
+
+    // On Windows `child.id` is the process handle, not the pid.
+    const child_handle = child.id orelse return error.SpawnFailed;
+    const pid = try std.fmt.allocPrint(
+        alloc,
+        "{d}",
+        .{background_windows.processIdFromHandle(child_handle)},
+    );
+    var pid_owned = true;
+    errdefer if (pid_owned) alloc.free(pid);
+
+    var release_write = child.stdin orelse return error.SpawnFailed;
+    child.stdin = null;
+    var release_owned = true;
+    errdefer if (release_owned) release_write.close(io_mod.getIo());
+    var ready_read = child.stderr orelse return error.SpawnFailed;
+    child.stderr = null;
+    var ready_owned = true;
+    errdefer if (ready_owned) ready_read.close(io_mod.getIo());
+
+    var handshake = SpawnedBackgroundHandshake{
+        .child = child,
+        .ready_read = ready_read,
+        .release_write = release_write,
+        .pid = pid,
+    };
+    child_owned = false;
+    pid_owned = false;
+    release_owned = false;
+    ready_owned = false;
+
+    var ready: [1]u8 = undefined;
+    const count = handshake.ready_read.readStreaming(
+        io_mod.getIo(),
+        &.{&ready},
+    ) catch |err| return cleanupFailedHandshake(alloc, &handshake, err);
+    if (count != 1 or ready[0] != background_ready_byte) {
+        return cleanupFailedHandshake(
+            alloc,
+            &handshake,
+            error.BackgroundWrapperNotReady,
+        );
+    }
+
+    const state = alloc.create(PreparedState) catch {
+        return cleanupFailedHandshake(
+            alloc,
+            &handshake,
+            error.OutOfMemory,
+        );
+    };
+    state.* = .{ .alloc = alloc, .handshake = handshake };
+    return .{
+        .context = state,
+        .pid = state.handshake.pid,
+        .close_and_wait_fn = closeAndWaitPrepared,
+        .wait_for_exit_fn = waitForPreparedExit,
+        .detach_reaper_fn = detachPreparedReaper,
+        .release_fn = releasePrepared,
+    };
 }
 
 fn closeAndWaitPrepared(
@@ -245,6 +382,9 @@ fn captureToken(
     alloc: Allocator,
     pid_text: []const u8,
 ) background_process_provider.ProviderError!process_supervisor.ProcessInstanceToken {
+    if (comptime builtin.os.tag == .windows) {
+        return background_windows.captureToken(alloc, pid_text);
+    }
     const pid = std.fmt.parseInt(std.posix.pid_t, pid_text, 10) catch
         return error.InvalidPid;
     return switch (builtin.os.tag) {
@@ -472,6 +612,22 @@ fn signalProcess(
     pid_text: []const u8,
     expected: process_supervisor.ProcessInstanceToken,
 ) background_process_provider.ProviderError!void {
+    if (comptime builtin.os.tag == .windows) {
+        switch (matchToken(context, alloc, pid_text, expected)) {
+            .matched => {},
+            .missing, .mismatched => {
+                return error.BackgroundProcessIdentityMismatch;
+            },
+            .unavailable => {
+                return error.BackgroundProcessIdentityIndeterminate;
+            },
+        }
+        if (!host.current().background_processes) return error.Unsupported;
+        if (!background_windows.terminatePidTree(pid_text)) {
+            return error.ProcessNotFound;
+        }
+        return;
+    }
     switch (matchToken(context, alloc, pid_text, expected)) {
         .matched => {},
         .missing, .mismatched => {
@@ -798,8 +954,11 @@ fn waitForProcessExit(
 }
 
 fn processExists(pid_text: []const u8) bool {
+    if (comptime builtin.os.tag == .windows) {
+        return background_windows.processAlive(pid_text);
+    }
     switch (builtin.os.tag) {
-        .windows, .wasi => return true,
+        .wasi => return true,
         else => {},
     }
     const pid = std.fmt.parseInt(
@@ -838,7 +997,7 @@ fn expectBlockedWrapperDoesNotExecute(
         "sh",
         "-lc",
         blocked_background_wrapper_command,
-        "fx-background",
+        "x1-background",
     };
     var child = try std.process.spawn(io_mod.getIo(), .{
         .argv = &argv,
@@ -943,7 +1102,7 @@ test "blocked background wrapper executes only after valid release" {
         "sh",
         "-lc",
         blocked_background_wrapper_command,
-        "fx-background",
+        "x1-background",
     };
     var child = try std.process.spawn(io_mod.getIo(), .{
         .argv = &argv,
@@ -1121,7 +1280,7 @@ test "released background command does not inherit release pipe as stdin" {
         "sh",
         "-lc",
         blocked_background_wrapper_command,
-        "fx-background",
+        "x1-background",
     };
     var child = try std.process.spawn(io_mod.getIo(), .{
         .argv = &argv,

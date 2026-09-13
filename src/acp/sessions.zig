@@ -24,7 +24,7 @@ const types = @import("../core/shared/types.zig");
 const context_contract = @import("../core/workspace/context_contract.zig");
 const command_specs = @import("../core/slash_commands/command_specs.zig");
 const test_builtin_gateway = if (builtin.is_test)
-    @import("../builtins/gateway.zig")
+    @import("../builtins/x1.zig")
 else
     struct {};
 
@@ -200,7 +200,7 @@ pub fn handleNewSession(state: *server.ServerState, alloc: Allocator, msg: *json
     );
     var session_rt_owned = true;
     defer if (session_rt_owned) session_rt.deinit(alloc);
-    _ = try session_rt.initializeProfileUsage(alloc, io_mod.getenv("HOME"));
+    _ = try session_rt.initializeProfileUsage(alloc, io_mod.homeDir());
     if (writable.state.usage) |usage| {
         try session_rt.usage.restore(
             alloc,
@@ -312,10 +312,10 @@ pub fn handleLoadWasmSession(state: *server.ServerState, alloc: Allocator, msg: 
     const sid_copy = try alloc.dupe(u8, loaded.state.id);
     var sid_owned = true;
     defer if (sid_owned) alloc.free(sid_copy);
-    if (loaded.state.preferences.provider != .gateway) {
+    if (loaded.state.preferences.provider != .layerx1) {
         return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_request,
-            .message = "Subscription models are unavailable in this WASM runtime",
+            .message = "This session was saved for a provider that X1 no longer supports",
         });
     }
     const model_copy = try alloc.dupe(u8, loaded.state.preferences.model);
@@ -563,12 +563,7 @@ fn handleRestoreSession(
     if (!try server.selectCredentialForProvider(state, effective_provider)) {
         return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_request,
-            .message = if (effective_provider == .codex)
-                credentials.missing_chatgpt_credential_message
-            else if (effective_provider == .grok)
-                credentials.missing_grok_credential_message
-            else
-                credentials.missing_credential_message,
+            .message = credentials.missing_layerx1_credential_message,
         });
     }
     const model_copy = try alloc.dupe(u8, effective_model);
@@ -581,7 +576,7 @@ fn handleRestoreSession(
     );
     var session_rt_owned = true;
     defer if (session_rt_owned) session_rt.deinit(alloc);
-    _ = try session_rt.initializeProfileUsage(alloc, io_mod.getenv("HOME"));
+    _ = try session_rt.initializeProfileUsage(alloc, io_mod.homeDir());
     try session_rt.restoreWithPermissionState(
         alloc,
         writable.state.conversation_language,
@@ -1116,11 +1111,7 @@ pub fn writeProviderConfigOption(
 ) !void {
     try w.writeAll("{\"id\":\"provider\",\"name\":\"Provider\",\"category\":\"model\",\"type\":\"select\",\"currentValue\":");
     try writeJsonStr(@tagName(current), w);
-    try w.writeAll(",\"options\":[{\"value\":\"gateway\",\"name\":\"Vercel AI Gateway\"},{\"value\":\"codex\",\"name\":\"Codex subscription\"}");
-    if (comptime !host_target.is_wasm) {
-        try w.writeAll(",{\"value\":\"grok\",\"name\":\"Grok subscription\"}");
-    }
-    try w.writeAll("]}");
+    try w.writeAll(",\"options\":[{\"value\":\"layerx1\",\"name\":\"LayerX1\"}]}");
 }
 
 pub fn writeModeConfigOption(
@@ -1227,7 +1218,7 @@ test "writeModelConfigOption includes all cached model ids" {
     const entries = [_]model_catalog.ModelCatalogEntry{
         .{ .id = @constCast("anthropic/claude-opus-4.6"), .model_type = @constCast("language") },
         .{ .id = @constCast("openai/gpt-4o"), .model_type = @constCast("language") },
-        .{ .id = @constCast("xai/grok-3"), .model_type = @constCast("language") },
+        .{ .id = @constCast("lx1-reasoning"), .model_type = @constCast("language") },
     };
 
     var out: std.Io.Writer.Allocating = .init(alloc);
@@ -1237,7 +1228,7 @@ test "writeModelConfigOption includes all cached model ids" {
     try std.testing.expect(std.mem.find(u8, items, "\"currentValue\":\"openai/gpt-4o\"") != null);
     try std.testing.expect(std.mem.find(u8, items, "anthropic/claude-opus-4.6") != null);
     try std.testing.expect(std.mem.find(u8, items, "openai/gpt-4o") != null);
-    try std.testing.expect(std.mem.find(u8, items, "xai/grok-3") != null);
+    try std.testing.expect(std.mem.find(u8, items, "lx1-reasoning") != null);
 }
 
 test "writeModelConfigOption appends current model when not in cached list" {
@@ -1457,7 +1448,7 @@ fn acpSessionTestConfig() server.Config {
         .gateway_chat_url = "http://127.0.0.1/unused",
         .gateway_models_path = "/v1/models",
         .gateway_provider = test_builtin_gateway.provider,
-        .provider_set = provider_set.gateway_only(test_builtin_gateway.provider_bundle),
+        .provider_set = provider_set.x1Only(test_builtin_gateway.provider_bundle),
         .secret_store = host.unavailable_secret_store,
         .prompt_policy = .{ .system_prompt = "test" },
         .ignored_list_entries = &.{},
@@ -1493,7 +1484,7 @@ fn initAcpSessionTestState(
         .writer = .{ .stdout = capture },
         .workspace_root = workspace,
         .api_key = api_key,
-        .credential_source = .ai_gateway_api_key,
+        .credential_source = .layerx1_subscription,
         .selected_model = selected_model,
         .configured_model = configured_model,
         .agent_step_limit = 8,
@@ -1508,7 +1499,7 @@ test "ACP new and loaded sessions provide a writable subagent host" {
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
 
     const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -1552,10 +1543,7 @@ test "ACP new and loaded sessions provide a writable subagent host" {
         );
         try std.testing.expectEqualStrings("review", new_active.mode);
         try std.testing.expect(new_writable.state.usage != null);
-        try std.testing.expect(
-            new_active.session_rt.usage.generation_usage_providers.select(.gateway).?.lookup_fn ==
-                state.cfg.provider_set.deferredUsageProviders().select(.gateway).?.lookup_fn,
-        );
+        try std.testing.expect(new_active.session_rt.usage.generation_usage_providers.select(.layerx1) == null);
         io_mod.sleep(10 * std.time.ns_per_ms);
         var live_usage = try new_active.session_rt.usage.snapshot(alloc);
         defer live_usage.deinit(alloc);
@@ -1591,10 +1579,7 @@ test "ACP new and loaded sessions provide a writable subagent host" {
         try std.testing.expect(loaded_writable.state.usage != null);
         try std.testing.expect(state.subagent_store != null);
         try std.testing.expect(state.subagent_host != null);
-        try std.testing.expect(
-            loaded_active.session_rt.usage.generation_usage_providers.select(.gateway).?.lookup_fn ==
-                state.cfg.provider_set.deferredUsageProviders().select(.gateway).?.lookup_fn,
-        );
+        try std.testing.expect(loaded_active.session_rt.usage.generation_usage_providers.select(.layerx1) == null);
 
         try capture.sync(io_mod.getIo());
     }
@@ -1621,7 +1606,7 @@ test "ACP same-session restore retires the replaced MCP runtime after active use
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
 
     const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");

@@ -94,7 +94,7 @@ pub const PermissionTargetKind = enum {
 
 pub const web_search_permission = "web_search";
 pub const web_fetch_permission = "web_fetch";
-pub const yolo_warning_text = "YOLO enabled: fx permission checks disabled";
+pub const yolo_warning_text = "YOLO enabled: x1 permission checks disabled";
 
 pub fn isWebSearchToolName(tool_name: []const u8) bool {
     return std.mem.eql(u8, tool_name, web_search_permission);
@@ -2154,7 +2154,7 @@ test "web_search permission target is whole tool name" {
     const second: types.ToolCall = .{
         .id = "call_2",
         .name = "web_search",
-        .arguments_json = "{\"query\":\"current Vercel news\",\"allowed_domains\":[\"vercel.com\"]}",
+        .arguments_json = "{\"query\":\"current LayerX1 news\",\"allowed_domains\":[\"vercel.com\"]}",
     };
 
     try std.testing.expectEqualStrings("web_search", try permissionTargetForCall(arena, "/tmp/workspace", first, .none));
@@ -2173,7 +2173,7 @@ test "web_search session grant authorizes subsequent query" {
     const target = try permissionTargetForCall(arena, "/tmp/workspace", .{
         .id = "call_1",
         .name = "web_search",
-        .arguments_json = "{\"query\":\"current Vercel news\"}",
+        .arguments_json = "{\"query\":\"current LayerX1 news\"}",
     }, .none);
 
     try std.testing.expect(sessionGrantAllowed(&grants, "web_search", target));
@@ -2625,8 +2625,8 @@ test "configured wildcard command allows only static command grammar" {
 
     try std.testing.expectEqual(RuleDecision.allow, ruleDecisionForPermissionPattern(rules, "bash", "printf safe", .none));
     try std.testing.expectEqual(RuleDecision.allow, ruleDecisionForPermissionPattern(rules, "bash", "printf 'safe value'", .none));
-    try std.testing.expectEqual(RuleDecision.none, ruleDecisionForPermissionPattern(rules, "bash", "printf safe && touch /tmp/fx-marker", .none));
-    try std.testing.expectEqual(RuleDecision.none, ruleDecisionForPermissionPattern(rules, "bash", "printf \"$(touch /tmp/fx-marker)\"", .none));
+    try std.testing.expectEqual(RuleDecision.none, ruleDecisionForPermissionPattern(rules, "bash", "printf safe && touch /tmp/x1-marker", .none));
+    try std.testing.expectEqual(RuleDecision.none, ruleDecisionForPermissionPattern(rules, "bash", "printf \"$(touch /tmp/x1-marker)\"", .none));
 }
 
 test "configured command rules require exact matching outside static grammar" {
@@ -2636,7 +2636,7 @@ test "configured command rules require exact matching outside static grammar" {
     const exact_rules: types.PermissionRuleSet = .{ .rules = &exact_rules_buf };
 
     try std.testing.expectEqual(RuleDecision.allow, ruleDecisionForPermissionPattern(exact_rules, "bash", "printf \"$(date)\"", .none));
-    try std.testing.expectEqual(RuleDecision.none, ruleDecisionForPermissionPattern(exact_rules, "bash", "printf \"$(touch /tmp/fx-marker)\"", .none));
+    try std.testing.expectEqual(RuleDecision.none, ruleDecisionForPermissionPattern(exact_rules, "bash", "printf \"$(touch /tmp/x1-marker)\"", .none));
 
     var dynamic_pattern_rules_buf = [_]types.PermissionRule{
         .{ .permission = @constCast("bash"), .pattern = @constCast("printf \"*\""), .action = .allow },
@@ -2654,8 +2654,8 @@ test "configured command deny and ask retain generic wildcard matching" {
     };
     const rules: types.PermissionRuleSet = .{ .rules = &rules_buf };
 
-    try std.testing.expectEqual(RuleDecision.deny, ruleDecisionForPermissionPattern(rules, "bash", "printf safe && touch /tmp/fx-marker", .none));
-    try std.testing.expectEqual(RuleDecision.ask, ruleDecisionForPermissionPattern(rules, "custom", "printf \"$(touch /tmp/fx-marker)\"", .none));
+    try std.testing.expectEqual(RuleDecision.deny, ruleDecisionForPermissionPattern(rules, "bash", "printf safe && touch /tmp/x1-marker", .none));
+    try std.testing.expectEqual(RuleDecision.ask, ruleDecisionForPermissionPattern(rules, "custom", "printf \"$(touch /tmp/x1-marker)\"", .none));
 }
 
 test "static command grammar is an explicit allowlist" {

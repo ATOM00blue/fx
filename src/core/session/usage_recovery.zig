@@ -189,7 +189,7 @@ test "missing recovery registry is an empty bounded set" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);
     var store = try session_store.Store.initFromHome(alloc, home, "/");
@@ -205,7 +205,7 @@ test "recovery markers are idempotent and clear durably" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);
@@ -220,13 +220,13 @@ test "recovery markers are idempotent and clear durably" {
         error.FileNotFound,
         tmp.dir.access(
             io_mod.getIo(),
-            "home/.fx/sessions/usage-recovery",
+            "home/.x1/sessions/usage-recovery",
             .{},
         ),
     );
     try tmp.dir.access(
         io_mod.getIo(),
-        "home/.fx/usage-recovery/recovery-marker",
+        "home/.x1/usage-recovery/recovery-marker",
         .{},
     );
 
@@ -260,7 +260,7 @@ test "recovery registry reads only marked durable session state" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);
@@ -333,7 +333,7 @@ test "recovery registry reads only marked durable session state" {
 
     var marker_before_file = try tmp.dir.openFile(
         io_mod.getIo(),
-        "home/.fx/usage-recovery/indexed-usage-recovery",
+        "home/.x1/usage-recovery/indexed-usage-recovery",
         .{},
     );
     defer marker_before_file.close(io_mod.getIo());
@@ -356,7 +356,7 @@ test "recovery registry reads only marked durable session state" {
 
     var marker_after_file = try tmp.dir.openFile(
         io_mod.getIo(),
-        "home/.fx/usage-recovery/indexed-usage-recovery",
+        "home/.x1/usage-recovery/indexed-usage-recovery",
         .{},
     );
     defer marker_after_file.close(io_mod.getIo());
@@ -374,7 +374,7 @@ test "recovery marker distinguishes checkpoints around a crash boundary" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);

@@ -211,14 +211,17 @@ test "parse extracts model command payload" {
 }
 
 test "parse extracts an optional logout provider" {
-    switch (parse(testSlashRegistry(), "/logout chatgpt")) {
-        .logout => |provider| try std.testing.expectEqualStrings("chatgpt", provider),
+    switch (parse(testSlashRegistry(), "/logout x1")) {
+        .logout => |provider| try std.testing.expectEqualStrings("x1", provider),
         else => return error.TestExpectedLogoutCommand,
     }
 }
 
-test "parse rejects removed plural model command" {
-    try std.testing.expectEqual(ParsedCommand.unknown, parse(testSlashRegistry(), "/models"));
+test "parse accepts plural model alias" {
+    switch (parse(testSlashRegistry(), "/models")) {
+        .model => |payload| try std.testing.expectEqualStrings("", payload),
+        else => return error.TestExpectedModelCommand,
+    }
 }
 
 test "parse leaves provider selection to setup" {

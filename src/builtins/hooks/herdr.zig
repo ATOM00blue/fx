@@ -1,9 +1,10 @@
 //! Best-effort lifecycle reporter for the herdr agent multiplexer.
 //!
 //! Each report uses a short-lived Unix socket. Failures and reply timeouts are
-//! ignored so the integration cannot block or terminate an fx session.
+//! ignored so the integration cannot block or terminate an x1 session.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const io_mod = @import("../../core/shared/io.zig");
 const debug_trace = @import("../../core/shared/debug_trace.zig");
 const host_target = @import("../../core/hosts/target.zig");
@@ -17,8 +18,8 @@ const custom_status_max = 32;
 const response_timeout = std.posix.timeval{ .sec = 0, .usec = 250_000 };
 
 // Third-party reporters use the `custom:` source prefix.
-const source = "custom:fx";
-const agent_name = "fx";
+const source = "custom:x1";
+const agent_name = "x1";
 
 const Request = union(enum) {
     report: struct { state: State, custom_status: ?[]const u8 },
@@ -39,11 +40,11 @@ pub const Client = struct {
     next_id: u64 = 1,
 
     pub fn shouldEnable(
-        fx_herdr: ?[]const u8,
+        x1_herdr: ?[]const u8,
         socket_path: ?[]const u8,
         pane_id: ?[]const u8,
     ) bool {
-        if (fx_herdr) |val| {
+        if (x1_herdr) |val| {
             if (std.mem.eql(u8, val, "0") or std.ascii.eqlIgnoreCase(val, "false"))
                 return false;
         }
@@ -55,11 +56,11 @@ pub const Client = struct {
     pub fn initFromEnv(self: *Client, alloc: std.mem.Allocator) void {
         const socket_path = io_mod.getenv("HERDR_SOCKET_PATH");
         const pane_id = io_mod.getenv("HERDR_PANE_ID");
-        if (!shouldEnable(io_mod.getenv("FX_HERDR"), socket_path, pane_id)) {
-            debug_trace.logf("herdr", "disabled socket={s} pane={s} fx_herdr={s}", .{
+        if (!shouldEnable(io_mod.getenv("X1_HERDR"), socket_path, pane_id)) {
+            debug_trace.logf("herdr", "disabled socket={s} pane={s} x1_herdr={s}", .{
                 socket_path orelse "(unset)",
                 pane_id orelse "(unset)",
-                io_mod.getenv("FX_HERDR") orelse "(unset)",
+                io_mod.getenv("X1_HERDR") orelse "(unset)",
             });
             return;
         }
@@ -78,7 +79,7 @@ pub const Client = struct {
 
     pub fn deinit(self: *Client) void {
         // Clear herdr's pane before freeing paths so exit does not leave a
-        // stale idle "fx" label behind.
+        // stale idle "x1" label behind.
         self.release();
         const io = io_mod.getIo();
         self.mutex.lockUncancelable(io);
@@ -99,14 +100,14 @@ pub const Client = struct {
         self.send(.{ .report = .{ .state = state, .custom_status = clampStatus(custom_status) } });
     }
 
-    /// Report fx's session id so herdr can associate the pane with a resumable
+    /// Report x1's session id so herdr can associate the pane with a resumable
     /// session. Does not affect herdr's semantic state.
     pub fn reportSession(self: *Client, session_id: []const u8) void {
         if (session_id.len == 0) return;
         self.send(.{ .session = session_id });
     }
 
-    /// Name the pane/agent so herdr lists fx even while idle. Best-effort;
+    /// Name the pane/agent so herdr lists x1 even while idle. Best-effort;
     /// called once at startup after the first state report.
     pub fn announce(self: *Client) void {
         self.sendAll(&.{
@@ -115,8 +116,8 @@ pub const Client = struct {
         });
     }
 
-    /// Remove fx from the pane on exit: drop the reported agent and clear the
-    /// label/name. Without this the pane keeps showing "fx" after fx is gone.
+    /// Remove x1 from the pane on exit: drop the reported agent and clear the
+    /// label/name. Without this the pane keeps showing "x1" after x1 is gone.
     pub fn release(self: *Client) void {
         self.sendAll(&.{
             .{ .agent_rename = null },
@@ -169,8 +170,12 @@ pub const Client = struct {
     }
 
     fn connectLocked(self: *Client) !std.Io.net.Stream {
-        const address = try std.Io.net.UnixAddress.init(self.socket_path);
-        return address.connect(io_mod.getIo());
+        if (comptime builtin.os.tag == .windows) {
+            return error.Unsupported;
+        } else {
+            const address = try std.Io.net.UnixAddress.init(self.socket_path);
+            return address.connect(io_mod.getIo());
+        }
     }
 
     fn takeIdLocked(self: *Client) u64 {
@@ -181,12 +186,16 @@ pub const Client = struct {
 };
 
 fn applyResponseTimeout(stream: std.Io.net.Stream) void {
-    std.posix.setsockopt(
-        stream.socket.handle,
-        std.posix.SOL.SOCKET,
-        std.posix.SO.RCVTIMEO,
-        std.mem.asBytes(&response_timeout),
-    ) catch {};
+    if (comptime builtin.os.tag == .windows) {
+        return;
+    } else {
+        std.posix.setsockopt(
+            stream.socket.handle,
+            std.posix.SOL.SOCKET,
+            std.posix.SO.RCVTIMEO,
+            std.mem.asBytes(&response_timeout),
+        ) catch {};
+    }
 }
 
 fn clampStatus(custom_status: ?[]const u8) ?[]const u8 {
@@ -293,7 +302,7 @@ test "shouldEnable requires both socket path and pane id" {
     try std.testing.expect(!Client.shouldEnable(null, "/tmp/herdr.sock", ""));
 }
 
-test "shouldEnable honors FX_HERDR opt-out" {
+test "shouldEnable honors X1_HERDR opt-out" {
     try std.testing.expect(!Client.shouldEnable("0", "/tmp/herdr.sock", "w1:p1"));
     try std.testing.expect(!Client.shouldEnable("false", "/tmp/herdr.sock", "w1:p1"));
     try std.testing.expect(!Client.shouldEnable("FALSE", "/tmp/herdr.sock", "w1:p1"));
@@ -306,7 +315,7 @@ test "report_agent serializes a single newline-delimited json line" {
     try writeReportAgent(&out.writer, 7, "w1:p1", .working, "editing");
     try std.testing.expectEqualStrings(
         "{\"id\":\"7\",\"method\":\"pane.report_agent\",\"params\":{\"pane_id\":\"w1:p1\"," ++
-            "\"source\":\"custom:fx\",\"agent\":\"fx\",\"state\":\"working\"," ++
+            "\"source\":\"custom:x1\",\"agent\":\"x1\",\"state\":\"working\"," ++
             "\"custom_status\":\"editing\"}}\n",
         out.written(),
     );
@@ -318,7 +327,7 @@ test "report_agent omits custom_status when null" {
     try writeReportAgent(&out.writer, 1, "w1:p1", .idle, null);
     try std.testing.expectEqualStrings(
         "{\"id\":\"1\",\"method\":\"pane.report_agent\",\"params\":{\"pane_id\":\"w1:p1\"," ++
-            "\"source\":\"custom:fx\",\"agent\":\"fx\",\"state\":\"idle\"}}\n",
+            "\"source\":\"custom:x1\",\"agent\":\"x1\",\"state\":\"idle\"}}\n",
         out.written(),
     );
 }
@@ -329,7 +338,7 @@ test "report_agent escapes pane id" {
     try writeReportAgent(&out.writer, 2, "pane\"x", .blocked, null);
     try std.testing.expectEqualStrings(
         "{\"id\":\"2\",\"method\":\"pane.report_agent\",\"params\":{\"pane_id\":\"pane\\\"x\"," ++
-            "\"source\":\"custom:fx\",\"agent\":\"fx\",\"state\":\"blocked\"}}\n",
+            "\"source\":\"custom:x1\",\"agent\":\"x1\",\"state\":\"blocked\"}}\n",
         out.written(),
     );
 }
@@ -337,9 +346,9 @@ test "report_agent escapes pane id" {
 test "pane.rename labels the pane" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try writeRename(&out.writer, 4, "pane.rename", "pane_id", "w1:p1", "label", "fx");
+    try writeRename(&out.writer, 4, "pane.rename", "pane_id", "w1:p1", "label", "x1");
     try std.testing.expectEqualStrings(
-        "{\"id\":\"4\",\"method\":\"pane.rename\",\"params\":{\"pane_id\":\"w1:p1\",\"label\":\"fx\"}}\n",
+        "{\"id\":\"4\",\"method\":\"pane.rename\",\"params\":{\"pane_id\":\"w1:p1\",\"label\":\"x1\"}}\n",
         out.written(),
     );
 }
@@ -347,9 +356,9 @@ test "pane.rename labels the pane" {
 test "agent.rename names the agent" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try writeRename(&out.writer, 5, "agent.rename", "target", "w1:p1", "name", "fx");
+    try writeRename(&out.writer, 5, "agent.rename", "target", "w1:p1", "name", "x1");
     try std.testing.expectEqualStrings(
-        "{\"id\":\"5\",\"method\":\"agent.rename\",\"params\":{\"target\":\"w1:p1\",\"name\":\"fx\"}}\n",
+        "{\"id\":\"5\",\"method\":\"agent.rename\",\"params\":{\"target\":\"w1:p1\",\"name\":\"x1\"}}\n",
         out.written(),
     );
 }
@@ -364,12 +373,12 @@ test "rename with null value clears the label" {
     );
 }
 
-test "clear_agent_authority removes fx from the pane" {
+test "clear_agent_authority removes x1 from the pane" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
     try writeClearAuthority(&out.writer, 7, "w1:p1");
     try std.testing.expectEqualStrings(
-        "{\"id\":\"7\",\"method\":\"pane.clear_agent_authority\",\"params\":{\"pane_id\":\"w1:p1\",\"source\":\"custom:fx\"}}\n",
+        "{\"id\":\"7\",\"method\":\"pane.clear_agent_authority\",\"params\":{\"pane_id\":\"w1:p1\",\"source\":\"custom:x1\"}}\n",
         out.written(),
     );
 }
@@ -380,7 +389,7 @@ test "report_agent_session serializes session identity" {
     try writeReportAgentSession(&out.writer, 3, "w1:p1", "session-42");
     try std.testing.expectEqualStrings(
         "{\"id\":\"3\",\"method\":\"pane.report_agent_session\",\"params\":{\"pane_id\":\"w1:p1\"," ++
-            "\"source\":\"custom:fx\",\"agent\":\"fx\",\"agent_session_id\":\"session-42\"}}\n",
+            "\"source\":\"custom:x1\",\"agent\":\"x1\",\"agent_session_id\":\"session-42\"}}\n",
         out.written(),
     );
 }

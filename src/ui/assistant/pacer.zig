@@ -459,7 +459,7 @@ fn makeBackgroundTurn(alloc: Allocator) !HistoryTurn {
             .text = try alloc.dupe(u8, "u"),
             .images = &.{},
         },
-        .log_path = try alloc.dupe(u8, "/tmp/fx-background.log"),
+        .log_path = try alloc.dupe(u8, "/tmp/x1-background.log"),
         .expect_url = false,
     } };
 }

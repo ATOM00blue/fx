@@ -1,8 +1,8 @@
 const std = @import("std");
 const stream_provider = @import("../core/agent/stream_provider.zig");
 const io_mod = @import("../core/shared/io.zig");
-const gateway_client = @import("client.zig");
-const credential_authority = @import("../core/auth/credential_authority.zig");
+const layerx1 = @import("layerx1.zig");
+const x1_agent_profile = @import("x1_agent_profile.zig");
 
 const Allocator = std.mem.Allocator;
 const max_error_body_bytes = 1024 * 1024;
@@ -73,24 +73,16 @@ fn stream(raw: ?*anyopaque, alloc: Allocator, request: stream_provider.ModelRequ
     const auth = try std.fmt.allocPrint(alloc, "Bearer {s}", .{request.credential.secret});
     defer alloc.free(auth);
 
-    const Header = struct { name: []const u8, value: []const u8 };
     var headers: std.ArrayList(Header) = .empty;
     defer headers.deinit(alloc);
-    try headers.appendSlice(alloc, &.{
-        .{ .name = "content-type", .value = "application/json" },
-        .{ .name = "authorization", .value = auth },
-        .{ .name = "HTTP-Referer", .value = "https://github.com/vercel-labs/fx" },
-        .{ .name = "X-Title", .value = "fx" },
-        .{ .name = "ai-gateway-protocol-version", .value = "0.0.1" },
-        .{ .name = "ai-language-model-specification-version", .value = "4" },
-        .{ .name = "ai-language-model-id", .value = request.model },
-        .{ .name = "ai-language-model-streaming", .value = "true" },
-    });
-    if (request.credential.tenant) |team| if (team.len > 0) try headers.append(alloc, .{ .name = "x-vercel-ai-gateway-team", .value = team });
-    if (request.session_id) |session_id| if (session_id.len > 0) try headers.appendSlice(alloc, &.{
-        .{ .name = "x-session-id", .value = session_id },
-        .{ .name = "x-session-affinity", .value = session_id },
-    });
+    try appendInferenceHeaders(
+        alloc,
+        &headers,
+        auth,
+        request.credential.account_id,
+        request.session_id,
+        x1_agent_profile.identityForRequest(request),
+    );
 
     var headers_json: std.Io.Writer.Allocating = .init(alloc);
     defer headers_json.deinit();
@@ -123,13 +115,14 @@ fn stream(raw: ?*anyopaque, alloc: Allocator, request: stream_provider.ModelRequ
     var reader: HostStreamReader = undefined;
     reader.init(transport, handle, request.cancel_flag, request.cooperative_pulse);
     var events = request.events;
-    const completion = gateway_client.consumeGatewaySseStream(
+    const completion = layerx1.consumeSse(
         alloc,
         &reader.interface,
         &events,
         EventBridge.content,
         EventBridge.toolStart,
         EventBridge.reasoning,
+        EventBridge.toolInput,
         request.cancel_flag,
         request.content_capture_limit,
     ) catch |err| switch (err) {
@@ -138,41 +131,9 @@ fn stream(raw: ?*anyopaque, alloc: Allocator, request: stream_provider.ModelRequ
     };
     return .{ .completed = .{
         .completion = completion,
-        .usage = gatewayUsageOutcome(request, completion),
+        .usage = .{ .unavailable = .possibly_billed },
         .ownership = .owned,
     } };
-}
-
-fn gatewayUsageOutcome(
-    request: stream_provider.ModelRequest,
-    completion: @import("../core/shared/types.zig").ModelCompletion,
-) stream_provider.UsageOutcome {
-    const reference = gatewayUsageReference(request, completion) orelse
-        return .{ .unavailable = .possibly_billed };
-    return if (completion.billing != null)
-        .{ .exact = .gateway }
-    else
-        .{ .deferred = reference };
-}
-
-fn gatewayUsageReference(
-    request: stream_provider.ModelRequest,
-    completion: @import("../core/shared/types.zig").ModelCompletion,
-) ?stream_provider.DeferredUsageReference {
-    const generation_id = completion.generation_id orelse return null;
-    const source = request.credential.source orelse return null;
-    return .{
-        .provider = .gateway,
-        .generation_id = generation_id,
-        .scope = gateway_client.generationBaseUrl(),
-        .tenant = request.credential.tenant,
-        .account_id = request.credential.account_id,
-        .credential_source = source,
-        .credential_identity = credential_authority.derive(
-            source,
-            request.credential.account_id,
-        ),
-    };
 }
 
 const EventBridge = struct {
@@ -188,10 +149,41 @@ const EventBridge = struct {
         sink(raw).emit(.{ .reasoning_delta = chunk });
     }
 
+    fn toolInput(raw: *anyopaque, chunk: []const u8) void {
+        sink(raw).emit(.{ .tool_input_delta = chunk });
+    }
+
     fn toolStart(raw: *anyopaque, id: []const u8, name: []const u8, label: ?[]const u8) void {
         sink(raw).emit(.{ .tool_started = .{ .id = id, .name = name, .label = label } });
     }
 };
+
+const Header = struct { name: []const u8, value: []const u8 };
+
+pub fn appendInferenceHeaders(
+    alloc: Allocator,
+    headers: *std.ArrayList(Header),
+    auth: []const u8,
+    account_id: ?[]const u8,
+    session_id: ?[]const u8,
+    identity: x1_agent_profile.RequestIdentity,
+) !void {
+    try headers.appendSlice(alloc, &.{
+        .{ .name = "content-type", .value = "application/json" },
+        .{ .name = "authorization", .value = auth },
+        .{ .name = "accept", .value = "text/event-stream" },
+    });
+    const profile = try x1_agent_profile.requestHeaders(identity);
+    for (profile.slice()) |header| {
+        try headers.append(alloc, .{ .name = header.name, .value = header.value });
+    }
+    if (account_id) |id| if (id.len > 0) {
+        try headers.append(alloc, .{ .name = "x-account-id", .value = id });
+    };
+    if (session_id) |id| if (id.len > 0) {
+        try headers.append(alloc, .{ .name = "x-session-id", .value = id });
+    };
+}
 
 fn failureKind(status: std.http.Status) stream_provider.FailureKind {
     return switch (status) {
@@ -243,6 +235,11 @@ const HostStreamReader = struct {
     buffer: [16 * 1024]u8 = undefined,
     interface: std.Io.Reader = undefined,
 
+    const vtable: std.Io.Reader.VTable = .{
+        .stream = streamReader,
+        .readVec = readVec,
+    };
+
     fn init(self: *@This(), transport: Transport, handle: i32, cancel_flag: *std.atomic.Value(bool), cooperative_pulse: ?stream_provider.CooperativePulse) void {
         self.* = .{
             .transport = transport,
@@ -254,7 +251,12 @@ const HostStreamReader = struct {
             else
                 null,
         };
-        self.interface = .{ .vtable = &.{ .stream = streamReader, .readVec = readVec }, .buffer = &self.buffer, .seek = 0, .end = 0 };
+        self.interface = .{
+            .vtable = &vtable,
+            .buffer = &self.buffer,
+            .seek = 0,
+            .end = 0,
+        };
     }
 
     fn readVec(reader: *std.Io.Reader, data: [][]u8) std.Io.Reader.Error!usize {
@@ -424,4 +426,46 @@ test "host stream reader throttles cooperative pulses" {
     try std.testing.expectEqual(@as(usize, 1), trace.calls);
     try reader.pulseIfDueAt(awake_timestamp(200));
     try std.testing.expectEqual(@as(usize, 2), trace.calls);
+}
+
+fn profileHeaderValue(headers: []const Header, name: []const u8) ?[]const u8 {
+    for (headers) |header| {
+        if (std.mem.eql(u8, header.name, name)) return header.value;
+    }
+    return null;
+}
+
+test "X1 Agent Profile native and host headers match" {
+    const alloc = std.testing.allocator;
+    var native_buf: [layerx1.max_inference_extra_headers]std.http.Header = undefined;
+    const native = try layerx1.inferenceExtraHeaders(&native_buf, "acct_1", "session_1", .{});
+    var host_headers: std.ArrayList(Header) = .empty;
+    defer host_headers.deinit(alloc);
+    try appendInferenceHeaders(alloc, &host_headers, "Bearer secret", "acct_1", "session_1", .{});
+    const profile = try x1_agent_profile.requestHeaders(.{});
+    try std.testing.expectEqual(@as(usize, 3), profile.len);
+    for (profile.slice()) |expected| {
+        try std.testing.expectEqualStrings(
+            expected.value,
+            profileHeaderValue(host_headers.items, expected.name) orelse return error.TestExpectedEqual,
+        );
+        var found = false;
+        for (native) |header| {
+            if (std.mem.eql(u8, header.name, expected.name)) {
+                try std.testing.expectEqualStrings(expected.value, header.value);
+                found = true;
+                break;
+            }
+        }
+        try std.testing.expect(found);
+    }
+    try std.testing.expect(profileHeaderValue(host_headers.items, x1_agent_profile.header_idempotency_key) == null);
+    try std.testing.expectEqualStrings(
+        x1_agent_profile.client_identity,
+        profileHeaderValue(host_headers.items, x1_agent_profile.header_client).?,
+    );
+    try std.testing.expectEqualStrings(
+        "1",
+        profileHeaderValue(host_headers.items, x1_agent_profile.header_agent_protocol).?,
+    );
 }

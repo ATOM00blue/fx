@@ -2,23 +2,23 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runx1 } from "../evals/eval-helpers";
 
 const TIMEOUT = 15_000;
 const NO_GATEWAY_AUTH = {
   AI_GATEWAY_API_KEY: undefined,
   VERCEL_OIDC_TOKEN: undefined,
-  FX_DISABLE_KEYCHAIN: "1",
+  X1_DISABLE_KEYCHAIN: "1",
 };
 
 async function runWithoutGatewayAuth(args: string[]) {
-  const root = mkdtempSync(join(tmpdir(), "fx-web-fetch-no-auth-"));
+  const root = mkdtempSync(join(tmpdir(), "x1-web-fetch-no-auth-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   mkdirSync(home);
   mkdirSync(workspace);
   try {
-    return await runFx(args, {
+    return await runx1(args, {
       cwd: workspace,
       env: { ...NO_GATEWAY_AUTH, HOME: home },
     });
@@ -44,7 +44,7 @@ describe("web_fetch permission progress", () => {
       ]);
 
       expect(result.code).toBe(1);
-      expect(result.stderr).toContain("Fx needs access to Vercel AI Gateway. Run fx login to sign in, fx setup to use an API key, or set AI_GATEWAY_API_KEY.");
+      expect(result.stderr).toContain("x1 needs a LayerX1 login. Run x1 login.");
       expectNoFetchProgress(result.stderr);
     },
     TIMEOUT,

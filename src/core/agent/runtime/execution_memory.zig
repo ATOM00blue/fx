@@ -24,7 +24,7 @@ const ToolCall = types.ToolCall;
 const Config = runtime_config.Config;
 const ToolExecutionStatus = runtime_tool_contracts.ToolExecutionStatus;
 
-pub fn persistedStatusForCurrentFxLocalResult(
+pub fn persistedStatusForCurrentx1LocalResult(
     status: ToolExecutionStatus,
     output: []const u8,
 ) types.PersistedToolStatus {
@@ -511,7 +511,7 @@ test "exact command sources delete replay and missing handles retain it" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -722,7 +722,7 @@ test "required terminal exec retains exact replay and publishes its handle" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -784,7 +784,7 @@ test "required terminal exec stores large output only as replay" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,

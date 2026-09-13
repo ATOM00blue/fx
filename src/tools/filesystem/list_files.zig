@@ -243,7 +243,7 @@ fn isSymlinkPermissionError(err: anyerror) bool {
 }
 
 fn setMode(path: []const u8, mode: std.posix.mode_t) !void {
-    try std.Io.Dir.cwd().setFilePermissions(io_mod.getIo(), path, std.Io.File.Permissions.fromMode(mode), .{});
+    try std.Io.Dir.cwd().setFilePermissions(io_mod.getIo(), path, io_mod.permissionsFromMode(mode), .{});
 }
 
 fn restoreMode(path: []const u8, mode: std.posix.mode_t) void {
@@ -427,7 +427,7 @@ test "list_files regular file target reports open failure" {
 test "list_files permission denied directory returns structured recovery" {
     if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
-    const root = try std.fmt.allocPrint(alloc, "/tmp/fx-list-files-access-{d}", .{io_mod.nanoTimestamp()});
+    const root = try std.fmt.allocPrint(alloc, "/tmp/x1-list-files-access-{d}", .{io_mod.nanoTimestamp()});
     defer alloc.free(root);
     defer std.Io.Dir.cwd().deleteTree(io_mod.getIo(), root) catch {};
     try std.Io.Dir.cwd().createDirPath(io_mod.getIo(), root);

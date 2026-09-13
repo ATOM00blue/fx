@@ -39,22 +39,12 @@ pub const LogoutFacts = struct {
 
 pub fn decideLogoutProvider(facts: LogoutFacts) model_provider.ProviderId {
     if (facts.requested) |provider| return provider;
-    if (facts.selected == .grok or facts.active_source == .grok_subscription) return .grok;
-    if (facts.selected == .codex or facts.active_source == .chatgpt_subscription) return .codex;
-
-    const only_grok_login = facts.available_sources.contains(.grok_subscription) and
-        !facts.available_sources.contains(.fx_login) and
-        !facts.available_sources.contains(.chatgpt_subscription);
-    if (only_grok_login) return .grok;
-    const only_codex_login = facts.available_sources.contains(.chatgpt_subscription) and
-        !facts.available_sources.contains(.fx_login) and
-        !facts.available_sources.contains(.grok_subscription);
-    if (only_codex_login) return .codex;
-    return .gateway;
+    _ = facts.active_source;
+    _ = facts.available_sources;
+    return .layerx1;
 }
 
 pub const SignInCompletionAction = union(enum) {
-    vercel,
     switch_provider: model_provider.ProviderId,
     activate_source: credentials.Source,
 };
@@ -64,60 +54,53 @@ pub fn signInCompletion(
     provider_routing_supported: bool,
 ) SignInCompletionAction {
     return switch (provider) {
-        .gateway => .vercel,
-        .codex => if (provider_routing_supported)
-            .{ .switch_provider = .codex }
+        .layerx1 => if (provider_routing_supported)
+            .{ .switch_provider = .layerx1 }
         else
-            .{ .activate_source = .chatgpt_subscription },
-        .grok => if (provider_routing_supported)
-            .{ .switch_provider = .grok }
-        else
-            .{ .activate_source = .grok_subscription },
+            .{ .activate_source = .layerx1_subscription },
     };
 }
 
 test "provider switch and logout decisions are pure and provider keyed" {
     try std.testing.expectEqual(ProviderSwitchDecision.no_change, decideProviderSwitch(.{
-        .current = .codex,
-        .target = .codex,
+        .current = .layerx1,
+        .target = .layerx1,
         .target_credential_ready = true,
         .intent = .manual,
         .stream_active = false,
         .queued_prompts = 0,
     }));
     try std.testing.expectEqual(ProviderSwitchDecision.busy, decideProviderSwitch(.{
-        .current = .gateway,
-        .target = .grok,
-        .target_credential_ready = true,
+        .current = .layerx1,
+        .target = .layerx1,
+        .target_credential_ready = false,
         .intent = .manual,
         .stream_active = true,
         .queued_prompts = 0,
     }));
 
-    var inventory: std.EnumSet(credentials.Source) = .empty;
-    inventory.insert(.chatgpt_subscription);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, decideLogoutProvider(.{
+    const inventory: std.EnumSet(credentials.Source) = .empty;
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, decideLogoutProvider(.{
         .requested = null,
-        .selected = .gateway,
+        .selected = .layerx1,
         .active_source = null,
         .available_sources = inventory,
     }));
-    try std.testing.expectEqual(model_provider.ProviderId.grok, decideLogoutProvider(.{
-        .requested = .grok,
-        .selected = .codex,
-        .active_source = .chatgpt_subscription,
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, decideLogoutProvider(.{
+        .requested = .layerx1,
+        .selected = .layerx1,
+        .active_source = .layerx1_subscription,
         .available_sources = inventory,
     }));
 }
 
 test "sign in completion selects routing or credential activation without effects" {
     try std.testing.expectEqual(
-        SignInCompletionAction{ .switch_provider = .codex },
-        signInCompletion(.codex, true),
+        SignInCompletionAction{ .switch_provider = .layerx1 },
+        signInCompletion(.layerx1, true),
     );
     try std.testing.expectEqual(
-        SignInCompletionAction{ .activate_source = .grok_subscription },
-        signInCompletion(.grok, false),
+        SignInCompletionAction{ .activate_source = .layerx1_subscription },
+        signInCompletion(.layerx1, false),
     );
-    try std.testing.expectEqual(SignInCompletionAction.vercel, signInCompletion(.gateway, true));
 }

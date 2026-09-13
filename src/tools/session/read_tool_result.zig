@@ -218,8 +218,8 @@ test "read_tool_result admission restores only omitted stored-result suffixes" {
             .expected_handle = "result-web_fetch-1705079ba6e278c4-553514ccf082aeb9.txt",
         },
         .{
-            .arguments_json = "{\"handle\":\"fx-command-replay-canonical.bin\"}",
-            .expected_handle = "fx-command-replay-canonical.bin",
+            .arguments_json = "{\"handle\":\"x1-command-replay-canonical.bin\"}",
+            .expected_handle = "x1-command-replay-canonical.bin",
         },
         .{
             .arguments_json = "{\"handle\":\"unknown-dogfood-handle\"}",
@@ -250,7 +250,7 @@ test "unknown read_tool_result handle returns failure for legacy and managed sto
     try tmp.dir.createDir(
         io_mod.getIo(),
         "legacy",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     const dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "legacy");
     defer alloc.free(dir);
@@ -271,7 +271,7 @@ test "unknown read_tool_result handle returns failure for legacy and managed sto
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -310,7 +310,7 @@ test "read_tool_result pages and searches saved command replay handles" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,

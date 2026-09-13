@@ -9,8 +9,8 @@ const repoRoot = resolve(scriptDir, "../..");
 const outputDir = resolve(process.argv[2] || resolve(repoRoot, "sdk/dist/term-demo"));
 const htmlPath = resolve(repoRoot, "sdk/term-demo.html");
 const browserPath = resolve(repoRoot, "sdk/browser.js");
-const sdkPath = resolve(repoRoot, "sdk/fx-sdk.js");
-const wasmPath = resolve(repoRoot, "zig-out/bin/fx-term.wasm");
+const sdkPath = resolve(repoRoot, "sdk/x1-sdk.js");
+const wasmPath = resolve(repoRoot, "zig-out/bin/x1-term.wasm");
 
 const [htmlSource, browserBytes, sdkBytes, wasmBytes] = await Promise.all([
   readFile(htmlPath, "utf8"),
@@ -23,17 +23,17 @@ const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const integrity = (bytes) => `sha256-${createHash("sha256").update(bytes).digest("base64")}`;
 const sdkHash = digest(sdkBytes);
 const wasmHash = digest(wasmBytes);
-const sdkName = `fx-sdk.${sdkHash}.js`;
-const wasmName = `fx-term.${wasmHash}.wasm`;
+const sdkName = `x1-sdk.${sdkHash}.js`;
+const wasmName = `x1-term.${wasmHash}.wasm`;
 const packagedBrowser = Buffer.from(
-  browserBytes.toString().replace('from "./fx-sdk.js";', `from "./${sdkName}";`),
+  browserBytes.toString().replace('from "./x1-sdk.js";', `from "./${sdkName}";`),
 );
 const browserHash = digest(packagedBrowser);
 const browserName = `browser.${browserHash}.js`;
 
 const replacements = [
-  ['const fxWasmAsset = "./fx-term.wasm";', `const fxWasmAsset = "./${wasmName}";`],
-  ['const fxWasmIntegrity = "";', `const fxWasmIntegrity = "${integrity(wasmBytes)}";`],
+  ['const x1WasmAsset = "./x1-term.wasm";', `const x1WasmAsset = "./${wasmName}";`],
+  ['const x1WasmIntegrity = "";', `const x1WasmIntegrity = "${integrity(wasmBytes)}";`],
   ['from "./browser.js";', `from "./${browserName}";`],
 ];
 let html = htmlSource;

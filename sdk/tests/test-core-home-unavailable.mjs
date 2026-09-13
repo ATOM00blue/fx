@@ -2,10 +2,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxAgent, supportsJspi } from "../node.js";
+import { createX1Agent, supportsJspi } from "../node.js";
 
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultWasm = resolve(scriptDir, "../../zig-out/bin/fx-core.wasm");
+const defaultWasm = resolve(scriptDir, "../../zig-out/bin/x1-core.wasm");
 const wasmPath = resolve(process.argv[2] || defaultWasm);
 
 if (!supportsJspi()) {
@@ -26,15 +26,15 @@ const mockFetch = async (url, init) => {
   fetchCalls++;
   if (init.method !== "POST") throw new Error(`unexpected method ${init.method}`);
   const requestBody = JSON.parse(new TextDecoder().decode(init.body));
-  if (!Array.isArray(requestBody.prompt) && !Array.isArray(requestBody.messages)) {
-    throw new Error("gateway request did not contain prompt messages");
+  if (!Array.isArray(requestBody.input)) {
+    throw new Error("LayerX1 request did not contain Responses input");
   }
   return new Response(new ReadableStream({
     start(controller) {
-      controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"hello"}\n'));
-      controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":" world"}\n'));
-      controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":3},"outputTokens":{"total":2}}}\n'));
-      controller.enqueue(encoded.encode("data: [DONE]\n"));
+      controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"hello"}\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":" world"}\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
       controller.close();
     },
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -48,14 +48,14 @@ const timeout = (label, ms = 8000) => {
   return { promise, cancel() { clearTimeout(timer); } };
 };
 
-const initializeTimeout = timeout("fx-core initialize");
+const initializeTimeout = timeout("x1-core initialize");
 const agent = await Promise.race([
-  createFxAgent({
+  createX1Agent({
     backend: "wasm",
     wasm: await readFile(wasmPath),
     fetch: mockFetch,
     env: {
-      AI_GATEWAY_API_KEY: "sdk-test-key",
+      X1_API_KEY: "sdk-test-key",
       HOME: "/repo",
     },
     workspace: {

@@ -4,38 +4,38 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  createFxAgent as createWasmAgent,
-  createFxTerminal as createWasmTerminal,
+  createX1Agent as createWasmAgent,
+  createX1Terminal as createWasmTerminal,
   encodeXtermKeyEvent,
-  fxSdkApiVersion,
+  x1SdkApiVersion,
   supportsJspi,
   xtermAdapter,
-} from "./fx-sdk.js";
+} from "./x1-sdk.js";
 
-export { encodeXtermKeyEvent, fxSdkApiVersion, supportsJspi, xtermAdapter };
-export const libfxApiVersion = 2;
+export { encodeXtermKeyEvent, x1SdkApiVersion, supportsJspi, xtermAdapter };
+export const libx1ApiVersion = 2;
 
 const fetchOperationStale = 0;
 const fetchOperationApplied = 1;
 const fetchOperationBackpressure = 2;
 
 const require = createRequire(import.meta.url);
-const defaultCoreWasm = new URL("./fx-core.wasm", import.meta.url);
-const defaultTermWasm = new URL("./fx-term.wasm", import.meta.url);
+const defaultCoreWasm = new URL("./x1-core.wasm", import.meta.url);
+const defaultTermWasm = new URL("./x1-term.wasm", import.meta.url);
 const defaultNativeCandidates = [
-  "./libfx.node",
-  `./libfx.${process.platform}-${process.arch}.node`,
+  "./libx1.node",
+  `./libx1.${process.platform}-${process.arch}.node`,
 ];
 let nativeBackendPromise;
 
 function jspiFallbackError(surface, nativeError) {
   const nativeDetail = nativeError ? ` Native loading failed: ${nativeError.message}.` : " No compatible native addon was found.";
   const error = new Error(
-    `libfx could not start the ${surface} backend.${nativeDetail} ` +
+    `libx1 could not start the ${surface} backend.${nativeDetail} ` +
     "The WebAssembly fallback requires JavaScript Promise Integration (JSPI). " +
-    "Run Node with --experimental-wasm-jspi or install a libfx package containing a compatible native addon.",
+    "Run Node with --experimental-wasm-jspi or install a libx1 package containing a compatible native addon.",
   );
-  error.code = "LIBFX_JSPI_REQUIRED";
+  error.code = "LIBX1_JSPI_REQUIRED";
   error.cause = nativeError;
   return error;
 }
@@ -61,14 +61,14 @@ async function loadNativeCandidate(candidate) {
 function validateNativeBackend(backend) {
   if (!backend) return null;
   const hasLowLevelCore = typeof backend.createCore === "function";
-  if ((hasLowLevelCore && backend.libfxApiVersion !== libfxApiVersion) ||
-    (!hasLowLevelCore && backend.libfxApiVersion !== undefined && backend.libfxApiVersion !== libfxApiVersion)) {
-    const actualVersion = backend.libfxApiVersion ?? "missing";
-    throw new Error(`native addon API version ${actualVersion} is incompatible with libfx API version ${libfxApiVersion}`);
+  if ((hasLowLevelCore && backend.libx1ApiVersion !== libx1ApiVersion) ||
+    (!hasLowLevelCore && backend.libx1ApiVersion !== undefined && backend.libx1ApiVersion !== libx1ApiVersion)) {
+    const actualVersion = backend.libx1ApiVersion ?? "missing";
+    throw new Error(`native addon API version ${actualVersion} is incompatible with libx1 API version ${libx1ApiVersion}`);
   }
-  if (typeof backend.createFxAgent !== "function" && typeof backend.createCore !== "function" &&
-    typeof backend.createFxTerminal !== "function") {
-    throw new Error("native addon must export createFxAgent(), createCore(), or createFxTerminal()");
+  if (typeof backend.createX1Agent !== "function" && typeof backend.createCore !== "function" &&
+    typeof backend.createX1Terminal !== "function") {
+    throw new Error("native addon must export createX1Agent(), createCore(), or createX1Terminal()");
   }
   return backend;
 }
@@ -110,32 +110,32 @@ async function wasmBytes(input) {
   return input;
 }
 
-function validateGatewayChatUrl(value) {
+function validateLayerX1ResponsesUrl(value) {
   if (value === undefined) return;
-  if (typeof value !== "string") throw new TypeError("FX_GATEWAY_CHAT_URL must be a string");
+  if (typeof value !== "string") throw new TypeError("X1_E2E_LAYERX1_RESPONSES_URL must be a string");
   let url;
-  try { url = new URL(value); } catch { throw new TypeError("FX_GATEWAY_CHAT_URL must be a valid URL"); }
+  try { url = new URL(value); } catch { throw new TypeError("X1_E2E_LAYERX1_RESPONSES_URL must be a valid URL"); }
   if (url.username || url.password || url.hash) {
-    throw new TypeError("FX_GATEWAY_CHAT_URL must not contain credentials or a fragment");
+    throw new TypeError("X1_E2E_LAYERX1_RESPONSES_URL must not contain credentials or a fragment");
   }
-  if (url.href === "https://ai-gateway.vercel.sh/v3/ai/language-model") return;
+  if (url.href === "https://api.layerx1.com/v1/responses") return;
   const loopback = url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname === "localhost";
   if (url.protocol !== "http:" || !loopback || !url.port) {
-    throw new TypeError("FX_GATEWAY_CHAT_URL must use the canonical Gateway or explicit loopback HTTP");
+    throw new TypeError("X1_E2E_LAYERX1_RESPONSES_URL must use the LayerX1 Responses URL or explicit loopback HTTP");
   }
 }
 
 function createNativeCoreRuntime(addon, options) {
-  const apiKey = options.env?.AI_GATEWAY_API_KEY;
-  const model = options.env?.FX_MODEL;
-  const gatewayChatUrl = options.env?.FX_GATEWAY_CHAT_URL;
-  validateGatewayChatUrl(gatewayChatUrl);
+  const apiKey = options.env?.X1_API_KEY;
+  const model = options.env?.X1_MODEL;
+  const responsesUrl = options.env?.X1_E2E_LAYERX1_RESPONSES_URL ?? options.env?.X1_GATEWAY_CHAT_URL;
+  validateLayerX1ResponsesUrl(responsesUrl);
   const core = addon.createCore({
     apiKey,
     home: options.home ?? homedir(),
     workspaceRoot: options.workspaceRoot ?? process.cwd(),
     ...(model === undefined ? {} : { model }),
-    ...(gatewayChatUrl === undefined ? {} : { gatewayChatUrl }),
+    ...(responsesUrl === undefined ? {} : { responsesUrl }),
   });
   let exitedResolve;
   let lineHandler = null;
@@ -248,7 +248,7 @@ function createNativeAgent(addon, options) {
 
 async function createWithFallback(surface, nativeMethod, wasmFactory, defaultWasm, options) {
   const { nativeAddon, backend = "auto", ...runtimeOptions } = options ?? {};
-  validateGatewayChatUrl(runtimeOptions.env?.FX_GATEWAY_CHAT_URL);
+  validateLayerX1ResponsesUrl(runtimeOptions.env?.X1_E2E_LAYERX1_RESPONSES_URL ?? runtimeOptions.env?.X1_GATEWAY_CHAT_URL);
   if (!new Set(["auto", "native", "wasm"]).has(backend)) {
     throw new TypeError('backend must be "auto", "native", or "wasm"');
   }
@@ -271,7 +271,7 @@ async function createWithFallback(surface, nativeMethod, wasmFactory, defaultWas
     }
     if (backend === "native") {
       const error = nativeError ?? new Error(`native addon does not provide ${nativeMethod}()`);
-      error.code ??= "LIBFX_NATIVE_UNAVAILABLE";
+      error.code ??= "LIBX1_NATIVE_UNAVAILABLE";
       throw error;
     }
   }
@@ -283,10 +283,10 @@ async function createWithFallback(surface, nativeMethod, wasmFactory, defaultWas
   });
 }
 
-export function createFxAgent(options = {}) {
-  return createWithFallback("agent", "createFxAgent", createWasmAgent, defaultCoreWasm, options);
+export function createX1Agent(options = {}) {
+  return createWithFallback("agent", "createX1Agent", createWasmAgent, defaultCoreWasm, options);
 }
 
-export function createFxTerminal(options = {}) {
-  return createWithFallback("terminal", "createFxTerminal", createWasmTerminal, defaultTermWasm, options);
+export function createX1Terminal(options = {}) {
+  return createWithFallback("terminal", "createX1Terminal", createWasmTerminal, defaultTermWasm, options);
 }

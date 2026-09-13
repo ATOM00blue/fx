@@ -5,15 +5,15 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxAgent } from "../node.js";
+import { createX1Agent } from "../node.js";
 
-const marker = "LIBFX_EXPLICIT_WORKSPACE_CONTEXT";
+const marker = "LIBX1_EXPLICIT_WORKSPACE_CONTEXT";
 const originalCwd = process.cwd();
-const processWorkspace = await mkdtemp(join(tmpdir(), "libfx-process-workspace-"));
-const runtimeHome = await mkdtemp(join(tmpdir(), "libfx-runtime-home-"));
-const runtimeWorkspace = await mkdtemp(join(tmpdir(), "libfx-runtime-workspace-"));
-await writeFile(join(processWorkspace, ".fx.json"), `${JSON.stringify({ context: false })}\n`);
-await writeFile(join(runtimeWorkspace, ".fx.json"), `${JSON.stringify({ context: true })}\n`);
+const processWorkspace = await mkdtemp(join(tmpdir(), "libx1-process-workspace-"));
+const runtimeHome = await mkdtemp(join(tmpdir(), "libx1-runtime-home-"));
+const runtimeWorkspace = await mkdtemp(join(tmpdir(), "libx1-runtime-workspace-"));
+await writeFile(join(processWorkspace, ".x1.json"), `${JSON.stringify({ context: false })}\n`);
+await writeFile(join(runtimeWorkspace, ".x1.json"), `${JSON.stringify({ context: true })}\n`);
 await writeFile(join(runtimeWorkspace, "AGENTS.md"), `# Context\n\n${marker}\n`);
 
 let requestBody = "";
@@ -22,27 +22,27 @@ const server = createServer((request, response) => {
   request.on("data", (chunk) => { requestBody += chunk; });
   request.on("end", () => {
     response.writeHead(200, { "content-type": "text/event-stream" });
-    response.write('data: {"type":"text-delta","delta":"isolated"}\n\n');
-    response.write('data: {"type":"finish","finishReason":{"unified":"stop","raw":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":1}}}\n\n');
-    response.end("data: [DONE]\n\n");
+    response.write('data: {"type":"response.output_text.delta","delta":"isolated"}\n\n');
+    response.write('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n');
+    response.end('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n');
   });
 });
 await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
 const { port } = server.address();
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const addon = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libfx.node"));
+const addon = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libx1.node"));
 
 try {
   process.chdir(processWorkspace);
-  const agent = await createFxAgent({
+  const agent = await createX1Agent({
     nativeAddon: addon,
     backend: "native",
     home: runtimeHome,
     workspaceRoot: runtimeWorkspace,
     env: {
-      AI_GATEWAY_API_KEY: "native-core-config-key",
-      FX_GATEWAY_CHAT_URL: `http://127.0.0.1:${port}/chat`,
-      FX_MODEL: "native/test-model",
+      X1_API_KEY: "native-core-config-key",
+      X1_GATEWAY_CHAT_URL: `http://127.0.0.1:${port}/chat`,
+      X1_MODEL: "native/test-model",
     },
   });
   const session = await agent.createSession();

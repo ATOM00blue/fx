@@ -1,4 +1,36 @@
-# fx
+# x1
+
+## Unreleased
+
+**Windows x86_64 moves from compile-only to a fully supported, CI-tested platform: first-run crashes are fixed, PowerShell/cmd execution lands with Job-Object process-tree control, background processes work, and the Windows binary ships through every distribution channel.**
+
+### Breaking Changes
+
+- None.
+
+### New Features
+
+- **Windows home/temp resolution**: `HOME` now falls back to `USERPROFILE` and `TMPDIR` to `TEMP`/`TMP`, so settings, sessions, auth, and scratch files land in the right places on a default Windows install.
+- **PowerShell and cmd shells**: The shell resolver now understands `pwsh`, `powershell`, and `cmd` (case-insensitive, `.exe`-optional), PATH-resolves bare names, and discovers PowerShell automatically for clean/user command environments that previously errored with `InvalidCommandEnvironment`.
+- **Windows background processes**: `run_in_background` and long-lived background work now run through a PowerShell wrapper with the same ready/release handshake and exit-marker contract as the POSIX `sh` wrapper, spawned with `CREATE_NO_WINDOW` so background work survives console close. Process identity tokens use creation FILETIME (safe against PID reuse), and stop/kill walks a Toolhelp32 snapshot to terminate the whole tree.
+- **Windows graceful shutdown**: A `SetConsoleCtrlHandler` restores the terminal and exits cleanly on console close/Ctrl+Break, and headless `x1 ask` now cancels gracefully on Ctrl+C instead of dying to the default handler.
+- **Windows resize detection**: A console-size poller drives the same debounced layout path SIGWINCH drives on Unix, so the TUI reflows on window resize.
+- **Windows clipboard and sounds**: Copy uses `clip.exe`, and notification sounds map to system beeps via `MessageBeep`.
+- **Windows self-upgrade**: Auto-upgrade is enabled on Windows, installing over the running binary with the rename-parked-`.old` dance and relaunching by spawning the upgraded `x1.exe` with inherited console streams.
+
+### Improvements
+
+- **Process-tree timeouts on Windows**: Foreground commands place the child tree in a Job Object started suspended (removing the escape race), so timeouts terminate every descendant under `cmd.exe`/PowerShell instead of orphaning them.
+- **Terminal detection**: `--version`/help output now detects console status and width on Windows instead of always assuming plain text.
+- **Environment safety**: The Windows entry point no longer threads the CRT `envp` (unreliable there) into environment lookups; libc `getenv` backed by the PEB environment block is used instead.
+- **Lock files on Windows**: Directory fsync (which has no Windows equivalent and failed every first-run lock creation) is now a documented no-op on NTFS, unlocking settings, history, auth, MCP, and terminal-host lock files.
+- **Windows CI**: CI and Full CI now build, unit-test, and smoke-test on a Windows runner; the full-suite gate verifies the Windows native matrix.
+- **Windows distribution**: CDN backfill includes `windows-x86_64`, binary-size tracking covers the Windows target, and `libx1` publishes a `win32-x64` N-API addon.
+
+### Bug Fixes
+
+- **First-run failures on Windows**: Lock-file creation, home-directory discovery, and temp-dir resolution no longer break settings, sessions, or auth on a fresh Windows install.
+- **Manual upgrade on Windows**: The extracted binary is now named `x1.exe`, so `x1 upgrade` finds the downloaded release instead of looking for a POSIX-named `x1`.
 
 ## 0.0.6
 
@@ -8,13 +40,13 @@
 
 ### Breaking Changes
 
-- **Terminal presentation**: `/appearance`, `/input`, and `/maxxing` have been removed along with their saved settings. fx now uses the same input and transcript layout everywhere.
+- **Terminal presentation**: `/appearance`, `/input`, and `/maxxing` have been removed along with their saved settings. x1 now uses the same input and transcript layout everywhere.
 - **Foreground command timeouts**: `terminal.exec` calls now require `timeout_ms` between 1 millisecond and 10 minutes. Use `terminal.start` for services, watchers, GUI apps, and other long-running work.
 
 ### New Features
 
 - **Remote MCP servers**: `/mcp add --transport http <name> <url>` now saves or replaces a remote Streamable HTTP server and reloads MCP immediately. The existing local stdio form is unchanged.
-- **Retained command output**: Captured command output can now be read later with `read_tool_result`, including after a saved session resumes. With `--no-save`, output remains available until fx exits.
+- **Retained command output**: Captured command output can now be read later with `read_tool_result`, including after a saved session resumes. With `--no-save`, output remains available until x1 exits.
 
 ### Improvements
 
@@ -26,7 +58,7 @@
 - **Subscription session longevity**: Codex and Grok sessions remain usable beyond 64 consecutive requests.
 - **Usage tracking**: Rejected completions no longer appear in usage tracking, and duplicate completion callbacks are recorded once.
 - **MCP discovery**: MCP searches still find the selected tool when a request includes surrounding context, and another server's authentication failure no longer replaces an empty search result.
-- **MCP authentication**: MCP authentication stays responsive while configuration reloads or logout is in progress, and pending authentication stops when MCP reloads or fx exits.
+- **MCP authentication**: MCP authentication stays responsive while configuration reloads or logout is in progress, and pending authentication stops when MCP reloads or x1 exits.
 - **Linked skill errors**: Linked skill errors now distinguish an unavailable linked directory from an unreadable `SKILL.md` and explain whether to repair, remove, or authorize the link.
 - **Live permission modes**: `Shift+Tab` permission-mode changes now apply to later tool calls in the current turn. Actions already in progress keep the mode under which they were admitted.
 - **Tool action summaries**: Denied and deferred tool rows now show the actual command or target, and those details and denial labels survive session resume.
@@ -34,10 +66,10 @@
 ### Bug Fixes
 
 - **Terminal resize**: Terminal resizing no longer leaves empty scrollback behind.
-- **Subscription sign-in**: Codex and Grok sign-ins now survive unrelated, stalled, reset, or stale browser connections. Grok authorization codes can also be pasted when the browser cannot return to fx.
+- **Subscription sign-in**: Codex and Grok sign-ins now survive unrelated, stalled, reset, or stale browser connections. Grok authorization codes can also be pasted when the browser cannot return to x1.
 - **OAuth callback pages**: OAuth callbacks now show a completion or failure page after returning from the browser.
-- **Nested rebuilds**: Interactive terminal helpers continue working after a nested rebuild replaces the fx binary on disk.
-- **Terminal recovery**: fx recovery no longer pauses commands already running in tmux.
+- **Nested rebuilds**: Interactive terminal helpers continue working after a nested rebuild replaces the x1 binary on disk.
+- **Terminal recovery**: x1 recovery no longer pauses commands already running in tmux.
 - **Terminal cancellation**: Terminal cancellation no longer reports failure when the command exits during cancellation.
 - **MCP resource compatibility**: MCP resources and prompts no longer fail on servers that require their configured name.
 - **MCP credential recovery**: MCP credentials with no advertised scopes remain usable after restart. Malformed stored entries no longer prevent valid servers from loading and are removed on the next successful credential write.
@@ -51,7 +83,7 @@
 - **Blocked cautions**: Cautioned or unavailable actions remain blocked without opening a permission prompt or ending the turn.
 - **Untrusted tool output**: Actions copied from untrusted tool output remain blocked unless the user's request independently authorizes them.
 - **Current-branch pushes**: Explicit pushes to the current branch use the branch reported by the local Git checkout rather than repository text.
-- **Provider recovery authority**: After restart, fx continues unfinished Codex or Grok work only for the account that started it. If that account cannot be verified, fx preserves completed work and sends nothing.
+- **Provider recovery authority**: After restart, x1 continues unfinished Codex or Grok work only for the account that started it. If that account cannot be verified, x1 preserves completed work and sends nothing.
 - **Sensitive command output**: Command output flagged as sensitive is not saved with the session, including secrets split across output chunks or oversized lines.
 - **OAuth callback validation**: OAuth authorization denials and successes apply only when the callback state matches the active sign-in attempt, and Grok browser callbacks accept only the expected xAI origin.
 - **MCP issuer validation**: MCP sign-in stops before exchanging a token or saving credentials when the authorization response comes from a different issuer than the server advertised.
@@ -63,15 +95,15 @@
 ### Breaking Changes
 
 - **Host command execution:** Run approved captured, background, and monitor commands as ordinary host subprocesses, and retire sandbox configuration, status fields, and commands
-- **Interactive provider switching:** Move provider selection to `/setup` and remove the `/provider` slash command while keeping the top-level `fx provider` command
+- **Interactive provider switching:** Move provider selection to `/setup` and remove the `/provider` slash command while keeping the top-level `x1 provider` command
 
 ### New Features
 
-- **Codex subscriptions:** Sign in with an eligible subscription through `fx login codex`, then use authenticated Codex models for interactive sessions, `fx ask`, native ACP, images, subagents, and automatic reviews
-- **Grok subscriptions:** Sign in with an eligible Grok subscription through `fx login grok`, then use authenticated xAI models, effort levels, images, local tools, persistent sessions, and automatic reviews
+- **Codex subscriptions:** Sign in with an eligible subscription through `x1 login codex`, then use authenticated Codex models for interactive sessions, `x1 ask`, native ACP, images, subagents, and automatic reviews
+- **Grok subscriptions:** Sign in with an eligible Grok subscription through `x1 login grok`, then use authenticated xAI models, effort levels, images, local tools, persistent sessions, and automatic reviews
 - **Workspace status line:** Opt in to the active workspace path and Git branch through `/settings`, `/statusline workspace`, or `statusLine.workspace`
-- **fx-native workspace skills:** Discover project skills from `.fx/skills` before other workspace and compatibility roots
-- **External skill authorities:** Allow symlinked skills under explicitly trusted external directories through `FX_SKILL_SYMLINK_AUTHORITIES`
+- **x1-native workspace skills:** Discover project skills from `.x1/skills` before other workspace and compatibility roots
+- **External skill authorities:** Allow symlinked skills under explicitly trusted external directories through `X1_SKILL_SYMLINK_AUTHORITIES`
 
 ### Improvements
 
@@ -81,7 +113,7 @@
 - **Session cache reads:** Keep session listings and latest-session resume responsive while another session defers cache publication
 - **Terminal tab titles:** Label interactive tabs with the session or workspace and active model, keep them current across rename, resume, and model changes, and clear them on exit
 - **Terminal activity:** Keep each command or shell attached to its terminal activity row through completion, distinguish graceful close from force close, and hide no-op `cd . &&` prefixes
-- **Terminal action arguments:** Advertise only the fields relevant to the selected action and limit unsaved `fx ask` sessions to `terminal.exec`
+- **Terminal action arguments:** Advertise only the fields relevant to the selected action and limit unsaved `x1 ask` sessions to `terminal.exec`
 - **Auto mode reads:** Run routine read-only commands and hardened Git inspection directly without automatic review
 - **Automatic denial recovery:** Return destructive actions to the agent for replanning and finish repeated no-progress denials as normal assistant output instead of opening a permission prompt
 - **One-off subagents:** Keep active one-off subagents visible, deliver one final result, and retire them after completion while leaving persistent subagents reusable
@@ -100,7 +132,7 @@
 - **Malformed tool loops:** End a turn after three consecutive malformed-only tool batches and reset recovery after a valid batch
 - **Terminal null placeholders:** Treat textual `"null"` values as absent for unused terminal fields while preserving real command text that contains the word
 - **Terminal keyboard input:** Ignore unknown completed escape sequences and handle Ghostty kitty Escape reports with Caps Lock, Num Lock, and event suffixes
-- **Credential fallback:** Continue to a stored API key when saved `fx login` credentials cannot load or refresh while keeping the login failure available for diagnostics
+- **Credential fallback:** Continue to a stored API key when saved `x1 login` credentials cannot load or refresh while keeping the login failure available for diagnostics
 - **Vision recovery:** Retry replay-safe requests once after a post-Vision assistant-prefill rejection
 - **Thinking status:** Keep the Thinking indicator and elapsed timer visible while automatic command review runs
 - **Terminal helper compatibility:** Reject unsupported start, signal, and force-close requests from stale terminal helpers without losing unrelated sessions
@@ -110,8 +142,8 @@
 ### Security
 
 - **Command approval patterns:** Restrict wildcard command allows to static shell words and keep destructive shell commands and file deletion outside automatic review
-- **macOS login storage:** Store native `fx login` sessions in Keychain with verified migration, refresh, restart, and logout behavior
-- **MCP configuration writes:** Save `~/.fx/mcp.json` atomically with private permissions, reject linked targets, and preserve the previous configuration when a write fails
+- **macOS login storage:** Store native `x1 login` sessions in Keychain with verified migration, refresh, restart, and logout behavior
+- **MCP configuration writes:** Save `~/.x1/mcp.json` atomically with private permissions, reject linked targets, and preserve the previous configuration when a write fails
 - **MCP session retirement:** Keep retired HTTP session IDs alive until in-flight requests drain
 - **Provider response limits:** Reject oversized Codex and Grok catalogs, streams, tool data, and replay state while keeping later input usable
 - **ACP permission validation:** Validate permission input before writing JSON-RPC frames
@@ -120,14 +152,14 @@
 
 ### New Features
 
-- **Session resume command:** Resume the latest workspace session or an exact session ID with `fx session resume`
-- **Headless permission prompts:** Add `--prompt-permissions` so JSON and quiet `fx ask` runs can request Y/N approval on a TTY while keeping stdout clean
+- **Session resume command:** Resume the latest workspace session or an exact session ID with `x1 session resume`
+- **Headless permission prompts:** Add `--prompt-permissions` so JSON and quiet `x1 ask` runs can request Y/N approval on a TTY while keeping stdout clean
 
 ### Improvements
 
 - **Auto mode permissions:** Run routine reversible development commands and new-file creation directly, then ask for human approval after repeated automatic review denials
 - **Command discovery:** Rank exact, prefix, and substring slash-command matches and highlight the selected help description
-- **Terminal attention bells:** Emit one terminal bell when fx pauses for permission or other input so terminal multiplexers can flag waiting panes
+- **Terminal attention bells:** Emit one terminal bell when x1 pauses for permission or other input so terminal multiplexers can flag waiting panes
 - **Transcript scrollback:** Preserve retained transcript rows in native scrollback across pruning, resize, and reflow
 
 ### Bug Fixes
@@ -135,9 +167,9 @@
 - **Session cache contention:** Continue same-workspace session writes and keep listing and resume results current while another process holds the latest-session cache lock
 - **Reasoning effort settings:** Change reasoning effort without crashing or replacing the selected model
 - **Web redirects:** Follow HTTP 303 redirects in `web_fetch`
-- **Command output separation:** End command output that lacks a trailing newline before rendering the next `fx ask` tool header
+- **Command output separation:** End command output that lacks a trailing newline before rendering the next `x1 ask` tool header
 - **Skill discovery:** Show one entry for skills reached through symlinked compatibility roots while preserving distinct same-name skills
-- **libfx session transitions:** Cancel active cooperative turns before starting a fresh session so the terminal remains responsive
+- **libx1 session transitions:** Cancel active cooperative turns before starting a fresh session so the terminal remains responsive
 - **Memory activity:** Present `memory list` as a read instead of a write
 - **Unsupported login shells:** Fall back to zsh on macOS or Bash elsewhere when the configured login shell is unsupported
 - **Process cleanup:** Cancel and reap headless terminal commands on SIGTERM, preserve signal status, and tolerate short-lived Linux processes disappearing during cleanup
@@ -148,7 +180,7 @@
 
 ### Improvements
 
-- **JSON recovery progress:** Report retry, recovery, and safety-pause status on stderr during `fx ask --json` while keeping stdout parseable
+- **JSON recovery progress:** Report retry, recovery, and safety-pause status on stderr during `x1 ask --json` while keeping stdout parseable
 - **Notification sounds:** Use clearer 48 kHz AAC cues with full tails and the intended volume differences between actions
 
 ### Bug Fixes
@@ -157,7 +189,7 @@
 - **Background URLs:** Refuse `/background open` for stopped or stale tasks so saved URLs cannot open an unrelated process after port reuse
 - **Model catalogs:** Reject malformed catalog responses with a nonzero exit instead of treating them as an empty model list
 - **Skill creation:** Show invalid `/skills create` names inline and keep the current session, transcript, and composer usable
-- **GLM 5.2 responses:** Restore responses for fx login sessions without changing requests for other models
+- **GLM 5.2 responses:** Restore responses for x1 login sessions without changing requests for other models
 
 ## 0.0.2
 
@@ -179,13 +211,13 @@
 ### Bug Fixes
 
 - **WebAssembly terminal input:** Keep input responsive during continuous streams, queue follow-up prompts until the active response completes, and preserve the queued prompt text
-- **Terminal job cleanup:** Force-close descendant jobs spawned by any Linux thread and return `session_lost` when fx cannot confirm complete cleanup
+- **Terminal job cleanup:** Force-close descendant jobs spawned by any Linux thread and return `session_lost` when x1 cannot confirm complete cleanup
 
 ## 0.0.1
 
 ### New Features
 
-- **Current fx documentation:** Route questions about fx through the public documentation index before answering
+- **Current x1 documentation:** Route questions about x1 through the public documentation index before answering
 
 ### Improvements
 

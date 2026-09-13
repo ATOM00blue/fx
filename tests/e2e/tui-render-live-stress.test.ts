@@ -11,7 +11,7 @@ import {
 } from "./tui-render-assertions";
 import { TmuxSession, tmuxAvailable } from "./tmux-helpers";
 
-const LIVE_ENABLED = process.env.FX_LIVE_RENDER_STRESS === "1";
+const LIVE_ENABLED = process.env.X1_LIVE_RENDER_STRESS === "1";
 const SKIP = !LIVE_ENABLED || !tmuxAvailable() || !HAS_API_KEY;
 const TIMEOUT = 240_000;
 const TRACE_SCOPES = "paint,render,scroll,footer.clean,input,tool,gateway";
@@ -43,7 +43,7 @@ function livePrompt(run: number, step: number): { prompt: string; marker: string
 }
 
 async function launch(run: number): Promise<{ session: TmuxSession; tracePath: string }> {
-  const workDir = mkdtempSync(join(tmpdir(), `fx-render-live-stress-${run}-`));
+  const workDir = mkdtempSync(join(tmpdir(), `x1-render-live-stress-${run}-`));
   workDirs.push(workDir);
   const tracePath = join(workDir, "trace.log");
 
@@ -54,8 +54,8 @@ async function launch(run: number): Promise<{ session: TmuxSession; tracePath: s
     env: {
       AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
       VERCEL_OIDC_TOKEN: process.env.VERCEL_OIDC_TOKEN,
-      FX_TRACE_LOG: tracePath,
-      FX_TRACE_SCOPES: TRACE_SCOPES,
+      X1_TRACE_LOG: tracePath,
+      X1_TRACE_SCOPES: TRACE_SCOPES,
     },
   });
   await s.waitForComposer(10_000);

@@ -1803,7 +1803,7 @@ test "queued editor follows the cursor when its draft exceeds the card budget" {
     try std.testing.expect(frame.cursor_visible);
 }
 
-test "current composer renders a white connected rail across its rows" {
+test "current composer renders an accent connected rail across its rows" {
     const alloc = std.testing.allocator;
     ui_render.initTheme(false, null);
     defer ui_render.initTheme(false, null);
@@ -1854,9 +1854,27 @@ test "current composer renders a white connected rail across its rows" {
     try expectFrameRowTextTrimmed(&frame, first_input_row, shell.layout.cols, "┃ one");
     try expectFrameRowTextTrimmed(&frame, first_input_row + 1, shell.layout.cols, "┃ two");
     try expectFrameRowTextTrimmed(&frame, frame_plan.paint.footer.input_base, shell.layout.cols, "┃ three");
-    try expectFrameCellForeground(&frame, first_input_row, shell.layout.cols, 1, .{ .indexed = 255 });
-    try expectFrameCellForeground(&frame, first_input_row + 1, shell.layout.cols, 1, .{ .indexed = 255 });
-    try expectFrameCellForeground(&frame, frame_plan.paint.footer.input_base, shell.layout.cols, 1, .{ .indexed = 255 });
+    try expectFrameCellForeground(&frame, first_input_row, shell.layout.cols, 1, .{
+        .rgb = .{
+            .r = ui_render.x1_accent_dark_rgb.r,
+            .g = ui_render.x1_accent_dark_rgb.g,
+            .b = ui_render.x1_accent_dark_rgb.b,
+        },
+    });
+    try expectFrameCellForeground(&frame, first_input_row + 1, shell.layout.cols, 1, .{
+        .rgb = .{
+            .r = ui_render.x1_accent_dark_rgb.r,
+            .g = ui_render.x1_accent_dark_rgb.g,
+            .b = ui_render.x1_accent_dark_rgb.b,
+        },
+    });
+    try expectFrameCellForeground(&frame, frame_plan.paint.footer.input_base, shell.layout.cols, 1, .{
+        .rgb = .{
+            .r = ui_render.x1_accent_dark_rgb.r,
+            .g = ui_render.x1_accent_dark_rgb.g,
+            .b = ui_render.x1_accent_dark_rgb.b,
+        },
+    });
     try expectFrameCellForeground(&frame, first_input_row, shell.layout.cols, 3, .default);
     try expectFrameRowDefaultBackground(&frame, frame_plan.paint.footer.input_base, shell.layout.cols);
     try expectFrameRowTextTrimmed(&frame, frame_plan.paint.footer.bottom_divider, shell.layout.cols, "");
@@ -1870,6 +1888,8 @@ fn expectGenericPickerSelectionAtRow(
     relative_row: u16,
 ) !void {
     const alloc = std.testing.allocator;
+    ui_render.initTheme(false, null);
+    defer ui_render.initTheme(false, null);
     var input = InputRuntime{};
     defer input.deinit(alloc);
 
@@ -1932,7 +1952,7 @@ fn expectGenericPickerSelectionAtRow(
 
     const selected_row = frame_plan.paint.footer.picker_start + relative_row;
     const selected_style = switch (kind) {
-        .model_stage => ui_render.selected_completion_style,
+        .model_stage => ui_render.x1_accent_style,
         else => ui_render.approval_button_inactive_style,
     };
     var saw_selected_bottom = false;
@@ -2160,7 +2180,7 @@ test "approval footer composition hides cursor while rendering command prompt" {
     var controls_count: u8 = 0;
     for (frame.rows.items, 0..) |row, row_index| {
         saw_prompt = saw_prompt or std.mem.find(u8, row.text.items, "Would you like to run the following command?") != null;
-        saw_default_reason = saw_default_reason or std.mem.find(u8, row.text.items, "fx needs your approval before running this shell command") != null;
+        saw_default_reason = saw_default_reason or std.mem.find(u8, row.text.items, "x1 needs your approval before running this shell command") != null;
         saw_selected_choice = saw_selected_choice or std.mem.find(u8, row.text.items, "1. Yes") != null;
         if (std.mem.find(u8, row.text.items, "Would you like to run the following command?") != null) {
             prompt_row = row_index;

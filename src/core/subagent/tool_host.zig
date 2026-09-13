@@ -2254,7 +2254,7 @@ test "fresh child state persists its provider with the model" {
         "/tmp/workspace",
         command.create,
         .{
-            .provider = .codex,
+            .provider = .layerx1,
             .model = "gpt-5.6-sol",
             .effort = types.ReasoningEffort.literal("high"),
             .conversation_language = session.ConversationLanguage.literal("en"),
@@ -2262,7 +2262,7 @@ test "fresh child state persists its provider with the model" {
     );
     defer state.deinit(alloc);
 
-    try std.testing.expectEqual(model_provider.ProviderId.codex, state.preferences.provider);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, state.preferences.provider);
     try std.testing.expectEqualStrings("gpt-5.6-sol", state.preferences.model);
 }
 
@@ -2471,7 +2471,7 @@ const TestEnvironment = struct {
     fn init(alloc: Allocator) !TestEnvironment {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
-        try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
         try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
         const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
         errdefer alloc.free(home);
@@ -2993,7 +2993,7 @@ fn testOptions(caller_id: []const u8, invocation_id: []const u8) ExecuteOptions 
         .caller_id = caller_id,
         .invocation_id = invocation_id,
         .defaults = .{
-            .provider = .gateway,
+            .provider = .layerx1,
             .model = "test/model",
             .effort = types.ReasoningEffort.literal("high"),
             .conversation_language = session.ConversationLanguage.literal("en"),
@@ -3007,7 +3007,7 @@ fn testHumanOptions(invocation_id: []const u8) HumanCommandOptions {
     return .{
         .invocation_id = invocation_id,
         .defaults = .{
-            .provider = .gateway,
+            .provider = .layerx1,
             .model = "test/model",
             .effort = types.ReasoningEffort.literal("high"),
             .conversation_language = session.ConversationLanguage.literal("en"),

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const contracts = @import("contracts.zig");
 const monitor_core = @import("monitor.zig");
 const operation = @import("operation.zig");
@@ -460,7 +461,8 @@ pub const Record = struct {
             return error.InvalidTerminalRecord;
         }
         if (self.takeover_owner_pid) |pid| {
-            _ = std.fmt.parseInt(std.posix.pid_t, pid, 10) catch
+            const ProcessId = if (builtin.os.tag == .windows) u32 else std.posix.pid_t;
+            _ = std.fmt.parseInt(ProcessId, pid, 10) catch
                 return error.InvalidTerminalRecord;
             _ = process_supervisor.ProcessInstanceToken.parse(
                 self.takeover_owner_process_token.?,
@@ -566,13 +568,13 @@ pub const ProfileStore = struct {
             }),
         };
         defer home_dir.close();
-        var fx_dir = try io_mod.openOrCreateVerifiedPrivateDir(
+        var x1_dir = try io_mod.openOrCreateVerifiedPrivateDir(
             &home_dir,
             profile_paths.root_dir_name,
         );
-        defer fx_dir.close();
+        defer x1_dir.close();
         var sessions_dir = try io_mod.openOrCreateVerifiedPrivateDir(
-            &fx_dir,
+            &x1_dir,
             profile_paths.sessions_dir_name,
         );
         errdefer sessions_dir.close();
@@ -1944,7 +1946,7 @@ fn proof_verifier(
     direct_human_model_read_only: bool,
 ) contracts.CheckpointChecksum {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.holder-proof.v2\x00");
+    hash.update("x1.terminal.holder-proof.v2\x00");
     hash.update(&proof.bytes);
     hash_u64(&hash, grant.generation.value);
     hash.update(@tagName(grant.actor));
@@ -1974,7 +1976,7 @@ fn close_initiator_verifier(
     claim: contracts.AuthorityClaim,
 ) contracts.CheckpointChecksum {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.close-initiator.v2\x00");
+    hash.update("x1.terminal.close-initiator.v2\x00");
     hash.update(&claim.proof.bytes);
     hash_u64(&hash, claim.generation.value);
     hash_text(&hash, @tagName(claim.actor));
@@ -2002,7 +2004,7 @@ fn owner_catalog_key(
     actor: contracts.ActorRole,
 ) [64]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.owner-catalog-key.v2\x00");
+    hash.update("x1.terminal.owner-catalog-key.v2\x00");
     hash.update(@tagName(actor));
     hash.update(@tagName(principal.transport_role));
     hash_text(&hash, principal.profile_user);
@@ -2017,7 +2019,7 @@ fn owner_catalog_verifier(
     claim: contracts.OwnerCatalogAuthorityClaim,
 ) contracts.CheckpointChecksum {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.owner-catalog-proof.v2\x00");
+    hash.update("x1.terminal.owner-catalog-proof.v2\x00");
     hash.update(&claim.proof.bytes);
     hash.update(@tagName(claim.actor));
     hash.update(@tagName(claim.principal.transport_role));
@@ -2357,7 +2359,7 @@ pub fn loadOrCreateOwnerCatalogClaim(
     return operation.ownOwnerCatalogClaim(alloc, claim);
 }
 
-/// Reloads authority for the current fx owner without trusting caller-supplied
+/// Reloads authority for the current x1 owner without trusting caller-supplied
 /// cwd, backend, or generation. Those facts are recovered from durable state;
 /// the active profile/session/workspace/transport identity must still match.
 pub fn reloadOwnerAuthorityClaim(
@@ -2449,7 +2451,7 @@ pub fn reloadHumanTakeoverAuthorityClaim(
     }, .humanTakeover());
 }
 
-/// Reloads a proof only through the managed-child capability of the durable fx
+/// Reloads a proof only through the managed-child capability of the durable x1
 /// session that owns it. A terminal id alone cannot select proof storage.
 pub fn reloadAuthorityClaim(
     alloc: Allocator,
@@ -6877,9 +6879,9 @@ const TestStoreFixture = struct {
             .{ .iterate = true, .follow_symlinks = false },
         ) };
         defer root.close();
-        var fx = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".fx");
-        defer fx.close();
-        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&fx, "sessions");
+        var x1 = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".x1");
+        defer x1.close();
+        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&x1, "sessions");
         defer sessions.close();
         var owner = try io_mod.openOrCreateVerifiedPrivateDir(
             &sessions,
@@ -8063,7 +8065,7 @@ test "tmux recovery propagates proof capability failure without durable loss" {
     defer alloc.free(name);
     const path = try std.fs.path.join(alloc, &.{
         fixture.home,
-        ".fx",
+        ".x1",
         "sessions",
         "terminal-store-owner",
         "terminal",
@@ -8078,7 +8080,7 @@ test "tmux recovery propagates proof capability failure without durable loss" {
     );
     try proof_file.setPermissions(
         std.testing.io,
-        std.Io.File.Permissions.fromMode(0o640),
+        io_mod.permissionsFromMode(0o640),
     );
     proof_file.close(std.testing.io);
 
@@ -8101,7 +8103,7 @@ test "tmux recovery propagates proof capability failure without durable loss" {
     defer proof_file.close(std.testing.io);
     try proof_file.setPermissions(
         std.testing.io,
-        std.Io.File.Permissions.fromMode(0o600),
+        io_mod.permissionsFromMode(0o600),
     );
 
     {
@@ -8872,7 +8874,7 @@ test "human owner takeover proof is narrow and excludes agent writes" {
     );
 }
 
-test "human takeover lease is reclaimable only after its Fx process owner is gone" {
+test "human takeover lease is reclaimable only after its x1 process owner is gone" {
     const Match = struct {
         var result: process_supervisor.TokenMatch = .matched;
 

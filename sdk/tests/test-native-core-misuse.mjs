@@ -9,13 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const addonPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libfx.node"));
-const traceChild = process.env.LIBFX_STALE_TRACE_CHILD === "1";
+const addonPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libx1.node"));
+const traceChild = process.env.LIBX1_STALE_TRACE_CHILD === "1";
 if (!traceChild) {
-  delete process.env.FX_TRACE;
-  delete process.env.FX_TRACE_LOG;
-  delete process.env.FX_TRACE_SCOPES;
-  delete process.env.FX_TRACE_STDERR;
+  delete process.env.X1_TRACE;
+  delete process.env.X1_TRACE_LOG;
+  delete process.env.X1_TRACE_SCOPES;
+  delete process.env.X1_TRACE_STDERR;
 }
 const addon = require(addonPath);
 
@@ -52,7 +52,7 @@ for (const [name, args] of [
 ]) {
   assert.throws(() => addon[name](...args), {
     name: "TypeError",
-    code: "LIBFX_INVALID_ARGUMENT",
+    code: "LIBX1_INVALID_ARGUMENT",
     message: "missing required argument",
   });
 }
@@ -71,9 +71,9 @@ for (const [options, message] of [
   [{ apiKey: "x".repeat(64 * 1024 + 1), home: "/tmp", workspaceRoot: "/tmp" }, /apiKey/],
   [{ apiKey: "key", model: "x".repeat(1025), home: "/tmp", workspaceRoot: "/tmp" }, /model/],
   [{ apiKey: "key", home: "x".repeat(16 * 1024 + 1), workspaceRoot: "/tmp" }, /home/],
-  [{ apiKey: "key", home: "/tmp", workspaceRoot: "/tmp", gatewayChatUrl: "http://attacker.example/chat" }, /gatewayChatUrl/],
-  [{ apiKey: "key", home: "/tmp", workspaceRoot: "/tmp", gatewayChatUrl: "https://user:pass@example.com/chat" }, /gatewayChatUrl/],
-  [{ apiKey: "key", home: "/tmp", workspaceRoot: "/tmp", gatewayChatUrl: "https://example.com/chat" }, /gatewayChatUrl/],
+  [{ apiKey: "key", home: "/tmp", workspaceRoot: "/tmp", responsesUrl: "http://attacker.example/chat" }, /responsesUrl/],
+  [{ apiKey: "key", home: "/tmp", workspaceRoot: "/tmp", responsesUrl: "https://user:pass@example.com/chat" }, /responsesUrl/],
+  [{ apiKey: "key", home: "/tmp", workspaceRoot: "/tmp", responsesUrl: "https://example.com/chat" }, /responsesUrl/],
 ]) {
   assert.throws(() => addon.createCore(options), message);
 }
@@ -81,21 +81,21 @@ for (const [options, message] of [
 for (const fakeHandle of [null, undefined, {}, Buffer.alloc(0), 0, "handle"]) {
   assert.throws(
     () => addon.coreExited(fakeHandle),
-    (error) => error instanceof TypeError || error.code === "LIBFX_INVALID_ARGUMENT" || error.code === "LIBFX_NAPI",
+    (error) => error instanceof TypeError || error.code === "LIBX1_INVALID_ARGUMENT" || error.code === "LIBX1_NAPI",
   );
 }
 
 const core = addon.createCore({ apiKey: "misuse-test-key", home: "/tmp", workspaceRoot: "/tmp" });
 assert.throws(
   () => addon.writeCore(core, Buffer.alloc(8 * 1024 * 1024 + 1)),
-  (error) => error.code === "LIBFX_NATIVE_BACKPRESSURE",
+  (error) => error.code === "LIBX1_NATIVE_BACKPRESSURE",
 );
 addon.writeCore(core, Buffer.alloc(0));
 addon.closeCore(core);
 addon.destroyCore(core);
 assert.throws(
   () => addon.coreExited(core),
-  (error) => error.code === "LIBFX_NATIVE_CLOSED",
+  (error) => error.code === "LIBX1_NATIVE_CLOSED",
 );
 
 const lifecycleCore = addon.createCore({
@@ -103,7 +103,7 @@ const lifecycleCore = addon.createCore({
   model: "native/test-model",
   home: "/tmp",
   workspaceRoot: "/tmp",
-  gatewayChatUrl: "http://127.0.0.1:31337/chat",
+  responsesUrl: "http://127.0.0.1:31337/chat",
 });
 let nextId = 1;
 let buffered = "";
@@ -141,9 +141,9 @@ const takeFetch = async () => {
   }
 };
 const responseBytes = (text) => Buffer.from([
-  `data: ${JSON.stringify({ type: "text-delta", delta: text })}\n\n`,
-  'data: {"type":"finish","finishReason":{"unified":"stop","raw":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":1}}}\n\n',
-  "data: [DONE]\n\n",
+  `data: ${JSON.stringify({ type: "response.output_text.delta", delta: text })}\n\n`,
+  'data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n',
+  "",
 ].join(""));
 const sendPrompt = (sessionId, text) => send("session/prompt", {
   sessionId,
@@ -193,7 +193,7 @@ try {
   ]) {
     assert.throws(() => addon[name](...args), {
       name: "TypeError",
-      code: "LIBFX_INVALID_ARGUMENT",
+      code: "LIBX1_INVALID_ARGUMENT",
     });
   }
 } finally {
@@ -201,7 +201,7 @@ try {
   addon.destroyCore(lifecycleCore);
 }
 
-const traceDir = mkdtempSync(resolve(tmpdir(), "libfx-stale-trace-"));
+const traceDir = mkdtempSync(resolve(tmpdir(), "libx1-stale-trace-"));
 const traceLog = resolve(traceDir, "trace.log");
 try {
   const traced = spawnSync(process.execPath, [fileURLToPath(import.meta.url), addonPath], {
@@ -209,9 +209,9 @@ try {
     encoding: "utf8",
     env: {
       ...process.env,
-      LIBFX_STALE_TRACE_CHILD: "1",
-      FX_TRACE_LOG: traceLog,
-      FX_TRACE_SCOPES: "napi",
+      LIBX1_STALE_TRACE_CHILD: "1",
+      X1_TRACE_LOG: traceLog,
+      X1_TRACE_SCOPES: "napi",
     },
   });
   assert.equal(traced.status, 0, traced.stderr || traced.stdout);

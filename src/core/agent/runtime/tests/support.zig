@@ -8,7 +8,7 @@ const permissions = @import("../../../permissions/permissions.zig");
 const worker_runtime = @import("../../worker_runtime.zig");
 const background_runtime = @import("../../../background/background_runtime.zig");
 const builtin_context = @import("../../../../builtins/context.zig");
-const builtin_gateway = @import("../../../../builtins/gateway.zig");
+const builtin_gateway = @import("../../../../builtins/x1.zig");
 const builtin_tools = @import("../../../../builtins/tools.zig");
 const session_runtime = @import("../../../session/session.zig");
 const session_codec = @import("../../../session/session_codec.zig");
@@ -173,7 +173,6 @@ const test_tools = [_]tool_dispatch.Tool{
     builtin_tools.semantic_search,
     builtin_tools.open_file,
     builtin_tools.web_fetch,
-    builtin_tools.web_search,
     builtin_tools.terminal,
     builtin_tools.skill,
     builtin_tools.install_skill,
@@ -1731,7 +1730,9 @@ pub const PromptFixture = struct {
             .images = self.images[0..],
             .model = @constCast("anthropic/claude-opus-4.6"),
             .api_key = @constCast("key"),
-            .credential_source = .ai_gateway_api_key,
+            .credential_source = .layerx1_subscription,
+            .account_id = @constCast("acct_test"),
+            .legacy_gateway_semantics = true,
             .permission_mode = .ask,
             .history = self.history[0..],
             .grants = self.grants[0..],
@@ -2031,6 +2032,14 @@ pub fn countPromptEntryText(entry: std.json.Value, needle: []const u8) usize {
     const content = entry.object.get("content") orelse return 0;
     return countPromptContentText(content, needle);
 }
+
+pub fn requestMessageItems(root: std.json.Value) ?[]const std.json.Value {
+    if (root != .object) return null;
+    const messages = root.object.get("input") orelse root.object.get("prompt") orelse return null;
+    if (messages != .array) return null;
+    return messages.array.items;
+}
+
 pub fn expectGatewayPromptFinalUserText(gateway: *const FakeGateway, index: usize, expected_text: []const u8) !void {
     const alloc = std.testing.allocator;
     try std.testing.expect(index < gateway.request_bodies.items.len);
@@ -2038,7 +2047,7 @@ pub fn expectGatewayPromptFinalUserText(gateway: *const FakeGateway, index: usiz
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
     try std.testing.expect(prompt.len > 0);
     var i = prompt.len;
     while (i > 0) {

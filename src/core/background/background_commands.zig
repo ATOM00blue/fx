@@ -333,15 +333,15 @@ test "show reports tracked tasks" {
             .id = 1,
             .command = "npm run dev",
             .cwd = "/tmp/app",
-            .log_path = "/tmp/fx-one.log",
+            .log_path = "/tmp/x1-one.log",
             .server_url = "http://localhost:3000",
             .state = .running,
         },
         .{
             .id = 2,
             .command = "zig build test",
-            .cwd = "/tmp/fx",
-            .log_path = "/tmp/fx-two.log",
+            .cwd = "/tmp/x1",
+            .log_path = "/tmp/x1-two.log",
             .exit_code = 2,
             .state = .failed,
         },
@@ -355,11 +355,11 @@ test "show reports tracked tasks" {
         \\2 tracked
         \\ - #1 [running] npm run dev
         \\   cwd: /tmp/app
-        \\   log: /tmp/fx-one.log
+        \\   log: /tmp/x1-one.log
         \\   url: http://localhost:3000
         \\ - #2 [failed(2)] zig build test
-        \\   cwd: /tmp/fx
-        \\   log: /tmp/fx-two.log
+        \\   cwd: /tmp/x1
+        \\   log: /tmp/x1-two.log
         \\
     );
 }
@@ -432,7 +432,7 @@ test "open reports parse errors no match and missing URL without launching opene
             .id = 7,
             .command = "npm run dev",
             .cwd = "/tmp/app",
-            .log_path = "/tmp/fx.log",
+            .log_path = "/tmp/x1.log",
             .state = .stopped,
         }};
         var app = FakeApp{ .alloc = alloc, .background = .{ .tasks = tasks[0..] } };
@@ -454,7 +454,7 @@ test "open rejects saved URLs for non-running tasks without launching opener" {
             .id = 7,
             .command = "npm run dev",
             .cwd = "/tmp/app",
-            .log_path = "/tmp/fx.log",
+            .log_path = "/tmp/x1.log",
             .server_url = "http://localhost:3000",
             .state = state,
         }};
@@ -476,7 +476,7 @@ test "open launches a saved URL for a running task" {
         .id = 7,
         .command = "npm run dev",
         .cwd = "/tmp/app",
-        .log_path = "/tmp/fx.log",
+        .log_path = "/tmp/x1.log",
         .server_url = "http://localhost:3000",
     }};
     var app = FakeApp{ .alloc = alloc, .background = .{ .tasks = tasks[0..] } };
@@ -565,7 +565,7 @@ test "background open preserves opened failed and unsupported output" {
         alloc,
         opener,
         url,
-        host.nativeForOs(.windows).url_open,
+        host.nativeForOs(.wasi).url_open,
     );
     defer alloc.free(unsupported.text);
     try std.testing.expect(!unsupported.succeeded);

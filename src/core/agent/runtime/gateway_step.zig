@@ -515,7 +515,7 @@ test "provider-local exact usage reaches session accounting" {
                     .finish_reason = .stop,
                     .usage = .{ .input_tokens = 3, .output_tokens = 1 },
                 },
-                .usage = .{ .exact = .codex },
+                .usage = .{ .exact = .layerx1 },
             } };
         }
     };
@@ -542,7 +542,7 @@ test "provider-local exact usage reaches session accounting" {
         .{
             .credential = .{
                 .secret = "subscription-token",
-                .source = .chatgpt_subscription,
+                .source = .layerx1_subscription,
                 .account_id = "acct_test",
             },
             .session_id = "session-test",

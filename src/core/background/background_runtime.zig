@@ -2451,8 +2451,8 @@ fn seedRecord(alloc: Allocator, id: u64) !background_store.Record {
         .id = id,
         .pid = try alloc.dupe(u8, "100"),
         .command = try alloc.dupe(u8, "npm run dev"),
-        .cwd = try alloc.dupe(u8, "/tmp/fx"),
-        .log_path = try alloc.dupe(u8, "/tmp/fx.log"),
+        .cwd = try alloc.dupe(u8, "/tmp/x1"),
+        .log_path = try alloc.dupe(u8, "/tmp/x1.log"),
         .expect_url = true,
         .server_url = null,
         .started_at_ms = 1,
@@ -2743,7 +2743,7 @@ fn spawnBlockedBackgroundHandshakeForTest(
         "sh",
         "-lc",
         test_blocked_background_wrapper_command,
-        "fx-background",
+        "x1-background",
     };
     var child = try std.process.spawn(io_mod.getIo(), .{
         .argv = &argv,
@@ -3461,7 +3461,7 @@ test "workspace restore preserves read only authority and suppresses duplicate r
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);

@@ -309,7 +309,7 @@ fn composeTitleRow(
     errdefer row.deinit(alloc);
     const indent_width: u16 = if (width <= 2) 0 else 2;
     if (indent_width > 0) try row.appendSlice(alloc, "  ");
-    try row.appendSlice(alloc, if (selected) ui_render.selected_completion_style else ui_render.dim_style);
+    try row.appendSlice(alloc, ui_render.pickerSelectionStyle(selected));
 
     var facts: std.ArrayList(u8) = .empty;
     defer facts.deinit(alloc);
@@ -337,6 +337,9 @@ fn appendCompactFacts(
     facts: *std.ArrayList(u8),
     capabilities: model_capabilities.Capabilities,
 ) !void {
+    if (capabilities.supports_tool_use) try appendMetadataFact(alloc, facts, "Tools");
+    if (capabilities.supports_vision) try appendMetadataFact(alloc, facts, "Vision");
+    if (capabilities.supports_file_input) try appendMetadataFact(alloc, facts, "Docs");
     if (capabilities.context_window) |tokens| try appendTokenFact(alloc, facts, tokens, "context");
     if (capabilities.max_output_tokens) |tokens| try appendTokenFact(alloc, facts, tokens, "output");
     if (capabilities.supports_fast_mode) try appendMetadataFact(alloc, facts, "Fast");
@@ -344,6 +347,18 @@ fn appendCompactFacts(
 
 fn compactFactsWidth(capabilities: model_capabilities.Capabilities) usize {
     var width: usize = 0;
+    if (capabilities.supports_tool_use) {
+        if (width > 0) width += display_width.visibleWidth(" · ");
+        width += display_width.visibleWidth("Tools");
+    }
+    if (capabilities.supports_vision) {
+        if (width > 0) width += display_width.visibleWidth(" · ");
+        width += display_width.visibleWidth("Vision");
+    }
+    if (capabilities.supports_file_input) {
+        if (width > 0) width += display_width.visibleWidth(" · ");
+        width += display_width.visibleWidth("Docs");
+    }
     if (capabilities.context_window) |tokens| {
         if (width > 0) width += display_width.visibleWidth(" · ");
         width += tokenFactWidth(tokens, "context");
@@ -400,24 +415,16 @@ fn loadedCatalogStatusText(state: model_cache_runtime.ModelMenuCatalogState) ?[]
     if (state.private_models_hidden) {
         const reason = state.public_only_reason orelse return "Using the public model catalog.";
         return switch (reason) {
-            .no_credential => "Using the public model catalog; sign in or use an API key for team-private models.",
-            .fx_login_team_required => "Choose a Vercel team to load its private models.",
-            .fx_login_refresh_required => "Vercel sign-in must refresh before team-private models can load.",
-            .credential_refresh_failed => "Vercel sign-in refresh failed; using the public model catalog.",
-            .authenticated_credential_rejected => "Your Gateway credential was rejected; using the public model catalog.",
-            .chatgpt_subscription => "Codex models require an authenticated Codex catalog.",
-            .grok_subscription => "Grok models require an authenticated Grok catalog.",
+            .no_credential => "Sign in to X1 to load the model catalog.",
+            .credential_refresh_failed => "X1 sign-in refresh failed.",
+            .authenticated_credential_rejected => "The X1 credential was rejected.",
+            .layerx1_subscription => "X1 models require an authenticated X1 catalog.",
         };
     }
     if (state.access_level == .authenticated) {
-        const source = state.source orelse return "Using an authenticated AI Gateway catalog.";
+        const source = state.source orelse return "Using an authenticated X1 catalog.";
         return switch (source) {
-            .fx_login => "Gateway catalog: authenticated with fx login.",
-            .ai_gateway_api_key => "Note: Gateway catalog is authenticated with an API key",
-            .vercel_oidc_token => "Gateway catalog: authenticated with the Vercel session.",
-            .stored_key => "Gateway catalog: authenticated with the stored API key.",
-            .chatgpt_subscription => "Codex catalog: authenticated with a subscription.",
-            .grok_subscription => "Grok catalog: authenticated with a subscription.",
+            .layerx1_subscription => "X1 catalog: authenticated with a subscription.",
         };
     }
     return null;
@@ -427,8 +434,8 @@ fn retryableFailureText(failure: ?model_cache_runtime.ModelMenuCatalogState.Fail
     const value = failure orelse return null;
     if (!value.retryable) return null;
     return switch (value.category) {
-        .rate_limited => "AI Gateway rate limited model discovery; retry /model.",
-        .transport, .gateway_unavailable => "Could not reach AI Gateway; retry /model.",
+        .rate_limited => "X1 rate limited model discovery; retry /model.",
+        .transport, .gateway_unavailable => "Could not reach X1; retry /model.",
         else => "Could not refresh model catalog; retry /model.",
     };
 }
@@ -492,12 +499,10 @@ test "model menu renders provider tabs and compact model facts" {
     try std.testing.expect(std.mem.find(u8, title.items, "anthropic/claude-opus-4.8") != null);
     try std.testing.expect(std.mem.find(u8, title.items, "●") == null);
     try std.testing.expect(std.mem.find(u8, title.items, "○") == null);
-    try std.testing.expect(std.mem.find(u8, title.items, "1M context · 128K output · Fast") != null);
+    try std.testing.expect(std.mem.find(u8, title.items, "Tools · Vision · Docs · 1M context · 128K output · Fast") != null);
     try std.testing.expect(std.mem.find(u8, title.items, "Anthropic") == null);
     try std.testing.expect(std.mem.find(u8, title.items, "Current") == null);
     try std.testing.expect(std.mem.find(u8, title.items, "Reasoning") == null);
-    try std.testing.expect(std.mem.find(u8, title.items, "Vision") == null);
-    try std.testing.expect(std.mem.find(u8, title.items, "Tools") == null);
     try std.testing.expect(std.mem.find(u8, title.items, "Files") == null);
     try std.testing.expect(std.mem.find(u8, title.items, "Web") == null);
 }
@@ -511,7 +516,7 @@ test "model menu keeps active provider visible and omits unknown metadata" {
             .capabilities = .{},
         },
         .{ .id = @constCast("openai/gpt"), .provider = "openai", .capabilities = .{} },
-        .{ .id = @constCast("xai/grok"), .provider = "xai", .capabilities = .{} },
+        .{ .id = @constCast("lx1-reasoning"), .provider = "xai", .capabilities = .{} },
     };
     const projection: ModelMenuProjection = .{
         .active = true,
@@ -558,6 +563,34 @@ test "model menu keeps shared-prefix model ids distinguishable when narrow" {
     try std.testing.expect(display_width.visibleWidthIgnoringAnsi(beta_row.items) <= 40);
 }
 
+test "model menu colors only the selected model label" {
+    const alloc = std.testing.allocator;
+    ui_render.initTheme(false, null);
+    defer ui_render.initTheme(false, null);
+
+    const selected_item: model_cache_runtime.ModelMenuItem = .{
+        .id = @constCast("provider/selected-model"),
+        .provider = "provider",
+        .capabilities = .{},
+    };
+    const inactive_item: model_cache_runtime.ModelMenuItem = .{
+        .id = @constCast("provider/inactive-model"),
+        .provider = "provider",
+        .capabilities = .{},
+    };
+
+    var selected = try composeTitleRow(alloc, selected_item, true, null, 80);
+    defer selected.deinit(alloc);
+    var inactive = try composeTitleRow(alloc, inactive_item, false, null, 80);
+    defer inactive.deinit(alloc);
+
+    try std.testing.expect(std.mem.find(u8, selected.items, ui_render.x1_accent_style) != null);
+    try std.testing.expect(std.mem.find(u8, selected.items, "provider/selected-model") != null);
+    try std.testing.expect(std.mem.find(u8, inactive.items, ui_render.x1_accent_style) == null);
+    try std.testing.expect(std.mem.find(u8, inactive.items, ui_render.dim_style) != null);
+    try std.testing.expect(std.mem.find(u8, inactive.items, "provider/inactive-model") != null);
+}
+
 test "model menu states and navigation budget stay bounded" {
     const alloc = std.testing.allocator;
     const loading: ModelMenuProjection = .{ .active = true, .load_state = .loading };
@@ -575,7 +608,7 @@ test "model menu states and navigation budget stay bounded" {
     const failed: ModelMenuProjection = .{ .active = true, .load_state = .failed, .catalog_state = .{ .failure = .{ .category = .transport, .retryable = true } } };
     var failed_state = try composeModelMenuRow(alloc, failed, 2, 80, menuRowCount(failed, 80, 10));
     defer failed_state.deinit(alloc);
-    try std.testing.expect(std.mem.find(u8, failed_state.items, "Could not reach AI Gateway; retry /model.") != null);
+    try std.testing.expect(std.mem.find(u8, failed_state.items, "Could not reach X1; retry /model.") != null);
 
     const items = [_]model_cache_runtime.ModelMenuItem{
         .{ .id = @constCast("a/one"), .provider = "a", .capabilities = .{} },
@@ -610,7 +643,7 @@ test "empty model menu keeps catalog provenance below the empty state" {
 
     var status = try composeModelMenuRow(alloc, projection, 4, 80, rows);
     defer status.deinit(alloc);
-    try std.testing.expect(std.mem.find(u8, status.items, "Using the public model catalog") != null);
+    try std.testing.expect(std.mem.find(u8, status.items, "Sign in to X1") != null);
 }
 
 test "model menu caps inline browse at twenty and prioritizes tiny selection" {
@@ -652,7 +685,7 @@ test "model menu places catalog note after an item gap and preserves the heading
         .items = &items,
         .catalog_state = .{
             .access_level = .authenticated,
-            .source = .ai_gateway_api_key,
+            .source = .layerx1_subscription,
         },
     };
     const rows = menuRowCount(projection, 120, 10);
@@ -672,27 +705,25 @@ test "model menu places catalog note after an item gap and preserves the heading
 
     var status = try composeModelMenuRow(alloc, projection, 5, 120, rows);
     defer status.deinit(alloc);
-    try std.testing.expect(std.mem.find(u8, status.items, "Note: Gateway catalog is authenticated with an API key") != null);
+    try std.testing.expect(std.mem.find(u8, status.items, "X1 catalog: authenticated with a subscription") != null);
 }
 
 test "model menu status follows provenance and retryable failure precedence" {
     try std.testing.expectEqualStrings(
-        "Gateway catalog: authenticated with fx login.",
-        loadedCatalogStatusText(.{ .access_level = .authenticated, .source = .fx_login }).?,
+        "X1 catalog: authenticated with a subscription.",
+        loadedCatalogStatusText(.{ .access_level = .authenticated, .source = .layerx1_subscription }).?,
     );
 
     const cases = [_]struct {
         state: model_cache_runtime.ModelMenuCatalogState,
         expected: []const u8,
     }{
-        .{ .state = .{ .public_only_reason = .no_credential, .private_models_hidden = true }, .expected = "Using the public model catalog; sign in or use an API key for team-private models." },
-        .{ .state = .{ .public_only_reason = .fx_login_team_required, .private_models_hidden = true }, .expected = "Choose a Vercel team to load its private models." },
-        .{ .state = .{ .public_only_reason = .fx_login_refresh_required, .private_models_hidden = true }, .expected = "Vercel sign-in must refresh before team-private models can load." },
-        .{ .state = .{ .public_only_reason = .credential_refresh_failed, .private_models_hidden = true }, .expected = "Vercel sign-in refresh failed; using the public model catalog." },
-        .{ .state = .{ .public_only_reason = .authenticated_credential_rejected, .private_models_hidden = true }, .expected = "Your Gateway credential was rejected; using the public model catalog." },
-        .{ .state = .{ .failure = .{ .category = .transport, .retryable = true } }, .expected = "Could not reach AI Gateway; retry /model." },
-        .{ .state = .{ .access_level = .public_only, .public_only_reason = .no_credential, .private_models_hidden = true, .failure = .{ .category = .rate_limited, .retryable = true } }, .expected = "AI Gateway rate limited model discovery; retry /model." },
-        .{ .state = .{ .access_level = .authenticated, .failure = .{ .category = .rate_limited, .retryable = true } }, .expected = "AI Gateway rate limited model discovery; retry /model." },
+        .{ .state = .{ .public_only_reason = .no_credential, .private_models_hidden = true }, .expected = "Sign in to X1 to load the model catalog." },
+        .{ .state = .{ .public_only_reason = .credential_refresh_failed, .private_models_hidden = true }, .expected = "X1 sign-in refresh failed." },
+        .{ .state = .{ .public_only_reason = .authenticated_credential_rejected, .private_models_hidden = true }, .expected = "The X1 credential was rejected." },
+        .{ .state = .{ .failure = .{ .category = .transport, .retryable = true } }, .expected = "Could not reach X1; retry /model." },
+        .{ .state = .{ .access_level = .public_only, .public_only_reason = .no_credential, .private_models_hidden = true, .failure = .{ .category = .rate_limited, .retryable = true } }, .expected = "X1 rate limited model discovery; retry /model." },
+        .{ .state = .{ .access_level = .authenticated, .failure = .{ .category = .rate_limited, .retryable = true } }, .expected = "X1 rate limited model discovery; retry /model." },
         .{ .state = .{ .access_level = .authenticated, .failure = .{ .category = .runtime, .retryable = true } }, .expected = "Could not refresh model catalog; retry /model." },
     };
 
@@ -816,10 +847,8 @@ test "model menu keeps only compact facts beside the model" {
     var title = try composeModelMenuRow(alloc, projection, 2, 100, rows);
     defer title.deinit(alloc);
     try std.testing.expect(std.mem.find(u8, title.items, "anthropic/claude-opus-4.8") != null);
-    try std.testing.expect(std.mem.find(u8, title.items, "1M context · 128K output · Fast") != null);
+    try std.testing.expect(std.mem.find(u8, title.items, "Tools · Vision · 1M context · 128K output · Fast") != null);
     try std.testing.expect(std.mem.find(u8, title.items, "Anthropic") == null);
     try std.testing.expect(std.mem.find(u8, title.items, "Current") == null);
     try std.testing.expect(std.mem.find(u8, title.items, "Reasoning") == null);
-    try std.testing.expect(std.mem.find(u8, title.items, "Vision") == null);
-    try std.testing.expect(std.mem.find(u8, title.items, "Tools") == null);
 }

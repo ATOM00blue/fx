@@ -361,41 +361,21 @@ fn writeTerminalSafe(writer: *std.Io.Writer, alloc: Allocator, raw: []const u8) 
     try writer.writeAll(encoded.bytes);
 }
 
-fn gatewayProviderConnected(auth: auth_runtime.StatusSnapshot) bool {
-    const source = auth.active_source orelse return auth.gateway_connected;
-    return auth.gateway_connected or (source != .chatgpt_subscription and source != .grok_subscription);
-}
-
-fn chatGptProviderConnected(auth: auth_runtime.StatusSnapshot) bool {
-    return auth.chatgpt_connected or auth.active_source == .chatgpt_subscription;
-}
-
-fn grokProviderConnected(auth: auth_runtime.StatusSnapshot) bool {
-    return auth.grok_connected or auth.active_source == .grok_subscription;
+fn layerx1ProviderConnected(auth: auth_runtime.StatusSnapshot) bool {
+    return auth.layerx1_connected or auth.active_source == .layerx1_subscription;
 }
 
 fn writeConnectedProvidersText(writer: *std.Io.Writer, auth: auth_runtime.StatusSnapshot) !void {
-    var wrote_provider = false;
-    if (gatewayProviderConnected(auth)) {
-        try writer.writeAll("Vercel AI Gateway");
-        wrote_provider = true;
+    if (layerx1ProviderConnected(auth)) {
+        try writer.writeAll("X1");
+        return;
     }
-    if (chatGptProviderConnected(auth)) {
-        if (wrote_provider) try writer.writeAll(", Codex");
-        if (!wrote_provider) try writer.writeAll("Codex");
-        wrote_provider = true;
-    }
-    if (grokProviderConnected(auth)) {
-        if (wrote_provider) try writer.writeAll(", Grok");
-        if (!wrote_provider) try writer.writeAll("Grok");
-        wrote_provider = true;
-    }
-    if (!wrote_provider) try writer.writeAll("none");
+    try writer.writeAll("none");
 }
 
 pub const StatusSnapshot = struct {
     model: []const u8,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     update_channel: []const u8 = "stable",
     build_channel: []const u8 = "stable",
     build_revision: []const u8 = "",
@@ -420,9 +400,6 @@ pub const StatusSnapshot = struct {
         defer out.deinit();
 
         try out.writer.print("[status] model={s}\n", .{self.model});
-        if (self.provider != .gateway) {
-            try out.writer.print("[status] model_source={s}\n", .{provider_catalog.label(self.provider)});
-        }
         try out.writer.print("[status] update_channel={s}\n", .{self.update_channel});
         try out.writer.print("[status] build_channel={s}\n", .{self.build_channel});
         if (self.build_revision.len > 0) {
@@ -432,11 +409,6 @@ pub const StatusSnapshot = struct {
             try out.writer.print("[status] mcp_config_error={s}\n", .{error_name});
         }
         try out.writer.print("[status] auth={s}\n", .{self.auth.activeSourceLabel()});
-        if (self.provider != .gateway) {
-            try out.writer.writeAll("[status] connected_providers=");
-            try writeConnectedProvidersText(&out.writer, self.auth);
-            try out.writer.writeByte('\n');
-        }
         try out.writer.print("[status] auth_refreshable={}\n", .{self.auth.refreshable()});
         if (self.auth.expired) try out.writer.writeAll("[status] auth_expired=true\n");
         if (self.auth_help) |help| {
@@ -458,20 +430,12 @@ pub const StatusSnapshot = struct {
         defer out.deinit();
 
         try out.writer.print("model={s}\n", .{self.model});
-        if (self.provider != .gateway) {
-            try out.writer.print("model_source={s}\n", .{provider_catalog.label(self.provider)});
-        }
         try out.writer.print("update_channel={s}\n", .{self.update_channel});
         try out.writer.print("build_channel={s}\n", .{self.build_channel});
         if (self.build_revision.len > 0) {
             try out.writer.print("build_revision={s}\n", .{self.build_revision});
         }
         try out.writer.print("auth={s}\n", .{self.auth.activeSourceLabel()});
-        if (self.provider != .gateway) {
-            try out.writer.writeAll("connected_providers=");
-            try writeConnectedProvidersText(&out.writer, self.auth);
-            try out.writer.writeByte('\n');
-        }
         try out.writer.print("auth_refreshable={}\n", .{self.auth.refreshable()});
         if (self.auth.expired) try out.writer.writeAll("auth_expired=true\n");
         if (self.auth_help) |help| try out.writer.print("auth_help={s}\n", .{help});
@@ -495,10 +459,6 @@ pub const StatusSnapshot = struct {
     pub fn writeJson(self: StatusSnapshot, writer: *std.Io.Writer) !void {
         try writer.writeAll("{\"kind\":\"status\",\"model\":");
         try std.json.Stringify.value(self.model, .{}, writer);
-        if (self.provider != .gateway) {
-            try writer.writeAll(",\"model_source\":");
-            try std.json.Stringify.value(provider_catalog.label(self.provider), .{}, writer);
-        }
         try writer.writeAll(",\"update_channel\":");
         try std.json.Stringify.value(self.update_channel, .{}, writer);
         try writer.writeAll(",\"build_channel\":");
@@ -511,24 +471,6 @@ pub const StatusSnapshot = struct {
         }
         try writer.writeAll(",\"auth\":");
         try std.json.Stringify.value(self.auth.activeSourceLabel(), .{}, writer);
-        if (self.provider != .gateway) {
-            try writer.writeAll(",\"connected_providers\":[");
-            var wrote_provider = false;
-            if (gatewayProviderConnected(self.auth)) {
-                try std.json.Stringify.value("vercel-ai-gateway", .{}, writer);
-                wrote_provider = true;
-            }
-            if (chatGptProviderConnected(self.auth)) {
-                if (wrote_provider) try writer.writeByte(',');
-                try std.json.Stringify.value("codex", .{}, writer);
-                wrote_provider = true;
-            }
-            if (grokProviderConnected(self.auth)) {
-                if (wrote_provider) try writer.writeByte(',');
-                try std.json.Stringify.value("grok", .{}, writer);
-            }
-            try writer.writeByte(']');
-        }
         try writer.print(",\"auth_refreshable\":{}", .{self.auth.refreshable()});
         if (self.auth.expired) try writer.writeAll(",\"auth_expired\":true");
         if (self.auth_help) |help| {
@@ -647,7 +589,7 @@ pub const PermissionsSnapshot = struct {
 
 pub const ModelListSnapshot = struct {
     ids: []const []const u8,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     limit: ?usize = null,
     private_models_hidden: bool = false,
     public_only_reason: ?credentials.CatalogPublicOnlyReason = null,
@@ -675,11 +617,7 @@ pub const ModelListSnapshot = struct {
 
         const shown = self.shownCount();
         for (self.ids[0..shown]) |id| {
-            if (self.provider != .gateway) {
-                try out.writer.print(" - {s} · {s}\n", .{ id, provider_catalog.label(self.provider) });
-            } else {
-                try out.writer.print(" - {s}\n", .{id});
-            }
+            try out.writer.print(" - {s}\n", .{id});
         }
         if (self.ids.len > shown) {
             try out.writer.print(" ... and {d} more\n", .{self.ids.len - shown});
@@ -703,11 +641,7 @@ pub const ModelListSnapshot = struct {
         try out.writer.print("{d} available", .{self.ids.len});
         const shown = self.shownCount();
         for (self.ids[0..shown]) |id| {
-            if (self.provider != .gateway) {
-                try out.writer.print("\n - {s} · {s}", .{ id, provider_catalog.label(self.provider) });
-            } else {
-                try out.writer.print("\n - {s}", .{id});
-            }
+            try out.writer.print("\n - {s}", .{id});
         }
         if (self.ids.len > shown) try out.writer.print("\n ... and {d} more", .{self.ids.len - shown});
         if (self.catalogExplanation()) |explanation| try out.writer.print("\n{s}", .{explanation});
@@ -727,17 +661,6 @@ pub const ModelListSnapshot = struct {
             if (i > 0) try out.writer.writeByte(',');
             try std.json.Stringify.value(id, .{}, &out.writer);
         }
-        if (self.provider != .gateway) {
-            try out.writer.writeAll("],\"models\":[");
-            for (self.ids[0..shown], 0..) |id, i| {
-                if (i > 0) try out.writer.writeByte(',');
-                try out.writer.writeAll("{\"id\":");
-                try std.json.Stringify.value(id, .{}, &out.writer);
-                try out.writer.writeAll(",\"source\":");
-                try std.json.Stringify.value(provider_catalog.label(self.provider), .{}, &out.writer);
-                try out.writer.writeByte('}');
-            }
-        }
         try out.writer.writeAll("]}");
         return try out.toOwnedSlice();
     }
@@ -748,9 +671,7 @@ pub const ModelListSnapshot = struct {
 
     fn emptyCatalogProviderName(self: ModelListSnapshot) []const u8 {
         return switch (self.provider) {
-            .gateway => "gateway",
-            .codex => provider_catalog.label(.codex),
-            .grok => provider_catalog.label(.grok),
+            .layerx1 => "x1",
         };
     }
 
@@ -758,13 +679,10 @@ pub const ModelListSnapshot = struct {
         if (!self.private_models_hidden) return null;
         const reason = self.public_only_reason orelse return "Using the public model catalog.";
         return switch (reason) {
-            .no_credential => "Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
-            .fx_login_team_required => "Choose a Vercel team to load its private models.",
-            .fx_login_refresh_required => "Vercel sign-in must refresh before team-private models can load.",
-            .credential_refresh_failed => "Vercel sign-in refresh failed; using the public model catalog.",
-            .authenticated_credential_rejected => "Your Gateway credential was rejected; using the public model catalog.",
-            .chatgpt_subscription => "Codex models require an authenticated Codex catalog.",
-            .grok_subscription => "Grok models require an authenticated Grok catalog.",
+            .no_credential => "Sign in to X1 to load the model catalog.",
+            .credential_refresh_failed => "X1 sign-in refresh failed.",
+            .authenticated_credential_rejected => "The X1 credential was rejected.",
+            .layerx1_subscription => "X1 models require an authenticated X1 catalog.",
         };
     }
 };
@@ -808,13 +726,13 @@ pub const SessionListSnapshot = struct {
         }
         if (self.has_more) {
             try out.writer.print(
-                "[sessions] more saved sessions; continue with `fx sessions {s}--cursor {s}`\n",
+                "[sessions] more saved sessions; continue with `x1 sessions {s}--cursor {s}`\n",
                 .{ if (self.all_workspaces) "--all " else "", self.next_cursor orelse "" },
             );
         }
         if (self.skipped_invalid > 0) {
             try out.writer.print(
-                "[sessions] warning: skipped {d} unreadable saved session{s}; run `fx doctor` for recovery guidance\n",
+                "[sessions] warning: skipped {d} unreadable saved session{s}; run `x1 doctor` for recovery guidance\n",
                 .{ self.skipped_invalid, if (self.skipped_invalid == 1) "" else "s" },
             );
         }
@@ -1135,7 +1053,7 @@ pub const SessionRecoverySnapshot = struct {
         if (self.result.status == .indeterminate) {
             return std.fmt.allocPrint(
                 alloc,
-                "[session recovery] could not confirm target {s}\nsource: {s} (unchanged)\nresolve: fx --resume {s}\ninspect: fx doctor\n",
+                "[session recovery] could not confirm target {s}\nsource: {s} (unchanged)\nresolve: x1 --resume {s}\ninspect: x1 doctor\n",
                 .{
                     self.result.recovered_session_id,
                     self.result.source_session_id,
@@ -1146,7 +1064,7 @@ pub const SessionRecoverySnapshot = struct {
         if (self.result.status == .recovered_with_unverified_artifacts) {
             return std.fmt.allocPrint(
                 alloc,
-                "[session recovery] copied {s} to {s}\nhistory_turns: {d}\nwarning: legacy command artifacts could not be authenticated\nresume: fx --resume {s}\n",
+                "[session recovery] copied {s} to {s}\nhistory_turns: {d}\nwarning: legacy command artifacts could not be authenticated\nresume: x1 --resume {s}\n",
                 .{
                     self.result.source_session_id,
                     self.result.recovered_session_id,
@@ -1157,7 +1075,7 @@ pub const SessionRecoverySnapshot = struct {
         }
         return std.fmt.allocPrint(
             alloc,
-            "[session recovery] copied {s} to {s}\nhistory_turns: {d}\nresume: fx --resume {s}\n",
+            "[session recovery] copied {s} to {s}\nhistory_turns: {d}\nresume: x1 --resume {s}\n",
             .{
                 self.result.source_session_id,
                 self.result.recovered_session_id,
@@ -1204,7 +1122,7 @@ pub const SessionRecoverySnapshot = struct {
 pub const DoctorSnapshot = struct {
     workspace_root: []const u8,
     model: []const u8,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     auth: auth_runtime.StatusSnapshot = .{},
     permission_mode: types.PermissionMode,
     agent_step_limit: usize,
@@ -1228,9 +1146,6 @@ pub const DoctorSnapshot = struct {
         );
         try out.writer.print("[doctor] workspace={s}\n", .{self.workspace_root});
         try out.writer.print("[doctor] model={s}\n", .{self.model});
-        if (self.provider != .gateway) {
-            try out.writer.print("[doctor] model_source={s}\n", .{provider_catalog.label(self.provider)});
-        }
         try out.writer.print("[doctor] auth={s}\n", .{self.auth.activeSourceLabel()});
         try out.writer.print("[doctor] auth_refreshable={}\n", .{self.auth.refreshable()});
         if (self.auth.expired) try out.writer.writeAll("[doctor] auth_expired=true\n");
@@ -1265,10 +1180,6 @@ pub const DoctorSnapshot = struct {
         try std.json.Stringify.value(self.workspace_root, .{}, writer);
         try writer.writeAll(",\"model\":");
         try std.json.Stringify.value(self.model, .{}, writer);
-        if (self.provider != .gateway) {
-            try writer.writeAll(",\"model_source\":");
-            try std.json.Stringify.value(provider_catalog.label(self.provider), .{}, writer);
-        }
         try writer.writeAll(",\"auth\":");
         try std.json.Stringify.value(self.auth.activeSourceLabel(), .{}, writer);
         try writer.print(",\"auth_refreshable\":{}", .{self.auth.refreshable()});
@@ -1604,9 +1515,9 @@ pub const UpgradeSnapshot = struct {
             },
             .up_to_date => {
                 if (std.mem.eql(u8, self.channel, "dev") and self.latest_revision.len > 0) {
-                    try out.writer.print("fx dev {s} is already up to date (", .{shortRevision(self.latest_revision)});
+                    try out.writer.print("x1 dev {s} is already up to date (", .{shortRevision(self.latest_revision)});
                 } else {
-                    try out.writer.writeAll("fx is already up to date (");
+                    try out.writer.writeAll("x1 is already up to date (");
                 }
                 try writeVersionWithPrefix(&out.writer, self.latest);
                 try out.writer.writeAll(")\n");
@@ -1959,9 +1870,9 @@ test "command failure snapshot renders stable escaped json" {
 test "core status snapshot text and json stay stable" {
     const snapshot = StatusSnapshot{
         .model = "alpha",
-        .auth_help = "Fx needs access to Vercel AI Gateway. Run fx login to sign in, fx setup to use an API key, or set AI_GATEWAY_API_KEY.",
+        .auth_help = credentials.missing_layerx1_credential_message,
         .permission_mode = .ask,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/x1",
         .history_turns = 3,
         .session_permission_grants = 1,
         .agent_step_limit = 24,
@@ -1970,14 +1881,14 @@ test "core status snapshot text and json stay stable" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[status] model=alpha\n[status] update_channel=stable\n[status] build_channel=stable\n[status] auth=missing\n[status] auth_refreshable=false\n[status] auth_help=Fx needs access to Vercel AI Gateway. Run fx login to sign in, fx setup to use an API key, or set AI_GATEWAY_API_KEY.\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=3\n[status] session_permission_grants=1\n[status] agent_step_limit=24\n",
+        "[status] model=alpha\n[status] update_channel=stable\n[status] build_channel=stable\n[status] auth=missing\n[status] auth_refreshable=false\n[status] auth_help=x1 needs a LayerX1 login. Run x1 login.\n[status] permission_mode=ask\n[status] workspace=/tmp/x1\n[status] history_turns=3\n[status] session_permission_grants=1\n[status] agent_step_limit=24\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"Fx needs access to Vercel AI Gateway. Run fx login to sign in, fx setup to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":3,\"session_permission_grants\":1,\"agent_step_limit\":24}",
+        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"x1 needs a LayerX1 login. Run x1 login.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/x1\",\"history_turns\":3,\"session_permission_grants\":1,\"agent_step_limit\":24}",
         json,
     );
 }
@@ -1985,9 +1896,9 @@ test "core status snapshot text and json stay stable" {
 test "core status snapshot includes selected team when present" {
     const snapshot = StatusSnapshot{
         .model = "alpha",
-        .auth = .{ .active_source = .fx_login, .team = "example-team" },
+        .auth = .{ .active_source = .layerx1_subscription, .team = "example-team" },
         .permission_mode = .ask,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/x1",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -1996,49 +1907,48 @@ test "core status snapshot includes selected team when present" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[status] model=alpha\n[status] update_channel=stable\n[status] build_channel=stable\n[status] auth=fx login\n[status] auth_refreshable=true\n[status] team=example-team\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=0\n[status] session_permission_grants=0\n[status] agent_step_limit=24\n",
+        "[status] model=alpha\n[status] update_channel=stable\n[status] build_channel=stable\n[status] auth=X1 subscription\n[status] auth_refreshable=true\n[status] team=example-team\n[status] permission_mode=ask\n[status] workspace=/tmp/x1\n[status] history_turns=0\n[status] session_permission_grants=0\n[status] agent_step_limit=24\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"fx login\",\"auth_refreshable\":true,\"team\":\"example-team\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":24}",
+        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"X1 subscription\",\"auth_refreshable\":true,\"team\":\"example-team\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/x1\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":24}",
         json,
     );
 }
 
-test "status distinguishes the selected model route from connected providers" {
+test "status reports the selected X1 account source" {
     const snapshot = StatusSnapshot{
         .model = "gpt-5.4",
-        .provider = .codex,
+        .provider = .layerx1,
         .auth = .{
-            .active_source = .chatgpt_subscription,
-            .gateway_connected = true,
-            .chatgpt_connected = true,
+            .active_source = .layerx1_subscription,
+            .layerx1_connected = true,
         },
         .permission_mode = .auto,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/x1",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
     };
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
-    try std.testing.expect(std.mem.find(u8, text, "model_source=Codex subscription") != null);
-    try std.testing.expect(std.mem.find(u8, text, "connected_providers=Vercel AI Gateway, Codex") != null);
+    try std.testing.expect(std.mem.find(u8, text, "auth=X1 subscription") != null);
+    try std.testing.expect(std.mem.find(u8, text, "LayerX1") == null);
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
-    try std.testing.expect(std.mem.find(u8, json, "\"model_source\":\"Codex subscription\"") != null);
-    try std.testing.expect(std.mem.find(u8, json, "\"connected_providers\":[\"vercel-ai-gateway\",\"codex\"]") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"auth\":\"X1 subscription\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "vercel") == null);
 }
 
 test "MCP config diagnostic renders in status text and JSON but not interactive body" {
     const snapshot = StatusSnapshot{
         .model = "alpha",
         .permission_mode = .ask,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/x1",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -2109,28 +2019,28 @@ test "model list explains public-only and rejected-credential catalogs" {
     }{
         .{
             .snapshot = .{ .ids = &ids, .private_models_hidden = true, .public_only_reason = .no_credential },
-            .text = "[models] 1 available\n - alpha\n[models] Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.\n",
-            .body = "1 available\n - alpha\nUsing the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
+            .text = "[models] 1 available\n - alpha\n[models] Sign in to X1 to load the model catalog.\n",
+            .body = "1 available\n - alpha\nSign in to X1 to load the model catalog.",
         },
         .{
             .snapshot = rejected,
-            .text = "[models] 1 available\n - alpha\n[models] Your Gateway credential was rejected; using the public model catalog.\n",
-            .body = "1 available\n - alpha\nYour Gateway credential was rejected; using the public model catalog.",
+            .text = "[models] 1 available\n - alpha\n[models] The X1 credential was rejected.\n",
+            .body = "1 available\n - alpha\nThe X1 credential was rejected.",
         },
         .{
             .snapshot = .{ .ids = &.{}, .private_models_hidden = true, .public_only_reason = .no_credential },
-            .text = "[models] no models returned by gateway\n[models] Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.\n",
-            .body = "no models returned by gateway\nUsing the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
+            .text = "[models] no models returned by x1\n[models] Sign in to X1 to load the model catalog.\n",
+            .body = "no models returned by x1\nSign in to X1 to load the model catalog.",
         },
         .{
             .snapshot = .{ .ids = &.{}, .private_models_hidden = true, .public_only_reason = .authenticated_credential_rejected },
-            .text = "[models] no models returned by gateway\n[models] Your Gateway credential was rejected; using the public model catalog.\n",
-            .body = "no models returned by gateway\nYour Gateway credential was rejected; using the public model catalog.",
+            .text = "[models] no models returned by x1\n[models] The X1 credential was rejected.\n",
+            .body = "no models returned by x1\nThe X1 credential was rejected.",
         },
         .{
-            .snapshot = .{ .ids = &.{}, .provider = .codex },
-            .text = "[models] no models returned by Codex subscription\n",
-            .body = "no models returned by Codex subscription",
+            .snapshot = .{ .ids = &.{}, .provider = .layerx1 },
+            .text = "[models] no models returned by x1\n",
+            .body = "no models returned by x1",
         },
     };
 
@@ -2186,7 +2096,7 @@ test "core model list snapshot handles limits and empty lists" {
 
     const empty_text = try (ModelListSnapshot{ .ids = &.{} }).renderText(std.testing.allocator);
     defer std.testing.allocator.free(empty_text);
-    try std.testing.expectEqualStrings("[models] no models returned by gateway\n", empty_text);
+    try std.testing.expectEqualStrings("[models] no models returned by x1\n", empty_text);
 
     const empty_json = try (ModelListSnapshot{ .ids = &.{} }).renderJson(std.testing.allocator);
     defer std.testing.allocator.free(empty_json);
@@ -2234,7 +2144,7 @@ test "core session list snapshot text and json stay stable" {
     defer std.testing.allocator.free(paged_text);
     try std.testing.expectEqualStrings(
         "[sessions] 1 saved\n - Session title\n   id=abc | 3 turns | Spanish | updated 1970-01-01 00:00:00.002 UTC\n" ++
-            "[sessions] more saved sessions; continue with `fx sessions --cursor v1:2:abc`\n",
+            "[sessions] more saved sessions; continue with `x1 sessions --cursor v1:2:abc`\n",
         paged_text,
     );
 
@@ -2399,7 +2309,7 @@ test "core empty session detail snapshot text and json stay stable" {
     const detail = session_store.ReadOnlyDetail{
         .summary = .{
             .id = @constCast("sess-empty"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .workspace_root = @constCast("/tmp/x1"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2407,8 +2317,8 @@ test "core empty session detail snapshot text and json stay stable" {
         },
         .state = .{
             .id = @constCast("sess-empty"),
-            .origin_workspace_root = @constCast("/tmp/fx"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .origin_workspace_root = @constCast("/tmp/x1"),
+            .workspace_root = @constCast("/tmp/x1"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2482,7 +2392,7 @@ test "core session detail snapshot preserves history variant shapes" {
     const detail = session_store.ReadOnlyDetail{
         .summary = .{
             .id = @constCast("sess-history"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .workspace_root = @constCast("/tmp/x1"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("es"),
@@ -2490,8 +2400,8 @@ test "core session detail snapshot preserves history variant shapes" {
         },
         .state = .{
             .id = @constCast("sess-history"),
-            .origin_workspace_root = @constCast("/tmp/fx"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .origin_workspace_root = @constCast("/tmp/x1"),
+            .workspace_root = @constCast("/tmp/x1"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("es"),
@@ -2542,7 +2452,7 @@ test "core session detail JSON includes assistant execution memory" {
         .output_bytes = 48,
         .stored_output_bytes = 48,
         .command_output_replay = .{ .available = .{
-            .handle = "fx-command-replay-private-sentinel.bin",
+            .handle = "x1-command-replay-private-sentinel.bin",
             .framed_bytes = 77,
         } },
         .command_process_presentation = .{ .exit_code = 9 },
@@ -2560,7 +2470,7 @@ test "core session detail JSON includes assistant execution memory" {
     const detail = session_store.ReadOnlyDetail{
         .summary = .{
             .id = @constCast("sess-exec"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .workspace_root = @constCast("/tmp/x1"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2568,8 +2478,8 @@ test "core session detail JSON includes assistant execution memory" {
         },
         .state = .{
             .id = @constCast("sess-exec"),
-            .origin_workspace_root = @constCast("/tmp/fx"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .origin_workspace_root = @constCast("/tmp/x1"),
+            .workspace_root = @constCast("/tmp/x1"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2592,7 +2502,7 @@ test "core session detail JSON includes assistant execution memory" {
     try std.testing.expect(std.mem.find(u8, json, "artifact-file.pdf") != null);
     try std.testing.expect(std.mem.find(u8, json, "command_output_replay") == null);
     try std.testing.expect(std.mem.find(u8, json, "command_process_presentation") == null);
-    try std.testing.expect(std.mem.find(u8, json, "fx-command-replay-private-sentinel.bin") == null);
+    try std.testing.expect(std.mem.find(u8, json, "x1-command-replay-private-sentinel.bin") == null);
 }
 
 test "core session migration snapshot text and json stay stable" {
@@ -2630,7 +2540,7 @@ test "core session recovery snapshot text and json stay stable" {
     );
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[session recovery] copied source-session to recovered-session\nhistory_turns: 4\nresume: fx --resume recovered-session\n",
+        "[session recovery] copied source-session to recovered-session\nhistory_turns: 4\nresume: x1 --resume recovered-session\n",
         text,
     );
 
@@ -2654,7 +2564,7 @@ test "core session recovery snapshot text and json stay stable" {
     }).renderText(std.testing.allocator);
     defer std.testing.allocator.free(partial_text);
     try std.testing.expectEqualStrings(
-        "[session recovery] copied source-session to partial-session\nhistory_turns: 4\nwarning: legacy command artifacts could not be authenticated\nresume: fx --resume partial-session\n",
+        "[session recovery] copied source-session to partial-session\nhistory_turns: 4\nwarning: legacy command artifacts could not be authenticated\nresume: x1 --resume partial-session\n",
         partial_text,
     );
     const partial_json = try (SessionRecoverySnapshot{
@@ -2677,20 +2587,20 @@ test "core session recovery snapshot text and json stay stable" {
     }).renderText(std.testing.allocator);
     defer std.testing.allocator.free(warning);
     try std.testing.expectEqualStrings(
-        "[session recovery] could not confirm target target-session\nsource: source-session (unchanged)\nresolve: fx --resume target-session\ninspect: fx doctor\n",
+        "[session recovery] could not confirm target target-session\nsource: source-session (unchanged)\nresolve: x1 --resume target-session\ninspect: x1 doctor\n",
         warning,
     );
 }
 
 test "core doctor snapshot text and json stay stable" {
     const checks = [_]doctor_runtime.Check{
-        .{ .name = @constCast("auth"), .status = .ok, .detail = @constCast("AI_GATEWAY_API_KEY is configured") },
+        .{ .name = @constCast("auth"), .status = .ok, .detail = @constCast("X1 account session is configured") },
         .{ .name = @constCast("gh"), .status = .warn, .detail = @constCast("GitHub CLI not found in PATH") },
     };
     const snapshot = DoctorSnapshot{
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/x1",
         .model = "alpha",
-        .auth = .{ .active_source = .ai_gateway_api_key },
+        .auth = .{ .active_source = .layerx1_subscription },
         .permission_mode = .ask,
         .agent_step_limit = 24,
         .checks = &checks,
@@ -2699,14 +2609,14 @@ test "core doctor snapshot text and json stay stable" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[doctor] ok=1 warn=1 fail=0\n[doctor] workspace=/tmp/fx\n[doctor] model=alpha\n[doctor] auth=AI_GATEWAY_API_KEY\n[doctor] auth_refreshable=false\n[doctor] permission_mode=ask\n[doctor] agent_step_limit=24\n[ok] auth: AI_GATEWAY_API_KEY is configured\n[warn] gh: GitHub CLI not found in PATH\n",
+        "[doctor] ok=1 warn=1 fail=0\n[doctor] workspace=/tmp/x1\n[doctor] model=alpha\n[doctor] auth=X1 subscription\n[doctor] auth_refreshable=true\n[doctor] permission_mode=ask\n[doctor] agent_step_limit=24\n[ok] auth: X1 account session is configured\n[warn] gh: GitHub CLI not found in PATH\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/fx\",\"model\":\"alpha\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"ask\",\"agent_step_limit\":24,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"gh\",\"status\":\"warn\",\"detail\":\"GitHub CLI not found in PATH\"}]}",
+        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/x1\",\"model\":\"alpha\",\"auth\":\"X1 subscription\",\"auth_refreshable\":true,\"permission_mode\":\"ask\",\"agent_step_limit\":24,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"X1 account session is configured\"},{\"name\":\"gh\",\"status\":\"warn\",\"detail\":\"GitHub CLI not found in PATH\"}]}",
         json,
     );
 }
@@ -2722,8 +2632,8 @@ test "core background list and detail snapshots preserve persisted fields" {
             .id = 7,
             .pid = @constCast("100"),
             .command = @constCast("npm run dev"),
-            .cwd = @constCast("/tmp/fx"),
-            .log_path = @constCast("/tmp/fx.log"),
+            .cwd = @constCast("/tmp/x1"),
+            .log_path = @constCast("/tmp/x1.log"),
             .expect_url = false,
             .server_url = @constCast("http://localhost:3000"),
             .started_at_ms = 1,
@@ -2735,7 +2645,7 @@ test "core background list and detail snapshots preserve persisted fields" {
     const list_json = try (BackgroundListSnapshot{ .records = &records }).renderJson(std.testing.allocator);
     defer std.testing.allocator.free(list_json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"background\",\"count\":1,\"records\":[{\"id\":7,\"started_at_ms\":1,\"updated_at_ms\":2,\"pid\":\"100\",\"command\":\"npm run dev\",\"cwd\":\"/tmp/fx\",\"log_path\":\"/tmp/fx.log\",\"state\":\"running\",\"server_url\":\"http://localhost:3000\",\"diagnostic\":null}]}",
+        "{\"kind\":\"background\",\"count\":1,\"records\":[{\"id\":7,\"started_at_ms\":1,\"updated_at_ms\":2,\"pid\":\"100\",\"command\":\"npm run dev\",\"cwd\":\"/tmp/x1\",\"log_path\":\"/tmp/x1.log\",\"state\":\"running\",\"server_url\":\"http://localhost:3000\",\"diagnostic\":null}]}",
         list_json,
     );
 
@@ -2748,7 +2658,7 @@ test "core background list and detail snapshots preserve persisted fields" {
     const detail_json = try (BackgroundDetailSnapshot{ .record = records[0] }).renderJson(std.testing.allocator);
     defer std.testing.allocator.free(detail_json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"background_detail\",\"id\":7,\"started_at_ms\":1,\"updated_at_ms\":2,\"pid\":\"100\",\"command\":\"npm run dev\",\"cwd\":\"/tmp/fx\",\"log_path\":\"/tmp/fx.log\",\"state\":\"running\",\"expect_url\":false,\"server_url\":\"http://localhost:3000\",\"diagnostic\":null,\"exit_code\":null}",
+        "{\"kind\":\"background_detail\",\"id\":7,\"started_at_ms\":1,\"updated_at_ms\":2,\"pid\":\"100\",\"command\":\"npm run dev\",\"cwd\":\"/tmp/x1\",\"log_path\":\"/tmp/x1.log\",\"state\":\"running\",\"expect_url\":false,\"server_url\":\"http://localhost:3000\",\"diagnostic\":null,\"exit_code\":null}",
         detail_json,
     );
 }
@@ -2858,7 +2768,7 @@ test "core upgrade snapshot renders errors and statuses" {
 
     const up_to_date_text = try up_to_date.renderText(std.testing.allocator);
     defer std.testing.allocator.free(up_to_date_text);
-    try std.testing.expectEqualStrings("fx is already up to date (v0.2.10)\n", up_to_date_text);
+    try std.testing.expectEqualStrings("x1 is already up to date (v0.2.10)\n", up_to_date_text);
 
     const failed_text = try (UpgradeSnapshot{
         .current = "0.2.9",

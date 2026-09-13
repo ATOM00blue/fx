@@ -49,7 +49,7 @@ else
 const Allocator = std.mem.Allocator;
 
 pub const TurnPreferences = struct {
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     model: []const u8,
     effort: types.ReasoningEffort,
 };
@@ -77,13 +77,13 @@ test "turn preference overrides preserve the persisted provider" {
     const preferences = resolveTurnPreferences(
         command.create.configuration,
         .{
-            .provider = .codex,
+            .provider = .layerx1,
             .model = @constCast("gpt-5.6-sol"),
             .effort = types.ReasoningEffort.literal("high"),
             .fast_mode = false,
         },
     );
-    try std.testing.expectEqual(model_provider.ProviderId.codex, preferences.provider);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, preferences.provider);
     try std.testing.expectEqualStrings("gpt-5.4-mini", preferences.model);
 }
 
@@ -4005,7 +4005,7 @@ const TestEnvironment = struct {
     fn init(alloc: Allocator) !TestEnvironment {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
-        try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
         try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
         const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
         errdefer alloc.free(home);

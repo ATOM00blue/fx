@@ -3,17 +3,17 @@
 //!     zig build run-bench-approval-review -Doptimize=ReleaseSafe -- combined 100 1
 
 const std = @import("std");
-const fx = @import("benchmark_exports");
+const x1 = @import("benchmark_exports");
 
-const approval_prompt = fx.approval_prompt;
-const approval_screen = fx.approval_screen;
-const diff_mod = fx.diff;
-const interaction_state = fx.interaction_state;
-const transcript_blocks = fx.transcript_blocks;
-const vt_emulator = fx.vt_emulator;
+const approval_prompt = x1.approval_prompt;
+const approval_screen = x1.approval_screen;
+const diff_mod = x1.diff;
+const interaction_state = x1.interaction_state;
+const transcript_blocks = x1.transcript_blocks;
+const vt_emulator = x1.vt_emulator;
 
 const Allocator = std.mem.Allocator;
-const TranscriptRuntime = fx.TranscriptRuntime;
+const TranscriptRuntime = x1.TranscriptRuntime;
 const TranscriptEntry = transcript_blocks.TranscriptEntry;
 const seed: u64 = 0xF17ED1FF20260805;
 const standard_cols: u16 = 120;
@@ -23,14 +23,14 @@ const compact_chrome_rows: usize = 8;
 const separator_rows: usize = 2;
 const max_runs: usize = 1_000;
 
-const transcript_head = "FX_TRANSCRIPT_HEAD_SENTINEL";
-const transcript_middle = "FX_TRANSCRIPT_MIDDLE_SENTINEL";
-const transcript_tail = "FX_TRANSCRIPT_TAIL_SENTINEL";
-const diff_head = "FX_DIFF_HEAD_SENTINEL";
-const diff_middle = "FX_DIFF_MIDDLE_SENTINEL";
-const diff_tail = "FX_DIFF_TAIL_SENTINEL";
-const payload_head = "FX_LARGE_PAYLOAD_HEAD_SENTINEL";
-const payload_tail = "FX_LARGE_PAYLOAD_TAIL_SENTINEL";
+const transcript_head = "X1_TRANSCRIPT_HEAD_SENTINEL";
+const transcript_middle = "X1_TRANSCRIPT_MIDDLE_SENTINEL";
+const transcript_tail = "X1_TRANSCRIPT_TAIL_SENTINEL";
+const diff_head = "X1_DIFF_HEAD_SENTINEL";
+const diff_middle = "X1_DIFF_MIDDLE_SENTINEL";
+const diff_tail = "X1_DIFF_TAIL_SENTINEL";
+const payload_head = "X1_LARGE_PAYLOAD_HEAD_SENTINEL";
+const payload_tail = "X1_LARGE_PAYLOAD_TAIL_SENTINEL";
 
 const Scenario = enum {
     transcript,
@@ -354,7 +354,7 @@ const preview_lines = [_]diff_mod.PreviewLine{.{
     .text = "changed",
 }};
 
-fn fileRequest() fx.permission_request.PermissionRequest {
+fn fileRequest() x1.permission_request.PermissionRequest {
     return .{
         .id = 0xA990,
         .label = "write_file approval-review-profile.txt",
@@ -373,7 +373,7 @@ fn fileRequest() fx.permission_request.PermissionRequest {
     };
 }
 
-fn layout(cols: u16, rows: u16) fx.types.Layout {
+fn layout(cols: u16, rows: u16) x1.types.Layout {
     return .{
         .rows = rows,
         .cols = cols,
@@ -439,7 +439,7 @@ fn setDocumentTarget(
     fixture: *const Fixture,
     state: *interaction_state.ApprovalScreenState,
     transcript: []const u8,
-    active_layout: fx.types.Layout,
+    active_layout: x1.types.Layout,
     target: DocumentTarget,
 ) !void {
     if (target == .tail) {
@@ -488,7 +488,7 @@ fn runPhase(
     alloc: Allocator,
     fixture: *Fixture,
     state: *interaction_state.ApprovalScreenState,
-    active_layout: fx.types.Layout,
+    active_layout: x1.types.Layout,
     clear_display: bool,
     target: DocumentTarget,
     expected_marker: ?[]const u8,
@@ -496,7 +496,7 @@ fn runPhase(
 ) !PhaseResult {
     const paint_started = std.Io.Timestamp.now(io, .awake).nanoseconds;
     fixture.runtime.layout = active_layout;
-    var transcript_source: ?fx.TranscriptPreparationSource = null;
+    var transcript_source: ?x1.TranscriptPreparationSource = null;
     defer if (transcript_source) |*source| source.deinit(alloc);
     const transcript_document: approval_screen.TranscriptDocument = switch (try approval_screen.transcriptDocumentPlan(
         fixture.projection(),

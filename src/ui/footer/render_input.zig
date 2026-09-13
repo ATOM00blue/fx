@@ -496,11 +496,14 @@ fn thinkingActivityProjection(
     ctx: RenderContext,
 ) ActivityProjection {
     _ = shell;
+    // A user prompt, approval, or other wait is not model work. Drop the
+    // thinking row so a frozen clock cannot look like an in-flight turn.
+    if (ctx.stream.waiting_since_ms > 0) return .none;
     // The markerless counter row belongs to the response: the text landing on
     // screen is its own progress report, and it keeps the row through the gaps
     // where the pacer waits on the next chunk. Once the model switches to a
     // tool payload nothing will print for a while, so the row takes the marker
-    // back and starts blinking again.
+    // back and starts rotating again.
     if (ctx.stream.active and ctx.stream.assistant_text_started and ctx.stream.composing_tool_payload) {
         return .{ .turn_thinking = .{
             .label = activity_status.buildQuietTurnLabel(buf, ctx.stream, ctx.now_ms),
@@ -517,6 +520,7 @@ fn thinkingActivityProjection(
         const presentation_stream: StreamState = .{ .active = true };
         return .{ .turn_thinking = .{
             .label = activity_status.buildThinkingLabel(buf, presentation_stream, ctx.now_ms) orelse "• Thinking",
+            .tone = .neutral,
         } };
     }
     var thinking_stream = ctx.stream;
@@ -612,7 +616,7 @@ pub fn activityProjectionLabel(projection: ActivityProjection) ?[]const u8 {
 
 test "skillsMenuProjection mirrors runtime menu state" {
     var skills = [_]skill_runtime.Skill{
-        .{ .name = "managed", .description = "managed desc", .path = "/tmp/managed/SKILL.md", .source = .global_fx },
+        .{ .name = "managed", .description = "managed desc", .path = "/tmp/managed/SKILL.md", .source = .global_x1 },
         .{ .name = "workspace", .description = "workspace desc", .path = "/tmp/workspace/SKILL.md", .source = .workspace_shared },
     };
     var runtime: skill_runtime.Runtime = .{ .items = &skills };
@@ -981,6 +985,33 @@ test "frame-owned activity shows live streaming token progress" {
         },
         .none, .tool_slot => return error.TestUnexpectedResult,
     }
+}
+
+test "frame-owned activity hides thinking while waiting on the user" {
+    var input = InputRuntime{};
+    defer input.deinit(std.testing.allocator);
+    var shell = TranscriptRuntime{};
+    defer shell.deinit(std.testing.allocator);
+    const ctx: RenderContext = .{
+        .stream = .{
+            .active = true,
+            .turn_started_ms = 1_000,
+            .waiting_since_ms = 2_000,
+        },
+        .now_ms = 4_000,
+        .has_api_key = true,
+        .model = "gpt-5.1",
+        .queued_count = 0,
+        .subagent_count = 0,
+        .subagent_view_active = false,
+        .selected_subagent_id = null,
+        .selected_subagent_label = null,
+        .selected_subagent_status = null,
+        .input = &input,
+    };
+
+    var wait_buf: [128]u8 = undefined;
+    try std.testing.expect(frameOwnedActivityProjection(&wait_buf, &shell, ctx, null) == .none);
 }
 
 test "static turn status reserves wrapped activity rows" {

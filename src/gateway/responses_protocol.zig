@@ -566,7 +566,7 @@ pub fn buildSubscriptionBilling(
     created_at_ms: i64,
     usage: types.Usage,
 ) !?types.ProviderBilling {
-    if (provider == .gateway or created_at_ms < 0) return null;
+    if (created_at_ms < 0) return null;
     const input_tokens = usage.input_tokens orelse return null;
     const output_tokens = usage.output_tokens orelse return null;
     const qualified_model = try std.fmt.allocPrint(
@@ -742,7 +742,7 @@ test "Responses protocol owns one subscription billing projection" {
     const alloc = std.testing.allocator;
     const billing = (try buildSubscriptionBilling(
         alloc,
-        .codex,
+        .layerx1,
         "gpt-test",
         42,
         .{
@@ -754,15 +754,15 @@ test "Responses protocol owns one subscription billing projection" {
         },
     )).?;
     defer alloc.free(@constCast(billing.model));
-    try std.testing.expectEqualStrings("codex/gpt-test", billing.model);
+    try std.testing.expectEqualStrings("layerx1/gpt-test", billing.model);
     try std.testing.expectEqual(@as(u64, 5), billing.cache_read_tokens);
     try std.testing.expectEqual(@as(u64, 2), billing.cache_write_tokens);
     try std.testing.expectEqual(@as(?u64, 3), billing.reasoning_tokens);
 
     const bounded = (try buildSubscriptionBilling(
         alloc,
-        .grok,
-        "grok-test",
+        .layerx1,
+        "x1-test",
         43,
         .{
             .input_tokens = 10,
@@ -779,7 +779,7 @@ test "Responses protocol owns one subscription billing projection" {
 
     try std.testing.expect((try buildSubscriptionBilling(
         alloc,
-        .codex,
+        .layerx1,
         "gpt-test",
         44,
         .{ .input_tokens = 10 },

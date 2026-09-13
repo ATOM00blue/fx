@@ -26,13 +26,20 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            target: x86_64-linux
+            target: x86_64-linux-gnu
+            binary: x1
           - name: linux-aarch64
-            target: aarch64-linux
+            target: aarch64-linux-gnu
+            binary: x1
           - name: macos-x86_64
             target: x86_64-macos
+            binary: x1
           - name: macos-aarch64
             target: aarch64-macos
+            binary: x1
+          - name: windows-x86_64
+            target: x86_64-windows-gnu
+            binary: x1.exe
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,19 +55,19 @@ jobs:
 
       - name: Package
         run: |
-          package_dir="$RUNNER_TEMP/fx-package-${{ matrix.name }}"
+          package_dir="$RUNNER_TEMP/x1-package-${{ matrix.name }}"
           mkdir -p "$package_dir"
-          cp zig-out/bin/fx LICENSE THIRD_PARTY_NOTICES.md "$package_dir/"
-          tar -czf fx-${{ matrix.name }}.tar.gz -C "$package_dir" fx LICENSE THIRD_PARTY_NOTICES.md
-          sha256sum fx-${{ matrix.name }}.tar.gz > fx-${{ matrix.name }}.tar.gz.sha256
+          cp zig-out/bin/${{ matrix.binary }} LICENSE THIRD_PARTY_NOTICES.md "$package_dir/"
+          tar -czf x1-${{ matrix.name }}.tar.gz -C "$package_dir" ${{ matrix.binary }} LICENSE THIRD_PARTY_NOTICES.md
+          sha256sum x1-${{ matrix.name }}.tar.gz > x1-${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fx-${{ matrix.name }}
+          name: x1-${{ matrix.name }}
           path: |
-            fx-${{ matrix.name }}.tar.gz
-            fx-${{ matrix.name }}.tar.gz.sha256
+            x1-${{ matrix.name }}.tar.gz
+            x1-${{ matrix.name }}.tar.gz.sha256
 
   web:
     if: >-
@@ -84,20 +91,20 @@ jobs:
 
       - name: Package web artifacts
         run: |
-          cp sdk/fx-sdk.js fx-sdk.js
-          cp zig-out/bin/fx-term.wasm fx-term.wasm
-          sha256sum fx-sdk.js > fx-sdk.js.sha256
-          sha256sum fx-term.wasm > fx-term.wasm.sha256
+          cp sdk/x1-sdk.js x1-sdk.js
+          cp zig-out/bin/x1-term.wasm x1-term.wasm
+          sha256sum x1-sdk.js > x1-sdk.js.sha256
+          sha256sum x1-term.wasm > x1-term.wasm.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fx-web
+          name: x1-web
           path: |
-            fx-sdk.js
-            fx-sdk.js.sha256
-            fx-term.wasm
-            fx-term.wasm.sha256
+            x1-sdk.js
+            x1-sdk.js.sha256
+            x1-term.wasm
+            x1-term.wasm.sha256
 
   publish:
     needs: [build, web]
@@ -105,7 +112,7 @@ jobs:
     env:
       RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
       BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
-      FX_WEB_DEPLOY_HOOK_URL: ${{ secrets.FX_WEB_DEPLOY_HOOK_URL }}
+      X1_WEB_DEPLOY_HOOK_URL: ${{ secrets.X1_WEB_DEPLOY_HOOK_URL }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -120,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for FILE in fx-*.tar.gz fx-*.tar.gz.sha256; do
+          for FILE in x1-*.tar.gz x1-*.tar.gz.sha256; do
             [ -f "$FILE" ] || continue
             CONTENT_TYPE="application/octet-stream"
             [[ "$FILE" == *.sha256 ]] && CONTENT_TYPE="text/plain"
@@ -145,10 +152,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          sha256sum --check fx-sdk.js.sha256
-          sha256sum --check fx-term.wasm.sha256
+          sha256sum --check x1-sdk.js.sha256
+          sha256sum --check x1-term.wasm.sha256
 
-          for FILE in fx-sdk.js fx-sdk.js.sha256 fx-term.wasm fx-term.wasm.sha256; do
+          for FILE in x1-sdk.js x1-sdk.js.sha256 x1-term.wasm x1-term.wasm.sha256; do
             CONTENT_TYPE="application/octet-stream"
             [[ "$FILE" == *.js ]] && CONTENT_TYPE="text/javascript"
             [[ "$FILE" == *.wasm ]] && CONTENT_TYPE="application/wasm"
@@ -200,9 +207,9 @@ jobs:
           fi
           echo "updated=true" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy fx-web
-        if: steps.point-dev.outputs.updated == 'true' && env.FX_WEB_DEPLOY_HOOK_URL != ''
+      - name: Deploy x1-web
+        if: steps.point-dev.outputs.updated == 'true' && env.X1_WEB_DEPLOY_HOOK_URL != ''
         run: |
           curl --fail --silent --show-error \
             --retry 3 --retry-all-errors --max-time 30 \
-            -X POST "$FX_WEB_DEPLOY_HOOK_URL"
+            -X POST "$X1_WEB_DEPLOY_HOOK_URL"

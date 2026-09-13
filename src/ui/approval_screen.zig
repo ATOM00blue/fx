@@ -2174,26 +2174,37 @@ test "file approval top-aligns a fitting welcome document and clears below" {
     var row: std.ArrayList(u8) = .empty;
     defer row.deinit(alloc);
     try grid.rowTextTrimmed(1, &row);
-    try std.testing.expect(std.mem.indexOf(u8, row.items, "Run /help for commands") != null);
+    try std.testing.expect(std.mem.indexOf(u8, row.items, "┌") != null);
 
-    const transcript_divider = grid.cellAt(4, 1) orelse return error.TestMissingTranscriptDivider;
+    var found_mark = false;
+    var found_url = false;
+    var review_row: ?u16 = null;
+    var choose_row: ?u16 = null;
+    var scan: u16 = 1;
+    while (scan <= grid.rows) : (scan += 1) {
+        row.clearRetainingCapacity();
+        try grid.rowTextTrimmed(scan, &row);
+        if (std.mem.indexOf(u8, row.items, "X1") != null) found_mark = true;
+        if (std.mem.indexOf(u8, row.items, "layerx1.com") != null) found_url = true;
+        if (std.mem.indexOf(u8, row.items, "+ short review") != null) review_row = scan;
+        if (std.mem.indexOf(u8, row.items, "1–3 Choose") != null) choose_row = scan;
+    }
+    try std.testing.expect(found_mark);
+    try std.testing.expect(found_url);
+    const review_line = review_row orelse return error.TestMissingReview;
+    const choose_line = choose_row orelse return error.TestMissingChoose;
+
+    const transcript_divider = grid.cellAt(review_line - 1, 1) orelse return error.TestMissingTranscriptDivider;
     try std.testing.expectEqual(@as(u21, 0x2500), transcript_divider.codepoint);
 
-    row.clearRetainingCapacity();
-    try grid.rowTextTrimmed(5, &row);
-    try std.testing.expect(std.mem.indexOf(u8, row.items, "+ short review") != null);
-
-    const approval_divider = grid.cellAt(6, 1) orelse return error.TestMissingApprovalDivider;
+    const approval_divider = grid.cellAt(review_line + 1, 1) orelse return error.TestMissingApprovalDivider;
     try std.testing.expectEqual(@as(u21, 0x2504), approval_divider.codepoint);
 
-    const bottom_divider = grid.cellAt(15, 1) orelse return error.TestMissingBottomDivider;
+    const bottom_divider = grid.cellAt(choose_line - 1, 1) orelse return error.TestMissingBottomDivider;
     try std.testing.expectEqual(@as(u21, 0x2500), bottom_divider.codepoint);
 
     row.clearRetainingCapacity();
-    try grid.rowTextTrimmed(16, &row);
-    try std.testing.expect(std.mem.indexOf(u8, row.items, "1–3 Choose") != null);
-    row.clearRetainingCapacity();
-    try grid.rowTextTrimmed(17, &row);
+    try grid.rowTextTrimmed(choose_line + 1, &row);
     try std.testing.expectEqualStrings("", row.items);
     row.clearRetainingCapacity();
     try grid.rowTextTrimmed(24, &row);

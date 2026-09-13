@@ -5,8 +5,6 @@ const transcript_release = @import("../../core/output/transcript_release.zig");
 const build_checkpoint = @import("../render_engine/build_checkpoint.zig");
 const tool_group_projection = @import("tool_group_projection.zig");
 const render_engine = @import("../render_engine.zig");
-const user_message_card = @import("../assistant/user_message_card.zig");
-const ui_render = @import("../render.zig");
 const types = @import("../../core/shared/types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -794,11 +792,7 @@ fn buildCompactTranscriptProjectionInterruptible(
         self.tool_details.items,
         self.layout.cols,
         focused_entry_id,
-        .{
-            .marker_style = user_message_card.promptMarkerStyle(),
-            .text_style = ui_render.statusline_style,
-            .reset_style = "\x1b[0m",
-        },
+        tool_group_projection.liveTranscriptStyle(),
         self.command_output_render.styles,
         checkpoint,
     );

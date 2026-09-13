@@ -15,8 +15,6 @@ const build_checkpoint = @import("render_engine/build_checkpoint.zig");
 const transcript_blocks = @import("render_engine/transcript_blocks.zig");
 const command_output_runtime = @import("transcript/command_output_runtime.zig");
 const tool_group_projection = @import("transcript/tool_group_projection.zig");
-const user_message_card = @import("assistant/user_message_card.zig");
-const ui_render = @import("render.zig");
 const types = @import("../core/shared/types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -2304,7 +2302,7 @@ test "full projection prefers a persisted command artifact over the compact tool
     );
     defer capability.deinit();
 
-    const artifact_name = "fx-command-full-transcript.log";
+    const artifact_name = "x1-command-full-transcript.log";
     var artifact = try capability.createExclusiveFile(
         alloc,
         .command_artifacts,
@@ -2399,7 +2397,7 @@ test "stored command artifact appends records beyond the callback count once" {
     );
     defer capability.deinit();
 
-    const artifact_name = "fx-command-late-tail.log";
+    const artifact_name = "x1-command-late-tail.log";
     var artifact = try capability.createExclusiveFile(
         alloc,
         .command_artifacts,
@@ -2504,7 +2502,7 @@ test "full projection prefers ordered replay and omits command envelopes and inp
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -2599,7 +2597,7 @@ test "review command replay emits three logical lines and the exact remainder" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -2722,7 +2720,7 @@ test "head-pruned command replay fills absolute prefix and suffix ranges once" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -2982,7 +2980,7 @@ test "corrupt required replay keeps a safe fallback and permanent marker" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -2999,7 +2997,7 @@ test "corrupt required replay keeps a safe fallback and permanent marker" {
         .{},
     );
     defer capability.deinit();
-    const handle = "fx-command-replay-corrupt.bin";
+    const handle = "x1-command-replay-corrupt.bin";
     var corrupt = try capability.createExclusiveFile(alloc, .command_artifacts, handle);
     defer corrupt.deinit();
     try corrupt.writeAll("not replay");
@@ -3290,7 +3288,7 @@ test "bounded command source rejects a truncated absolute record range" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -3308,7 +3306,7 @@ test "bounded command source rejects a truncated absolute record range" {
     );
     defer capability.deinit();
 
-    const handle = "fx-command-artifact-short-range.bin";
+    const handle = "x1-command-artifact-short-range.bin";
     var artifact = try capability.createExclusiveFile(alloc, .command_artifacts, handle);
     defer artifact.deinit();
     try artifact.writeAll("ONLY_RECORD\n");
@@ -3341,7 +3339,7 @@ test "oversized newline-free replay stays paged through measurement and tail ren
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -3431,7 +3429,7 @@ test "oversized replay keeps shared orphan wrapping in the paged record" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -3523,7 +3521,7 @@ test "oversized zero width replay has bounded measurement and visible output" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -3624,7 +3622,7 @@ test "oversized interleaved replay preserves more than sixty four record ordinal
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -3927,7 +3925,7 @@ test "missing command artifact uses the retained tool result sidecar" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -3964,7 +3962,7 @@ test "missing command artifact uses the retained tool result sidecar" {
     defer projection.deinit(alloc);
     try projection.segments.append(alloc, .{ .stored_result = .{
         .kind = .command_artifact,
-        .handle = "fx-command-missing.log",
+        .handle = "x1-command-missing.log",
         .preview = "preview",
         .fallback_handle = fallback_handle,
     } });
@@ -3983,7 +3981,7 @@ test "paged command result removes an envelope split across source pages" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -4068,7 +4066,7 @@ test "resumed command detail pages its exact result handle without replay" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -4369,11 +4367,7 @@ fn buildProjectionForDepthWithDiffResolverInterruptible(
         entries,
         details,
         cols,
-        .{
-            .marker_style = user_message_card.promptMarkerStyle(),
-            .text_style = ui_render.statusline_style,
-            .reset_style = "\x1b[0m",
-        },
+        tool_group_projection.liveTranscriptStyle(),
         styles,
         checkpoint,
     );

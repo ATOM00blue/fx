@@ -2,9 +2,7 @@ const std = @import("std");
 const types = @import("../shared/types.zig");
 
 pub const ProviderId = enum {
-    gateway,
-    codex,
-    grok,
+    layerx1,
 };
 
 pub const ProviderSelection = struct {
@@ -13,37 +11,29 @@ pub const ProviderSelection = struct {
 };
 
 pub fn parse(value: []const u8) ?ProviderId {
-    if (std.ascii.eqlIgnoreCase(value, "gateway")) return .gateway;
-    if (std.ascii.eqlIgnoreCase(value, "codex")) return .codex;
-    if (std.ascii.eqlIgnoreCase(value, "grok")) return .grok;
+    if (std.ascii.eqlIgnoreCase(value, "layerx1") or std.ascii.eqlIgnoreCase(value, "x1")) return .layerx1;
     return null;
 }
 
 pub fn authorizesCredential(provider: ProviderId, source: ?types.CredentialSource) bool {
     const selected = source orelse return false;
     return switch (provider) {
-        .gateway => selected != .chatgpt_subscription and selected != .grok_subscription,
-        .codex => selected == .chatgpt_subscription,
-        .grok => selected == .grok_subscription,
+        .layerx1 => selected == .layerx1_subscription,
     };
 }
 
-test "explicit providers authorize only their own credential origins" {
-    try std.testing.expect(authorizesCredential(.gateway, .ai_gateway_api_key));
-    try std.testing.expect(authorizesCredential(.gateway, .fx_login));
-    try std.testing.expect(!authorizesCredential(.gateway, .chatgpt_subscription));
-    try std.testing.expect(authorizesCredential(.codex, .chatgpt_subscription));
-    try std.testing.expect(!authorizesCredential(.codex, .ai_gateway_api_key));
-    try std.testing.expect(!authorizesCredential(.codex, null));
-    try std.testing.expect(authorizesCredential(.grok, .grok_subscription));
-    try std.testing.expect(!authorizesCredential(.grok, .chatgpt_subscription));
-    try std.testing.expect(!authorizesCredential(.gateway, .grok_subscription));
+test "x1 provider authorizes only the LayerX1 subscription credential" {
+    try std.testing.expect(authorizesCredential(.layerx1, .layerx1_subscription));
+    try std.testing.expect(!authorizesCredential(.layerx1, null));
 }
 
-test "provider parsing exposes gateway codex and grok" {
-    try std.testing.expectEqual(ProviderId.gateway, parse("gateway").?);
-    try std.testing.expectEqual(ProviderId.codex, parse("CODEX").?);
-    try std.testing.expectEqual(ProviderId.grok, parse("GROK").?);
+test "provider parsing exposes only x1 aliases" {
+    try std.testing.expectEqual(ProviderId.layerx1, parse("layerx1").?);
+    try std.testing.expectEqual(ProviderId.layerx1, parse("x1").?);
+    try std.testing.expectEqual(ProviderId.layerx1, parse("X1").?);
+    try std.testing.expect(parse("gateway") == null);
+    try std.testing.expect(parse("codex") == null);
+    try std.testing.expect(parse("grok") == null);
     try std.testing.expect(parse("openai-codex") == null);
     try std.testing.expect(parse("") == null);
 }

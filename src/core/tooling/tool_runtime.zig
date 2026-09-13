@@ -76,7 +76,7 @@ const test_builtin_tools = if (builtin.is_test)
 else
     struct {};
 const test_builtin_gateway = if (builtin.is_test)
-    @import("../../builtins/gateway.zig")
+    @import("../../builtins/x1.zig")
 else
     struct {};
 const test_browser_workspace_tools = if (builtin.is_test)
@@ -139,9 +139,9 @@ pub const Context = struct {
     gateway_team: ?[]const u8 = null,
     credential_source: ?types.CredentialSource = null,
     account_id: ?[]const u8 = null,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     provider_capabilities: provider_set.Bundle.Capabilities = .{
-        .fx_search = true,
+        .provider_search = true,
         .vision_fallback = true,
     },
     oauth_transport: oauth_transport.Provider = oauth_transport.unavailable_provider,
@@ -2009,7 +2009,7 @@ fn canonicalSubagentCall(call: ToolCall) bool {
         call.argument_integrity == .valid and
         call.provider_result == null and
         call.final_identity == .valid and
-        call.provenance == .fx_local;
+        call.provenance == .x1_local;
 }
 
 fn canonicalPersistedSubagentResult(
@@ -2105,7 +2105,6 @@ const test_tool_registry = tool_dispatch.Registry{ .tools = &.{
     test_builtin_tools.semantic_search,
     test_builtin_tools.open_file,
     test_builtin_tools.web_fetch,
-    test_builtin_tools.web_search,
     test_builtin_tools.terminal,
     test_builtin_tools.skill,
     test_builtin_tools.install_skill,
@@ -2117,7 +2116,7 @@ const test_tool_registry = tool_dispatch.Registry{ .tools = &.{
 } };
 
 fn matchesTestRunCommandCompatibility(command: []const u8) bool {
-    return std.mem.startsWith(u8, command, "fx-compatibility-probe");
+    return std.mem.startsWith(u8, command, "x1-compatibility-probe");
 }
 
 fn executeTestRunCommandCompatibility(
@@ -2219,9 +2218,9 @@ const TestRuntime = struct {
     max_command_output_bytes: usize = 64 * 1024,
     max_tool_result_bytes: usize = 64 * 1024,
     api_key: []const u8 = "",
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     provider_capabilities: provider_set.Bundle.Capabilities = .{
-        .fx_search = true,
+        .provider_search = true,
         .vision_fallback = true,
     },
     gateway_team: ?[]const u8 = null,
@@ -2370,7 +2369,7 @@ const SubagentTestEnvironment = struct {
     fn init(alloc: Allocator) !SubagentTestEnvironment {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
-        try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
         try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
         const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
         errdefer alloc.free(home);
@@ -3432,7 +3431,7 @@ test "captured command compatibility bypasses compound commands" {
     const arena = arena_state.allocator();
 
     try std.testing.expect((try tool_dispatch.dispatchRunCommandCompatibility(typedDispatchContext(rt.context(), arena), rt.tool_registry, .{
-        .command = "fx-compatibility-probe; printf shell-fallback",
+        .command = "x1-compatibility-probe; printf shell-fallback",
         .resolved_cwd = "/tmp",
         .environment = .legacy,
         .timeout_ms = 600_000,
@@ -3446,7 +3445,7 @@ test "captured command compatibility bypasses compound commands" {
             typedDispatchContext(rt.context(), arena),
             rt.tool_registry,
             .{
-                .command = "fx-compatibility-probe",
+                .command = "x1-compatibility-probe",
                 .resolved_cwd = "/tmp",
                 .environment = environment,
                 .timeout_ms = 600_000,
@@ -3468,7 +3467,7 @@ test "run command compatibility returns installer failure without shell fallback
         typedDispatchContext(rt.context(), arena_state.allocator()),
         rt.tool_registry,
         .{
-            .command = "fx-compatibility-probe",
+            .command = "x1-compatibility-probe",
             .resolved_cwd = "/tmp",
             .environment = .legacy,
             .timeout_ms = 600_000,
@@ -4300,35 +4299,6 @@ test "web_fetch execution uses supplied registry entry" {
     try std.testing.expectEqualStrings("registry-owned web_fetch", direct.model_output);
 }
 
-test "web_search execution uses supplied registry entry" {
-    const alloc = std.testing.allocator;
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-
-    var registered_web_search = test_builtin_tools.web_search;
-    registered_web_search.call = registryOwnedWebSearchCall;
-    const tools = [_]tool_dispatch.Tool{registered_web_search};
-    const registry = tool_dispatch.Registry{ .tools = tools[0..] };
-    var backend = WebSearchBackendFixture{};
-    var rt = TestRuntime{
-        .tool_registry = registry,
-        .web_search_runtime_ready = true,
-        .web_search_backend = .{ .ctx = @ptrCast(&backend), .execute_fn = WebSearchBackendFixture.search },
-    };
-    defer rt.deinit(alloc);
-
-    const result = try executeToolCall(rt.context(), arena, .{
-        .id = "web-search-registry",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    });
-
-    try std.testing.expectEqual(tool_contracts.ToolExecutionStatus.success, result.status);
-    try std.testing.expectEqualStrings("registry-owned web_search", result.model_output);
-    try std.testing.expectEqual(@as(usize, 0), backend.calls);
-}
-
 test "terminal exec execution uses supplied registry entry" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
@@ -4534,161 +4504,6 @@ test "validateToolCall rejects selected MCP arguments through runtime capability
     try std.testing.expectEqualStrings("path must be a string", invalid.failure);
 }
 
-test "checkToolAvailability rejects missing web_search runtime without catalog or network work" {
-    const alloc = std.testing.allocator;
-    var rt = TestRuntime{};
-    defer rt.deinit(alloc);
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-
-    const reason = try checkToolAvailability(rt.context(), arena_state.allocator(), .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    }) orelse return error.TestExpectedEqual;
-
-    try std.testing.expectEqualStrings(tool_dispatch.web_search_unavailable_message, reason);
-}
-
-test "validateToolCall rejects invalid private web_search before backend invocation" {
-    const alloc = std.testing.allocator;
-    var backend = WebSearchBackendFixture{};
-    var rt = TestRuntime{
-        .web_search_runtime_ready = true,
-        .web_search_backend = .{ .ctx = @ptrCast(&backend), .execute_fn = WebSearchBackendFixture.search },
-    };
-    defer rt.deinit(alloc);
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-
-    const invalid = try validateToolCall(rt.context(), arena_state.allocator(), .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"x\"}",
-    });
-
-    try std.testing.expectEqualStrings("web_search field \"query\" must contain at least two characters", invalid.failure);
-    try std.testing.expectEqual(@as(usize, 0), backend.calls);
-}
-
-test "executeToolCall invokes injected private web_search backend" {
-    const alloc = std.testing.allocator;
-    var backend = WebSearchBackendFixture{};
-    var rt = TestRuntime{
-        .web_search_runtime_ready = true,
-        .web_search_backend = .{ .ctx = @ptrCast(&backend), .execute_fn = WebSearchBackendFixture.search },
-    };
-    defer rt.deinit(alloc);
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-
-    const result = try executeToolCall(rt.context(), arena_state.allocator(), .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    });
-
-    try std.testing.expectEqual(@as(usize, 1), backend.calls);
-    try expectContains(result.model_output, "Web search results for query: current news");
-    try std.testing.expectEqual(@as(u32, 2), result.inner_usage.?.web_search_requests);
-}
-
-test "valid allowed web_search emits searching query status" {
-    const alloc = std.testing.allocator;
-    var backend = WebSearchBackendFixture{};
-    var progress = WebSearchProgressCapture{};
-    var rt = TestRuntime{
-        .web_search_runtime_ready = true,
-        .web_search_backend = .{ .ctx = @ptrCast(&backend), .execute_fn = WebSearchBackendFixture.search },
-        .web_search_progress_ctx = @ptrCast(&progress),
-        .on_web_search_progress = WebSearchProgressCapture.onProgress,
-    };
-    defer rt.deinit(alloc);
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-
-    _ = try executeToolCall(rt.context(), arena_state.allocator(), .{
-        .id = "call_search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    });
-
-    try std.testing.expectEqual(@as(usize, 1), progress.searching_count);
-    try std.testing.expectEqualStrings("call_search", progress.call_id);
-    try std.testing.expectEqualStrings("current news", progress.queryView());
-}
-
-test "invalid web_search emits no searching status" {
-    const alloc = std.testing.allocator;
-    var backend = WebSearchBackendFixture{};
-    var progress = WebSearchProgressCapture{};
-    var rt = TestRuntime{
-        .web_search_runtime_ready = true,
-        .web_search_backend = .{ .ctx = @ptrCast(&backend), .execute_fn = WebSearchBackendFixture.search },
-        .web_search_progress_ctx = @ptrCast(&progress),
-        .on_web_search_progress = WebSearchProgressCapture.onProgress,
-    };
-    defer rt.deinit(alloc);
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-
-    const invalid = try validateToolCall(rt.context(), arena_state.allocator(), .{
-        .id = "call_search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"x\"}",
-    });
-
-    try std.testing.expectEqualStrings("web_search field \"query\" must contain at least two characters", invalid.failure);
-    try std.testing.expectEqual(@as(usize, 0), progress.searching_count);
-    try std.testing.expectEqual(@as(usize, 0), backend.calls);
-}
-
-test "web_search emits found result count status" {
-    const alloc = std.testing.allocator;
-    var backend = WebSearchBackendFixture{};
-    var progress = WebSearchProgressCapture{};
-    var rt = TestRuntime{
-        .web_search_runtime_ready = true,
-        .web_search_backend = .{ .ctx = @ptrCast(&backend), .execute_fn = WebSearchBackendFixture.search },
-        .web_search_progress_ctx = @ptrCast(&progress),
-        .on_web_search_progress = WebSearchProgressCapture.onProgress,
-    };
-    defer rt.deinit(alloc);
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-
-    _ = try executeToolCall(rt.context(), arena_state.allocator(), .{
-        .id = "call_search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    });
-
-    try std.testing.expectEqual(@as(usize, 1), progress.found_count);
-    try std.testing.expectEqual(@as(usize, 3), progress.result_count);
-}
-
-test "web_search completion includes searches and duration" {
-    const alloc = std.testing.allocator;
-    var backend = WebSearchBackendFixture{};
-    var rt = TestRuntime{
-        .web_search_runtime_ready = true,
-        .web_search_backend = .{ .ctx = @ptrCast(&backend), .execute_fn = WebSearchBackendFixture.search },
-    };
-    defer rt.deinit(alloc);
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-
-    const result = try executeToolCall(rt.context(), arena_state.allocator(), .{
-        .id = "call_search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    });
-
-    const completion = result.web_search_completion orelse return error.TestExpectedEqual;
-    try std.testing.expectEqual(@as(u32, 2), completion.searches);
-    try std.testing.expectEqual(@as(u64, 17), completion.duration_ms);
-}
-
 test "web_fetch uses the configured shared runtime" {
     const alloc = std.testing.allocator;
     var fetch_runtime = web_fetch_runtime.Runtime.init(.{ .allocator = alloc });
@@ -4765,7 +4580,7 @@ test "non-web_fetch tool-call metrics retain bounded args and result" {
     diagnostics.recordToolCallResult(.{
         .name = "read_file",
         .arguments_json = "{\"path\":\"README.md\"}",
-        .model_output = "<path>README.md</path>\n<content>\n# fx\nnormal result\n</content>",
+        .model_output = "<path>README.md</path>\n<content>\n# x1\nnormal result\n</content>",
         .ok = true,
         .started_at_ms = 1000,
     });
@@ -4775,7 +4590,7 @@ test "non-web_fetch tool-call metrics retain bounded args and result" {
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("read_file", buf[0].name());
     try expectContains(buf[0].args(), "README.md");
-    try expectContains(buf[0].result(), "# fx");
+    try expectContains(buf[0].result(), "# x1");
     try expectContains(buf[0].result(), "normal result");
 }
 
@@ -4801,7 +4616,7 @@ test "request tool permission keeps safe defaults while local writes bypass revi
     try std.testing.expectEqual(ToolPermissionDecision.once, (try tool_admission.requestPermissionOutcome(rt.context().admissionInput(), arena, .{
         .id = "1",
         .name = "write_file",
-        .arguments_json = "{\"path\":\"fx-permission-test.txt\",\"content\":\"hello\"}",
+        .arguments_json = "{\"path\":\"x1-permission-test.txt\",\"content\":\"hello\"}",
     }, .auto, &.{})).decision);
 
     try std.testing.expectEqual(ToolPermissionDecision.once, (try tool_admission.requestPermissionOutcome(rt.context().admissionInput(), arena, .{
@@ -6300,7 +6115,7 @@ test "saved noninteractive terminal exec captures replay by capability" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -6350,7 +6165,7 @@ test "registered read_tool_result restores an omitted stored-result suffix" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -6500,7 +6315,7 @@ test "required replay spill failure returns recoverable capture failure" {
     const alloc = std.testing.allocator;
     var store = command_replay_store.EphemeralStore.initForTesting(
         alloc,
-        "/definitely/missing/fx-replay-dir",
+        "/definitely/missing/x1-replay-dir",
     );
     defer store.deinit();
     var rt = TestRuntime{
@@ -6534,7 +6349,7 @@ test "run_command timeout returns model-visible failure" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -7882,7 +7697,7 @@ test "terminal exec cannot reuse or replace a persisted legacy background task" 
     const pid_text = "12345";
 
     var rt = TestRuntime{
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/x1",
         .interactive = false,
         .background = BackgroundRuntime.init(
             background_process_provider.process_supervisor_test_provider,
@@ -7894,7 +7709,7 @@ test "terminal exec cannot reuse or replace a persisted legacy background task" 
         .pid = pid_text,
         .process_token = token,
         .command = "npm run dev",
-        .cwd = "/tmp/fx",
+        .cwd = "/tmp/x1",
         .log_path = log_path,
         .expect_url = true,
         .url = "http://localhost:49123",
@@ -8104,7 +7919,7 @@ test "memory tool uses isolated HOME and preserves outputs" {
     try expectToolOutput(ctx, "memory", "{\"action\":\"save\",\"fact\":\"likes Zig\"}", "remembered");
     try expectToolOutput(ctx, "memory", "{\"action\":\"list\"}", "- likes Zig\n");
 
-    const memories_path = try std.fs.path.join(alloc, &.{ home, ".fx", "memories.json" });
+    const memories_path = try std.fs.path.join(alloc, &.{ home, ".x1", "memories.json" });
     defer alloc.free(memories_path);
     var file = try std.Io.Dir.openFileAbsolute(io_mod.getIo(), memories_path, .{});
     const content = blk: {
@@ -8138,7 +7953,7 @@ test "memory tool uses isolated HOME and preserves outputs" {
     });
     try std.testing.expectEqual(tool_contracts.ToolExecutionStatus.failure, failed_clear.status);
     try std.testing.expectEqualStrings(
-        "memory clear failed: saved memories were not removed; ensure ~/.fx/memories.json is a removable file and retry",
+        "memory clear failed: saved memories were not removed; ensure ~/.x1/memories.json is a removable file and retry",
         failed_clear.model_output,
     );
 
@@ -8175,7 +7990,7 @@ test "install_skill explicit tool installs local skill source" {
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
     const result = try executeToolCall(rt.context(), arena_state.allocator(), .{ .id = "1", .name = "install_skill", .arguments_json = args_json });
-    try expectContains(result.model_output, "Installed 1 skill(s) into fx.");
+    try expectContains(result.model_output, "Installed 1 skill(s) into x1.");
     try expectContains(result.model_output, "- workflow&quot;&lt;injected&gt;\n");
     try expectNotContains(result.model_output, "<skill");
     try expectNotContains(result.model_output, "BODY SENTINEL");
@@ -8199,10 +8014,10 @@ test "skill tool preserves resource and discovery notices separately" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/workflow/assets");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/malformed");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1/skills/workflow/assets");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1/skills/malformed");
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.x1/skills/workflow/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(
             io_mod.getIo(),
@@ -8210,19 +8025,19 @@ test "skill tool preserves resource and discovery notices separately" {
         );
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/assets/data.txt", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.x1/skills/workflow/assets/data.txt", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "hello\n");
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/malformed/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.x1/skills/malformed/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "---\ndescription: missing name\n---\nMALFORMED BODY");
     }
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.x1/skills");
     defer alloc.free(skills_dir);
     try setTestHome(null);
 
@@ -8248,7 +8063,7 @@ test "skill tool loads the exact advertised duplicate and rejects ambiguous or u
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace/.agents/skills/workflow/assets");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/workflow/assets");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1/skills/workflow/assets");
     try tmp.dir.createDirPath(io_mod.getIo(), "home/outside/workflow/assets");
     {
         var file = try tmp.dir.createFile(io_mod.getIo(), "home/workspace/.agents/skills/workflow/SKILL.md", .{});
@@ -8261,12 +8076,12 @@ test "skill tool loads the exact advertised duplicate and rejects ambiguous or u
         try file.writeStreamingAll(io_mod.getIo(), "WORKSPACE COMPANION A\n");
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.x1/skills/workflow/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "---\nname: workflow\ndescription: managed workflow\n---\n\nMANAGED BODY B\n");
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/assets/b-only.txt", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.x1/skills/workflow/assets/b-only.txt", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "MANAGED COMPANION B\n");
     }
@@ -8283,11 +8098,11 @@ test "skill tool loads the exact advertised duplicate and rejects ambiguous or u
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.x1/skills");
     defer alloc.free(skills_dir);
     const workspace_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace/.agents/skills/workflow");
     defer alloc.free(workspace_skill);
-    const managed_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills/workflow");
+    const managed_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.x1/skills/workflow");
     defer alloc.free(managed_skill);
     const outside_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/outside/workflow");
     defer alloc.free(outside_skill);
@@ -8338,16 +8153,16 @@ test "name-only skill call rediscovers a duplicate added after the first read" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/workflow");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1/skills/workflow");
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.x1/skills/workflow/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "---\nname: workflow\ndescription: managed workflow\n---\n\nMANAGED BODY A\n");
     }
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.x1/skills");
     defer alloc.free(skills_dir);
     try setTestHome(null);
     defer setTestHome(null) catch {};
@@ -8402,11 +8217,11 @@ test "skill tool reports missing skill" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1/skills");
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.x1/skills");
     defer alloc.free(skills_dir);
     try setTestHome(null);
     defer setTestHome(null) catch {};
@@ -8487,13 +8302,13 @@ const VisionGatewayFixture = struct {
                 .usage = response.usage,
             },
             .usage = .{ .deferred = .{
-                .provider = .gateway,
+                .provider = .layerx1,
                 .generation_id = response.generation_id orelse "gen_test",
                 .scope = "https://ai-gateway.vercel.sh",
                 .tenant = request.credential.tenant,
-                .credential_source = request.credential.source orelse .ai_gateway_api_key,
+                .credential_source = request.credential.source orelse .layerx1_subscription,
                 .credential_identity = credential_authority.derive(
-                    request.credential.source orelse .ai_gateway_api_key,
+                    request.credential.source orelse .layerx1_subscription,
                     request.credential.account_id,
                 ),
             } },
@@ -8664,7 +8479,7 @@ test "Codex vision calls fail before provider access" {
     var fixture = VisionGatewayFixture{ .alloc = alloc, .responses = &responses };
     defer fixture.deinit();
     var rt = TestRuntime{
-        .provider = .codex,
+        .provider = .layerx1,
         .provider_capabilities = .{},
         .agent_stream_provider = fixture.provider(),
         .tool_registry = .{ .tools = vision_test_registry_tools[0..] },
@@ -9045,15 +8860,15 @@ test "vision runtime resolves historical authorized images and batches twenty as
 
     try std.testing.expectEqual(tool_contracts.ToolExecutionStatus.success, result.status);
     try std.testing.expectEqual(@as(usize, 3), fixture.call_count);
-    try std.testing.expectEqual(@as(usize, 8), std.mem.count(u8, fixture.payloads.items[0], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 8), std.mem.count(u8, fixture.payloads.items[1], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 4), std.mem.count(u8, fixture.payloads.items[2], "\"type\":\"file\""));
+    try std.testing.expectEqual(@as(usize, 8), std.mem.count(u8, fixture.payloads.items[0], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 8), std.mem.count(u8, fixture.payloads.items[1], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 4), std.mem.count(u8, fixture.payloads.items[2], "\"type\":\"input_image\""));
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", fixture.last_model);
     try std.testing.expectEqualStrings("gateway-key", fixture.last_api_key);
     try std.testing.expectEqualStrings("team_vision", fixture.last_team.?);
     try std.testing.expectEqual(@as(usize, 2), fixture.last_retry_count);
     try expectContains(fixture.payloads.items[0], "Read the build state");
-    try expectContains(fixture.payloads.items[0], "\"mediaType\":\"image/png\"");
+    try expectContains(fixture.payloads.items[0], "data:image/png;base64,");
     for (fixture.payloads.items) |payload| {
         for (catalog) |image| try expectNotContains(payload, image.path);
     }
@@ -9152,7 +8967,7 @@ test "vision runtime loads approved paths into a transient authorized catalog" {
     try std.testing.expectEqual(tool_contracts.ToolExecutionStatus.success, result.status);
     try expectContains(result.model_output, "\"image_id\":1");
     try std.testing.expectEqual(@as(usize, 1), fixture.call_count);
-    try expectContains(fixture.payloads.items[0], "\"type\":\"file\"");
+    try expectContains(fixture.payloads.items[0], "\"type\":\"input_image\"");
     try expectNotContains(fixture.payloads.items[0], source_path);
 }
 

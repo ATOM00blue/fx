@@ -237,12 +237,12 @@ fn composeCommandRow(
         0;
     if (indent > 0) try row.appendSlice(alloc, "  ");
 
-    try row.appendSlice(alloc, if (selected) ui_render.selected_completion_style else ui_render.dim_style);
+    try row.appendSlice(alloc, ui_render.pickerSelectionStyle(selected));
     try row_text.appendSingleLineEllipsized(alloc, &row, spec.command, description_col -| indent -| gutter);
     try row.appendSlice(alloc, ui_render.reset_style);
     try row_text.appendSpacesToColumn(alloc, &row, description_col);
 
-    try row.appendSlice(alloc, if (selected) ui_render.selected_completion_style else ui_render.dim_style);
+    try row.appendSlice(alloc, ui_render.pickerSelectionStyle(selected));
     try row_text.appendSingleLineEllipsized(
         alloc,
         &row,
@@ -291,6 +291,8 @@ const help_menu_test_registry = command_specs.SlashRegistry{ .commands = help_me
 
 test "help menu places descriptions after the widest matching command" {
     const alloc = std.testing.allocator;
+    ui_render.initTheme(false, null);
+    defer ui_render.initTheme(false, null);
     const projection: render_input.HelpMenuProjection = .{
         .active = true,
         .registry = help_menu_test_registry,
@@ -309,9 +311,9 @@ test "help menu places descriptions after the widest matching command" {
     try std.testing.expect(std.mem.find(u8, selected.items, "show available slash commands") != null);
     try std.testing.expectEqual(@as(?usize, null), std.mem.findScalar(u8, selected.items, '\n'));
     const description_start = std.mem.find(u8, selected.items, "show available slash commands").?;
-    const selected_style_start = description_start - ui_render.selected_completion_style.len;
+    const selected_style_start = description_start - ui_render.x1_accent_style.len;
     try std.testing.expectEqualStrings(
-        ui_render.selected_completion_style,
+        ui_render.x1_accent_style,
         selected.items[selected_style_start..description_start],
     );
     try std.testing.expectEqual(

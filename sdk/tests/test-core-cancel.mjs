@@ -2,10 +2,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxAgent, supportsJspi } from "../node.js";
+import { createX1Agent, supportsJspi } from "../node.js";
 
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultWasm = resolve(scriptDir, "../../zig-out/bin/fx-core.wasm");
+const defaultWasm = resolve(scriptDir, "../../zig-out/bin/x1-core.wasm");
 const wasmPath = resolve(process.argv[2] || defaultWasm);
 
 if (!supportsJspi()) {
@@ -35,13 +35,13 @@ const timeout = (label, ms = 5000) => new Promise((_, reject) => {
 });
 
 const agent = await Promise.race([
-  createFxAgent({
+  createX1Agent({
   backend: "wasm",
     wasm: await readFile(wasmPath),
     fetch: stalledFetch,
-    env: { AI_GATEWAY_API_KEY: "sdk-test-key" },
+    env: { X1_API_KEY: "sdk-test-key" },
   }),
-  timeout("fx-core initialize"),
+  timeout("x1-core initialize"),
 ]);
 
 const session = await agent.createSession();

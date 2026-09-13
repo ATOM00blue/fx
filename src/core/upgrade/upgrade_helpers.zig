@@ -13,15 +13,16 @@ const Channel = update_target.Channel;
 const Target = update_target.Target;
 
 fn setRecvTimeout(conn: *std.http.Client.Connection) void {
+    if (comptime builtin.os.tag == .windows) return;
     const sock = conn.stream_writer.stream.socket.handle;
     const timeout = std.posix.timeval{ .sec = recv_timeout_sec, .usec = 0 };
     std.posix.setsockopt(sock, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
 }
 
-pub const cdn_base = "https://releases.fx.sh";
+pub const cdn_base = "https://releases.x1.sh";
 
 pub fn resolveCdnBase() []const u8 {
-    if (io_mod.getenv("FX_E2E_UPGRADE_BASE_URL")) |url| {
+    if (io_mod.getenv("X1_E2E_UPGRADE_BASE_URL")) |url| {
         if (isLoopbackE2eUpgradeBase(url)) return url;
     }
     return cdn_base;
@@ -47,12 +48,13 @@ fn isLoopbackE2eUpgradeBase(url: []const u8) bool {
 }
 
 pub const platform = platformFromTarget() orelse
-    @compileError("unsupported platform for auto-upgrade (requires macOS or Linux, x86_64 or aarch64)");
+    @compileError("unsupported platform for auto-upgrade");
 
 fn platformFromTarget() ?[]const u8 {
     const os: ?[]const u8 = switch (builtin.os.tag) {
         .macos => "macos",
         .linux => "linux",
+        .windows => "windows",
         else => null,
     };
     const arch: ?[]const u8 = switch (builtin.cpu.arch) {
@@ -255,11 +257,65 @@ pub fn extractTarGz(alloc: Allocator, archive_path: []const u8, dest_dir: []cons
     }
 }
 
+const replaced_binary_backup_suffix = ".old";
+
 pub fn replaceBinary(new_path: []const u8, target_path: []const u8) !void {
+    if (comptime builtin.os.tag == .windows) return replaceBinaryWindows(new_path, target_path);
     std.Io.Dir.renameAbsolute(new_path, target_path, io_mod.getIo()) catch {
         copyBinary(new_path, target_path) catch return error.ReplaceFailed;
         return;
     };
+}
+
+// Windows refuses to delete or overwrite the file of a running process, but it
+// does allow renaming that file. Park the incumbent beside itself with a
+// `.old` suffix, move the replacement into the original path, and leave the
+// backup for a later run to remove (it stays locked until the old process
+// exits). If installation fails after parking, the incumbent is restored.
+fn replaceBinaryWindows(new_path: []const u8, target_path: []const u8) !void {
+    const zio = io_mod.getIo();
+    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const backup_path = replacedBinaryBackupPath(&backup_buf, target_path) catch return error.ReplaceFailed;
+
+    // Remove a backup left behind by a previous upgrade before parking again.
+    std.Io.Dir.deleteFileAbsolute(zio, backup_path) catch {};
+
+    var incumbent_parked = false;
+    if (std.Io.Dir.renameAbsolute(target_path, backup_path, zio)) {
+        incumbent_parked = true;
+    } else |err| switch (err) {
+        error.FileNotFound => {}, // fresh install; nothing to park
+        else => return error.ReplaceFailed,
+    }
+
+    if (std.Io.Dir.renameAbsolute(new_path, target_path, zio)) {
+        return;
+    } else |_| {}
+
+    // The temp directory can live on another volume, so a copy fallback is
+    // still needed even after parking the incumbent.
+    copyBinary(new_path, target_path) catch {
+        if (incumbent_parked) {
+            std.Io.Dir.renameAbsolute(backup_path, target_path, zio) catch {};
+        }
+        return error.ReplaceFailed;
+    };
+}
+
+// Best-effort removal of the `.old` backup parked by a Windows self-upgrade.
+// Safe to call on every launch: without a parked backup this is a no-op.
+pub fn removeReplacedBinaryBackup(target_path: []const u8) void {
+    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const backup_path = replacedBinaryBackupPath(&backup_buf, target_path) catch return;
+    std.Io.Dir.deleteFileAbsolute(io_mod.getIo(), backup_path) catch {};
+}
+
+fn replacedBinaryBackupPath(buf: []u8, target_path: []const u8) error{PathTooLong}![]const u8 {
+    const backup_len = target_path.len + replaced_binary_backup_suffix.len;
+    if (backup_len > buf.len) return error.PathTooLong;
+    @memcpy(buf[0..target_path.len], target_path);
+    @memcpy(buf[target_path.len..backup_len], replaced_binary_backup_suffix);
+    return buf[0..backup_len];
 }
 
 pub const ExecutablePathError = error{
@@ -329,12 +385,12 @@ test "E2E upgrade base accepts only explicit IPv4 loopback origins" {
     try std.testing.expect(!isLoopbackE2eUpgradeBase("http://localhost:1234"));
 }
 
-test "production upgrade base uses the fx release domain" {
-    try std.testing.expectEqualStrings("https://releases.fx.sh", resolveCdnBase());
+test "production upgrade base uses the x1 release domain" {
+    try std.testing.expectEqualStrings("https://releases.x1.sh", resolveCdnBase());
 }
 
 test "extractChecksumHex parses sha256sum format" {
-    const with_filename = "abc123def456  fx-macos-aarch64.tar.gz\n";
+    const with_filename = "abc123def456  x1-macos-aarch64.tar.gz\n";
     const hex = extractChecksumHex(with_filename).?;
     try std.testing.expectEqualStrings("abc123def456", hex);
 }
@@ -361,13 +417,13 @@ test "replaceBinary moves replacement over target path" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try writeTempFile(tmp.dir, "fx-old", "old");
-    try writeTempFile(tmp.dir, "fx-new", "new");
+    try writeTempFile(tmp.dir, "x1-old", "old");
+    try writeTempFile(tmp.dir, "x1-new", "new");
     const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(root);
-    const new_path = try std.fs.path.join(alloc, &.{ root, "fx-new" });
+    const new_path = try std.fs.path.join(alloc, &.{ root, "x1-new" });
     defer alloc.free(new_path);
-    const target_path = try std.fs.path.join(alloc, &.{ root, "fx-old" });
+    const target_path = try std.fs.path.join(alloc, &.{ root, "x1-old" });
     defer alloc.free(target_path);
 
     try replaceBinary(new_path, target_path);
@@ -375,4 +431,99 @@ test "replaceBinary moves replacement over target path" {
     const replaced = try readAbsoluteFile(alloc, target_path);
     defer alloc.free(replaced);
     try std.testing.expectEqualStrings("new", replaced);
+}
+
+test "replaced binary backup path appends the backup suffix" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        "C:\\tools\\x1.exe.old",
+        try replacedBinaryBackupPath(&buf, "C:\\tools\\x1.exe"),
+    );
+    try std.testing.expectEqualStrings(
+        "/usr/local/bin/x1.old",
+        try replacedBinaryBackupPath(&buf, "/usr/local/bin/x1"),
+    );
+}
+
+test "replaced binary backup path rejects paths that cannot fit" {
+    var buf: [8]u8 = undefined;
+    try std.testing.expectError(
+        error.PathTooLong,
+        replacedBinaryBackupPath(&buf, "/usr/local/bin/x1"),
+    );
+}
+
+// The dance below uses only platform-neutral Io calls, so its logic stays
+// verifiable on every host even though replaceBinary only dispatches to it on
+// Windows (where the running exe cannot be overwritten in place).
+test "replaceBinaryWindows parks the incumbent and installs the replacement" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try writeTempFile(tmp.dir, "x1", "old");
+    try writeTempFile(tmp.dir, "x1-new", "new");
+    const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
+    defer alloc.free(root);
+    const new_path = try std.fs.path.join(alloc, &.{ root, "x1-new" });
+    defer alloc.free(new_path);
+    const target_path = try std.fs.path.join(alloc, &.{ root, "x1" });
+    defer alloc.free(target_path);
+    const backup_path = try std.fs.path.join(alloc, &.{ root, "x1.old" });
+    defer alloc.free(backup_path);
+
+    try replaceBinaryWindows(new_path, target_path);
+
+    const installed = try readAbsoluteFile(alloc, target_path);
+    defer alloc.free(installed);
+    try std.testing.expectEqualStrings("new", installed);
+    const parked = try readAbsoluteFile(alloc, backup_path);
+    defer alloc.free(parked);
+    try std.testing.expectEqualStrings("old", parked);
+
+    removeReplacedBinaryBackup(target_path);
+    try std.testing.expectError(error.FileNotFound, readAbsoluteFile(alloc, backup_path));
+}
+
+test "replaceBinaryWindows restores the incumbent when installation fails" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try writeTempFile(tmp.dir, "x1", "old");
+    const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
+    defer alloc.free(root);
+    const missing_path = try std.fs.path.join(alloc, &.{ root, "x1-new" });
+    defer alloc.free(missing_path);
+    const target_path = try std.fs.path.join(alloc, &.{ root, "x1" });
+    defer alloc.free(target_path);
+    const backup_path = try std.fs.path.join(alloc, &.{ root, "x1.old" });
+    defer alloc.free(backup_path);
+
+    try std.testing.expectError(error.ReplaceFailed, replaceBinaryWindows(missing_path, target_path));
+
+    const restored = try readAbsoluteFile(alloc, target_path);
+    defer alloc.free(restored);
+    try std.testing.expectEqualStrings("old", restored);
+    try std.testing.expectError(error.FileNotFound, readAbsoluteFile(alloc, backup_path));
+}
+
+test "replaceBinaryWindows installs even without an incumbent" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try writeTempFile(tmp.dir, "x1-new", "new");
+    const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
+    defer alloc.free(root);
+    const new_path = try std.fs.path.join(alloc, &.{ root, "x1-new" });
+    defer alloc.free(new_path);
+    const target_path = try std.fs.path.join(alloc, &.{ root, "x1" });
+    defer alloc.free(target_path);
+
+    try replaceBinaryWindows(new_path, target_path);
+
+    const installed = try readAbsoluteFile(alloc, target_path);
+    defer alloc.free(installed);
+    try std.testing.expectEqualStrings("new", installed);
 }

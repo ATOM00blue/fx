@@ -63,7 +63,7 @@ const parent_delivery_projector = @import("../subagent/parent_delivery_projector
 const subagent_tool_host = @import("../subagent/tool_host.zig");
 const text_utils = @import("../shared/text_utils.zig");
 const test_builtin_gateway = if (std_builtin.is_test)
-    @import("../../builtins/gateway.zig")
+    @import("../../builtins/x1.zig")
 else
     struct {};
 const builtin_tools = @import("../../builtins/tools.zig");
@@ -103,7 +103,10 @@ const WorkerRuntime = worker_runtime.WorkerRuntime;
 const McpHasToolFn = tool_mcp_runtime.HasToolFn;
 
 const supports_headless_interrupt = switch (std_builtin.os.tag) {
-    .windows, .wasi, .freestanding => false,
+    .wasi, .freestanding => false,
+    // Windows delivers Ctrl+C through the shared console-control handler
+    // instead of a SIGINT disposition.
+    .windows => true,
     else => true,
 };
 
@@ -111,7 +114,69 @@ const HeadlessInterruptInstallError = error{HeadlessInterruptBusy};
 const headless_interrupt_exit_code: u8 = 130;
 const headless_termination_exit_code: u8 = 143;
 
-const headless_interrupt = if (supports_headless_interrupt) struct {
+const headless_interrupt = if (std_builtin.os.tag == .windows) struct {
+    var coordinator_mutex: std.Io.Mutex = .init;
+    var coordinator_active = false;
+    var cancel_requested = std.atomic.Value(bool).init(false);
+
+    /// Invoked from the OS console-control handler thread when a
+    /// CTRL_C_EVENT arrives while a headless scope owns the console.
+    fn requestInterrupt() callconv(.c) void {
+        cancel_requested.store(true, .seq_cst);
+    }
+
+    fn exitCode() u8 {
+        return headless_interrupt_exit_code;
+    }
+
+    const Scope = struct {
+        installed: bool = false,
+
+        fn install(enabled: bool) HeadlessInterruptInstallError!Scope {
+            if (!enabled) return .{};
+            coordinator_mutex.lockUncancelable(io_mod.getIo());
+            defer coordinator_mutex.unlock(io_mod.getIo());
+            if (coordinator_active) return error.HeadlessInterruptBusy;
+
+            var scope = Scope{};
+            cancel_requested.store(false, .seq_cst);
+            // Shares the console-control registration with the
+            // interactive abnormal-exit layer when both are installed.
+            app_lifecycle.windows_console_control.setHeadlessInterruptRequest(&requestInterrupt);
+            coordinator_active = true;
+            scope.installed = true;
+            return scope;
+        }
+
+        fn restore(self: *Scope, redeliver: bool) void {
+            if (!self.installed) return;
+            coordinator_mutex.lockUncancelable(io_mod.getIo());
+            defer coordinator_mutex.unlock(io_mod.getIo());
+            std.debug.assert(coordinator_active);
+            app_lifecycle.windows_console_control.setHeadlessInterruptRequest(null);
+            coordinator_active = false;
+            self.installed = false;
+            if (redeliver and cancel_requested.load(.seq_cst)) {
+                // POSIX re-raises the consumed signal so the parent sees
+                // the default disposition; Windows exits with the code a
+                // shell would report for it.
+                std.process.exit(headless_interrupt_exit_code);
+            }
+        }
+
+        fn deinit(self: *Scope) void {
+            self.restore(false);
+        }
+
+        fn restoreAndRedeliver(self: *Scope) void {
+            self.restore(true);
+        }
+
+        fn requested(self: *const Scope) bool {
+            return self.installed and cancel_requested.load(.seq_cst);
+        }
+    };
+} else if (supports_headless_interrupt) struct {
     var coordinator_mutex: std.Io.Mutex = .init;
     var coordinator_active = false;
     var cancel_requested = std.atomic.Value(bool).init(false);
@@ -307,7 +372,7 @@ pub const PromptRunResult = struct {
     }
 };
 
-/// Resume selector parsed from fx ask --resume.
+/// Resume selector parsed from x1 ask --resume.
 const ResumeTarget = session_store.ResumeTarget;
 
 const AskOptions = struct {
@@ -513,7 +578,7 @@ const AskContext = struct {
     gateway_team: ?[]const u8 = null,
     credential_source: ?types.CredentialSource = null,
     account_id: ?[]const u8 = null,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     model_catalog_access: credentials.CatalogAccess = .{ .public_only = .no_credential },
     model: []const u8 = "",
     agent_step_limit: usize = 0,
@@ -591,9 +656,7 @@ const AskContext = struct {
                 cfg.max_history_turns,
                 cfg.provider_set.deferredUsageProviders(),
             ),
-            .web_search_runtime = web_search_runtime.Runtime.init(.{
-                .provider = cfg.provider_set.gateway.fx_search.?,
-            }),
+            .web_search_runtime = web_search_runtime.Runtime.init(.{}),
             .background = BackgroundRuntime.init(
                 cfg.background_process_provider,
             ),
@@ -617,14 +680,14 @@ const AskContext = struct {
         });
         if (turn_end) {
             try self.lifecycle_runtime.registerPostTurnEnd(.{
-                .name = "fx.sound.turn_end",
+                .name = "x1.sound.turn_end",
                 .ctx = self,
                 .run = postTurnEndNotification,
             });
         }
         if (attention_required) {
             try self.lifecycle_runtime.registerAttentionRequired(.{
-                .name = "fx.sound.attention_required",
+                .name = "x1.sound.attention_required",
                 .ctx = self,
                 .run = attentionRequiredNotification,
             });
@@ -817,7 +880,7 @@ const AskContext = struct {
                 "event=ask_session_store_unavailable error={s}",
                 .{@errorName(err)},
             );
-            try self.writeStderr("fx ask: warning: session persistence unavailable; error=");
+            try self.writeStderr("x1 ask: warning: session persistence unavailable; error=");
             try self.writeStderr(@errorName(err));
             try self.writeStderr("; continuing without saving\n");
             return;
@@ -936,7 +999,7 @@ const AskContext = struct {
 
     fn toolContext(self: *AskContext) tool_runtime.Context {
         const provider_capabilities = self.cfg.provider_set.select(self.provider).capabilities;
-        if (provider_capabilities.fx_search) {
+        if (provider_capabilities.provider_search) {
             self.web_search_runtime.configure(.{
                 .api_key = self.api_key,
                 .credential_source = self.credential_source,
@@ -1013,7 +1076,7 @@ const AskContext = struct {
             .web_fetch_progress_ctx = @ptrCast(self),
             .on_web_fetch_progress = onWebFetchProgress,
             .web_search_runtime_ready = false,
-            .web_search_backend = if (provider_capabilities.fx_search) self.web_search_runtime.dispatchBackend() else null,
+            .web_search_backend = if (provider_capabilities.provider_search) self.web_search_runtime.dispatchBackend() else null,
             .web_search_progress_ctx = @ptrCast(self),
             .on_web_search_progress = onWebSearchProgress,
             .model_capability_resolver = .{
@@ -1161,7 +1224,7 @@ fn checkHeadlessCancellation(deps: RunDeps) !void {
 }
 
 fn writeAskUsage(deps: RunDeps, usage: []const u8) !void {
-    try deps.write_stderr(deps.stderr_ctx, "usage: fx ");
+    try deps.write_stderr(deps.stderr_ctx, "usage: x1 ");
     try deps.write_stderr(deps.stderr_ctx, usage);
     try deps.write_stderr(deps.stderr_ctx, "\n");
 }
@@ -1187,7 +1250,7 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
                 try deps.write_stdout(deps.stdout_ctx, json);
                 return 1;
             }
-            try deps.write_stderr(deps.stderr_ctx, "fx ask: missing prompt\n");
+            try deps.write_stderr(deps.stderr_ctx, "x1 ask: missing prompt\n");
             try writeAskUsage(deps, cfg.command_usage);
             return 1;
         },
@@ -1198,7 +1261,7 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
                 try deps.write_stdout(deps.stdout_ctx, json);
                 return 1;
             }
-            try deps.write_stderr(deps.stderr_ctx, "fx ask: --no-save cannot be used with --resume or --resume-id\n");
+            try deps.write_stderr(deps.stderr_ctx, "x1 ask: --no-save cannot be used with --resume or --resume-id\n");
             try writeAskUsage(deps, cfg.command_usage);
             return 1;
         },
@@ -1209,7 +1272,7 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
                 try deps.write_stdout(deps.stdout_ctx, json);
                 return 1;
             }
-            try deps.write_stderr(deps.stderr_ctx, "fx ask: prompt exceeds the local input safety limit\n");
+            try deps.write_stderr(deps.stderr_ctx, "x1 ask: prompt exceeds the local input safety limit\n");
             return 1;
         },
         error.PromptInputReadFailed => {
@@ -1219,7 +1282,7 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
                 try deps.write_stdout(deps.stdout_ctx, json);
                 return 1;
             }
-            try deps.write_stderr(deps.stderr_ctx, "fx ask: failed to read prompt from stdin\n");
+            try deps.write_stderr(deps.stderr_ctx, "x1 ask: failed to read prompt from stdin\n");
             return 1;
         },
         error.InvalidAskArgs => {
@@ -1239,7 +1302,7 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
                 try deps.write_stdout(deps.stdout_ctx, json);
                 return 1;
             }
-            try deps.write_stderr(deps.stderr_ctx, "fx ask: prompt must be valid UTF-8 and contain no NUL bytes\n");
+            try deps.write_stderr(deps.stderr_ctx, "x1 ask: prompt must be valid UTF-8 and contain no NUL bytes\n");
             return 1;
         },
         else => return err,
@@ -1281,13 +1344,13 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
         if (err == error.OneOffSessionNotResumable and !options.json_output) {
             try deps.write_stderr(
                 deps.stderr_ctx,
-                "fx ask: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n",
+                "x1 ask: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n",
             );
             return 1;
         }
         if (!options.json_output) {
             const notice = askErrorNotice(err) orelse return err;
-            try deps.write_stderr(deps.stderr_ctx, "fx ask: ");
+            try deps.write_stderr(deps.stderr_ctx, "x1 ask: ");
             try deps.write_stderr(deps.stderr_ctx, notice);
             try deps.write_stderr(deps.stderr_ctx, "\n");
             return 1;
@@ -1344,7 +1407,7 @@ fn preflightAskImages(
             } else {
                 var message: std.Io.Writer.Allocating = .init(alloc);
                 defer message.deinit();
-                try message.writer.print("fx ask: failed to attach image \"{s}\": {s}\n", .{ image_path, reason });
+                try message.writer.print("x1 ask: failed to attach image \"{s}\": {s}\n", .{ image_path, reason });
                 try deps.write_stderr(deps.stderr_ctx, message.written());
             }
             return false;
@@ -1388,13 +1451,9 @@ fn missingCredentialResult(
     options: RunOptions,
     provider: model_provider.ProviderId,
 ) !PromptRunResult {
-    const message = if (provider == .codex)
-        credentials.missing_chatgpt_credential_message
-    else if (provider == .grok)
-        credentials.missing_grok_credential_message
-    else
-        credentials.missing_credential_message;
-    try options.deps.write_stderr(options.deps.stderr_ctx, "fx ask: ");
+    _ = provider;
+    const message = credentials.missing_layerx1_credential_message;
+    try options.deps.write_stderr(options.deps.stderr_ctx, "x1 ask: ");
     try options.deps.write_stderr(options.deps.stderr_ctx, message);
     try options.deps.write_stderr(options.deps.stderr_ctx, "\n");
     return .{
@@ -1431,7 +1490,7 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
         var notice_writer: std.Io.Writer.Allocating = .init(alloc);
         defer notice_writer.deinit();
         try notice_writer.writer.print(
-            "fx ask: config {s}: {s}",
+            "x1 ask: config {s}: {s}",
             .{ @tagName(diagnostic.layer), @tagName(diagnostic.cause) },
         );
         try config_runtime.writeDiagnosticMetadata(&notice_writer.writer, diagnostic);
@@ -1458,7 +1517,7 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
     var ctx = AskContext.init(alloc, cfg, options.deps, startup.workspace_root);
     defer ctx.deinit();
     if (options.save_session) {
-        _ = try ctx.session.initializeProfileUsage(alloc, io_mod.getenv("HOME"));
+        _ = try ctx.session.initializeProfileUsage(alloc, io_mod.homeDir());
         ctx.session.attachProfileUsagePublisher(alloc);
     }
     ctx.use_process_interrupt_flag = options.deps.install_headless_interrupt;
@@ -1639,7 +1698,7 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
             @intCast(@max(io_mod.milliTimestamp(), 0)),
         )) |failure| {
             defer alloc.free(failure);
-            try ctx.writeStderr("fx ask: ");
+            try ctx.writeStderr("x1 ask: ");
             try ctx.writeStderr(failure);
             try ctx.writeStderr("\n");
             return error.McpRequiredServerUnavailable;
@@ -2232,20 +2291,20 @@ fn finishCliPermissionOutcome(
     switch (outcome.requirement orelse .approval_required) {
         .configured_rule => try writeBlockedActionGuidance(
             ctx,
-            "fx ask: permission required by configured rule",
+            "x1 ask: permission required by configured rule",
             label,
             "noninteractive_permission_prompt_unavailable",
-            "fx ask: rerun in the interactive shell to approve this action, or add a narrow matching permission rule before retrying\n",
+            "x1 ask: rerun in the interactive shell to approve this action, or add a narrow matching permission rule before retrying\n",
         ),
         .approval_required => try writeBlockedActionGuidance(
             ctx,
-            "fx ask: permission required for tool execution in noninteractive mode",
+            "x1 ask: permission required for tool execution in noninteractive mode",
             label,
             "noninteractive_permission_prompt_unavailable",
             if (permission_mode == .auto)
-                "fx ask: human approval is required for this action; use the interactive shell to approve it, or add a narrow matching permission rule\n"
+                "x1 ask: human approval is required for this action; use the interactive shell to approve it, or add a narrow matching permission rule\n"
             else
-                "fx ask: rerun with --auto to review this exact action automatically, or use the interactive shell to approve it\n",
+                "x1 ask: rerun with --auto to review this exact action automatically, or use the interactive shell to approve it\n",
         ),
     }
     try recordToolCallRejected(
@@ -2288,9 +2347,9 @@ fn writeBlockedActionGuidance(
     hint: []const u8,
 ) !void {
     try ctx.writeLine(headline);
-    try ctx.writeStderr("fx ask: blocked action: ");
+    try ctx.writeStderr("x1 ask: blocked action: ");
     try ctx.writeStderr(label);
-    try ctx.writeStderr("\nfx ask: reason=");
+    try ctx.writeStderr("\nx1 ask: reason=");
     try ctx.writeStderr(reason);
     try ctx.writeStderr("\n");
     try ctx.writeStderr(hint);
@@ -2338,7 +2397,7 @@ fn emitAskNotificationBell(raw: *anyopaque) void {
     ctx.writeStderr("\x07") catch |err| {
         debug_trace.logf(
             "notifications",
-            "fx ask terminal bell write failed err={s}",
+            "x1 ask terminal bell write failed err={s}",
             .{@errorName(err)},
         );
     };
@@ -3001,7 +3060,7 @@ fn pushHttpError(raw_ctx: *anyopaque, status: std.http.Status, detail: []const u
     else
         try gateway_error_format.formatHttpErrorMessage(ctx.alloc, status, detail);
     defer ctx.alloc.free(message);
-    try ctx.writeStderr("fx ask: ");
+    try ctx.writeStderr("x1 ask: ");
     try ctx.writeStderr(message);
     try ctx.writeStderr("\n");
     if (ctx.output_mode.capturesJson()) {
@@ -3433,7 +3492,7 @@ fn emitHeadlessYoloWarning(alloc: Allocator, options: RunOptions) !void {
             var message: std.Io.Writer.Allocating = .init(alloc);
             defer message.deinit();
             try message.writer.print(
-                "fx ask: failed to save YOLO acknowledgment: {s}\n",
+                "x1 ask: failed to save YOLO acknowledgment: {s}\n",
                 .{@errorName(failure.err)},
             );
             try options.deps.write_stderr(options.deps.stderr_ctx, message.written());
@@ -3692,7 +3751,7 @@ fn promptRealPermissionApproval(
     const stdin_tty = std.Io.File.stdin().isTty(zio) catch false;
     if (!stdin_tty) return .unavailable;
 
-    try write_stderr(stderr_ctx, "fx wants to run:\n  ");
+    try write_stderr(stderr_ctx, "x1 wants to run:\n  ");
     try write_stderr(stderr_ctx, label);
     try write_stderr(stderr_ctx, "\n\nApprove? [y/N] ");
     notify_attention(attention_ctx);
@@ -3755,7 +3814,7 @@ const TestPermissionPrompt = struct {
         self.calls += 1;
         self.label = label;
         if (self.result != .unavailable) {
-            try write_stderr(stderr_ctx, "fx wants to run:\n  ");
+            try write_stderr(stderr_ctx, "x1 wants to run:\n  ");
             try write_stderr(stderr_ctx, label);
             try write_stderr(stderr_ctx, "\n\nApprove? [y/N] ");
             notify_attention(attention_ctx);
@@ -3840,13 +3899,13 @@ fn testConfig() Config {
         .gateway_chat_url = "https://example.invalid/chat",
         .gateway_models_path = "/models",
         .gateway_provider = test_builtin_gateway.provider,
-        .provider_set = provider_set.gateway_only(test_builtin_gateway.provider_bundle),
+        .provider_set = provider_set.x1Only(test_builtin_gateway.provider_bundle),
         .secret_store = host.unavailable_secret_store,
         .prompt_policy = .{
             .system_prompt = "system",
             .model_prompt_overlay_fn = testModelPromptOverlay,
         },
-        .skill_root_policy = .{ .managed_root_source = .global_fx },
+        .skill_root_policy = .{ .managed_root_source = .global_x1 },
         .ignored_list_entries = &.{},
         .max_list_entries = 10,
         .max_read_file_bytes = 1024,
@@ -3863,7 +3922,7 @@ fn testConfig() Config {
 fn testMissingKeyStartup(alloc: Allocator, _: oauth_transport.Provider, _: host.SecretStore, default_model: []const u8, default_agent_step_limit: usize) !app_lifecycle.StartupState {
     var state = app_lifecycle.StartupState{ .agent_step_limit = default_agent_step_limit };
     errdefer state.deinit(alloc);
-    state.workspace_root = try alloc.dupe(u8, "/tmp/fx-test");
+    state.workspace_root = try alloc.dupe(u8, "/tmp/x1-test");
     state.selected_model = try alloc.dupe(u8, default_model);
     state.context_enabled = false;
     return state;
@@ -3872,10 +3931,10 @@ fn testMissingKeyStartup(alloc: Allocator, _: oauth_transport.Provider, _: host.
 fn testPresentKeyStartup(alloc: Allocator, _: oauth_transport.Provider, _: host.SecretStore, default_model: []const u8, default_agent_step_limit: usize) !app_lifecycle.StartupState {
     var state = app_lifecycle.StartupState{ .agent_step_limit = default_agent_step_limit };
     errdefer state.deinit(alloc);
-    state.workspace_root = try alloc.dupe(u8, "/tmp/fx-test");
+    state.workspace_root = try alloc.dupe(u8, "/tmp/x1-test");
     state.credential = .{
         .token = try alloc.dupe(u8, "key"),
-        .source = .ai_gateway_api_key,
+        .source = .layerx1_subscription,
     };
     state.selected_model = try alloc.dupe(u8, default_model);
     state.context_enabled = true;
@@ -3914,7 +3973,7 @@ fn testPushAssistantText(deps: *const agent_runtime.AgentRuntimeDeps, text: []co
 fn testProcessQueuedPrompt(deps: *const agent_runtime.AgentRuntimeDeps, semantic_presentation: ?agent_runtime.SemanticPresentationSink, lifecycle: agent_runtime.LifecycleContext, _: agent_runtime.Config, _: worker_runtime.QueuedPrompt) !void {
     try std.testing.expect(semantic_presentation == null);
     try std.testing.expectEqual(hooks.ScopeKind.ask, lifecycle.scope.kind);
-    try std.testing.expectEqualStrings("/tmp/fx-test", lifecycle.scope.workspace_root);
+    try std.testing.expectEqualStrings("/tmp/x1-test", lifecycle.scope.workspace_root);
     try testPushAssistantText(deps, "assistant text");
 }
 
@@ -3977,14 +4036,11 @@ fn testProcessQueuedPromptChecksTimeout(deps: *const agent_runtime.AgentRuntimeD
     const tool_ctx = ctx.toolContext();
     try std.testing.expectEqual(@as(?usize, std.time.ms_per_s), tool_ctx.command_timeout_ms);
     try std.testing.expect(!tool_ctx.web_search_runtime_ready);
-    try std.testing.expect(tool_ctx.web_search_backend != null);
+    try std.testing.expect(tool_ctx.web_search_backend == null);
     try std.testing.expect(tool_ctx.web_fetch_runtime.? == &ctx.web_fetch_runtime);
     try std.testing.expect(tool_ctx.web_fetch_progress_ctx != null);
     try std.testing.expect(tool_ctx.on_web_fetch_progress != null);
-    try std.testing.expectEqualStrings(ctx.model, ctx.web_search_runtime.worker_model);
-    try std.testing.expectEqual(ctx.cfg.gateway_retry_count, ctx.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(ctx.cfg.gateway_chat_url, ctx.web_search_runtime.gateway_chat_url);
-    try std.testing.expect(ctx.web_search_runtime.provider.?.execute_fn == ctx.cfg.provider_set.gateway.fx_search.?.execute_fn);
+    try std.testing.expect(ctx.web_search_runtime.provider == null);
     try std.testing.expectEqualStrings("/models", tool_ctx.gateway_models_path);
     try testPushAssistantText(deps, "assistant text");
 }
@@ -3999,7 +4055,7 @@ fn testProcessQueuedPromptChecksExecOnlyTerminal(deps: *const agent_runtime.Agen
     try std.testing.expect(tool_projection_mod.containsName(cfg.advertised_tool_names, "read_file"));
     try std.testing.expect(tool_projection_mod.containsName(cfg.advertised_tool_names, "terminal"));
     try std.testing.expect(!tool_projection_mod.containsName(cfg.advertised_tool_names, "run_command"));
-    try std.testing.expect(tool_projection_mod.containsName(cfg.advertised_tool_names, "web_search"));
+    try std.testing.expect(!tool_projection_mod.containsName(cfg.advertised_tool_names, "web_search"));
     const advertised_terminal = for (cfg.advertised_functions) |function| {
         if (std.mem.eql(u8, function.name, "terminal")) break function;
     } else return error.TestExpectedEqual;
@@ -4009,7 +4065,7 @@ fn testProcessQueuedPromptChecksExecOnlyTerminal(deps: *const agent_runtime.Agen
     ));
     try std.testing.expect(std.mem.find(u8, advertised_terminal.description, "required finite timeout_ms") != null);
     try std.testing.expect(std.mem.find(u8, advertised_terminal.description, "Use start") == null);
-    try std.testing.expectEqualStrings(builtin_tools.web_search.description, cfg.custom_tool_guidance);
+    try std.testing.expectEqualStrings("", cfg.custom_tool_guidance);
     try std.testing.expectEqualStrings("test model overlay", cfg.model_prompt_overlay.?);
     const runtime_terminal = deps.tool_registry.lookup("terminal") orelse
         return error.TestExpectedEqual;
@@ -4630,7 +4686,7 @@ test "Ask MCP adapters revalidate scoped authority before catalog access" {
     try std.testing.expectEqual(@as(usize, 1), provider.calls);
 }
 
-test "fx ask deps validate malformed registered calls" {
+test "x1 ask deps validate malformed registered calls" {
     const alloc = std.testing.allocator;
     var stdout_capture = TestCapture{};
     defer stdout_capture.deinit(alloc);
@@ -4652,94 +4708,7 @@ test "fx ask deps validate malformed registered calls" {
     try std.testing.expectEqualStrings("web_fetch field \"url\" must be a string", result.failure);
 }
 
-test "CLI prompt projection configures web search then blocks native execution" {
-    const alloc = std.testing.allocator;
-    const web_search_contract = @import("../tooling/web_search_contract.zig");
-    const ProviderState = struct {
-        calls: usize = 0,
-    };
-    const FailingWebSearchProvider = struct {
-        fn execute(
-            raw_ctx: ?*anyopaque,
-            _: Allocator,
-            _: web_search_runtime.Inputs,
-            _: web_search_contract.ProviderRequest,
-            _: ?web_search_contract.ProgressFn,
-            _: ?*anyopaque,
-        ) anyerror!web_search_contract.ProviderResponse {
-            const state: *ProviderState = @ptrCast(@alignCast(raw_ctx orelse return error.TestWebSearchProvider));
-            state.calls += 1;
-            return error.TestWebSearchProvider;
-        }
-    };
-    var stdout_capture = TestCapture{};
-    defer stdout_capture.deinit(alloc);
-    var stderr_capture = TestCapture{};
-    defer stderr_capture.deinit(alloc);
-    var ctx = AskContext.init(alloc, testConfig(), testPromptRunDeps(&stdout_capture, &stderr_capture, testPresentKeyStartup), "/tmp/workspace");
-    defer ctx.deinit();
-    var provider_state = ProviderState{};
-    var provider = ctx.web_search_runtime.provider orelse return error.TestExpectedEqual;
-    provider.context = @ptrCast(&provider_state);
-    provider.execute_fn = FailingWebSearchProvider.execute;
-    ctx.web_search_runtime = web_search_runtime.Runtime.init(.{
-        .provider = provider,
-    });
-
-    ctx.web_search_runtime.configure(.{
-        .api_key = "stale-key",
-        .worker_model = "stale-model",
-        .gateway_retry_count = 99,
-        .gateway_chat_url = "https://stale.invalid/chat",
-    });
-
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    var messages: std.ArrayList(ChatMessage) = .empty;
-    defer messages.deinit(arena);
-    const deps = agentRuntimeDeps(&ctx);
-    const append_static = deps.append_static_context orelse return error.TestExpectedEqual;
-    try append_static(deps.ctx, arena, &messages);
-    try deps.append_runtime_context(deps.ctx, arena, &messages);
-
-    try std.testing.expectEqualStrings("stale-key", ctx.web_search_runtime.api_key);
-
-    const validate = deps.validate_tool_call orelse return error.TestExpectedEqual;
-    const validation = try validate(deps.ctx, arena, .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"x\"}",
-    });
-    try std.testing.expectEqualStrings("web_search field \"query\" must contain at least two characters", validation.failure);
-    try std.testing.expectEqualStrings(ctx.api_key, ctx.web_search_runtime.api_key);
-    try std.testing.expectEqualStrings(ctx.model, ctx.web_search_runtime.worker_model);
-    try std.testing.expectEqual(ctx.cfg.gateway_retry_count, ctx.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(ctx.cfg.gateway_chat_url, ctx.web_search_runtime.gateway_chat_url);
-
-    const execute = deps.execute_tool_call;
-    const execution = try execute(deps.ctx, .{
-        .call_allocator = arena,
-        .result_allocator = arena,
-        .call = .{
-            .id = "search-execute",
-            .name = "web_search",
-            .arguments_json = "{\"query\":\"current Zig release\"}",
-        },
-        .authority = .ordinary,
-        .session_grants = &.{},
-        .advertised_dynamic_tool_names = &.{},
-        .max_tool_result_bytes = ctx.max_tool_result_bytes,
-    });
-    try std.testing.expectEqualStrings(ctx.api_key, ctx.web_search_runtime.api_key);
-    try std.testing.expectEqualStrings(ctx.model, ctx.web_search_runtime.worker_model);
-    try std.testing.expectEqual(ctx.cfg.gateway_retry_count, ctx.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(ctx.cfg.gateway_chat_url, ctx.web_search_runtime.gateway_chat_url);
-    try std.testing.expectEqual(.failure, execution.status);
-    try std.testing.expectEqual(@as(usize, 0), provider_state.calls);
-}
-
-test "fx ask ChatGPT route disables Gateway-backed auxiliary providers" {
+test "x1 ask X1 route disables Gateway-backed auxiliary providers" {
     const alloc = std.testing.allocator;
     var stdout_capture = TestCapture{};
     defer stdout_capture.deinit(alloc);
@@ -4752,9 +4721,9 @@ test "fx ask ChatGPT route disables Gateway-backed auxiliary providers" {
         "/tmp/workspace",
     );
     defer ctx.deinit();
-    ctx.api_key = "chatgpt-secret";
-    ctx.credential_source = .chatgpt_subscription;
-    ctx.provider = .codex;
+    ctx.api_key = "x1-secret";
+    ctx.credential_source = .layerx1_subscription;
+    ctx.provider = .layerx1;
     ctx.model = "gpt-5.4";
 
     const tool_ctx = ctx.toolContext();
@@ -4763,7 +4732,7 @@ test "fx ask ChatGPT route disables Gateway-backed auxiliary providers" {
     try std.testing.expect(tool_ctx.permission_reviewer_provider == null);
 }
 
-test "fx ask finalization fails every failed turn" {
+test "x1 ask finalization fails every failed turn" {
     const cases = [_]struct {
         outcome: types.TurnPresentationOutcome,
         disposition: ?types.ProviderCompletionDisposition,
@@ -4789,26 +4758,6 @@ test "fx ask finalization fails every failed turn" {
         try std.testing.expectEqual(case.expected_failed, ctx.failed);
         try std.testing.expectEqual(@as(usize, 0), ctx.worker.worker_events.items.len);
     }
-}
-
-test "fx ask deps reject malformed native web_search calls" {
-    const alloc = std.testing.allocator;
-    var stdout_capture = TestCapture{};
-    defer stdout_capture.deinit(alloc);
-    var stderr_capture = TestCapture{};
-    defer stderr_capture.deinit(alloc);
-    var ctx = AskContext.init(alloc, testConfig(), testPromptRunDeps(&stdout_capture, &stderr_capture, testPresentKeyStartup), "/tmp/workspace");
-    defer ctx.deinit();
-
-    const deps = agentRuntimeDeps(&ctx);
-    const validate = deps.validate_tool_call orelse return error.TestExpectedEqual;
-    const result = try validate(deps.ctx, alloc, .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"x\"}",
-    });
-    defer alloc.free(result.failure);
-    try std.testing.expectEqualStrings("web_search field \"query\" must contain at least two characters", result.failure);
 }
 
 test "parse options preserves active ask flags and operands" {
@@ -4923,7 +4872,7 @@ test "headless yolo warning precedes startup configuration diagnostics" {
         u8,
         stderr_capture.bytes.items,
         permissions.yolo_warning_text ++ "\n" ++
-            "fx ask: config user: malformed_settings\n",
+            "x1 ask: config user: malformed_settings\n",
     ));
 }
 
@@ -5028,7 +4977,7 @@ test "runWithDeps reports a missing image before startup after cleaning prior at
     defer alloc.free(valid_path);
     const valid_path_z = try alloc.dupeZ(u8, valid_path);
     defer alloc.free(valid_path_z);
-    const missing_path_z = try alloc.dupeZ(u8, "/tmp/fx-ask-missing-image.png");
+    const missing_path_z = try alloc.dupeZ(u8, "/tmp/x1-ask-missing-image.png");
     defer alloc.free(missing_path_z);
 
     var stdout_capture: TestCapture = .{};
@@ -5275,7 +5224,7 @@ test "stdin read failure has distinct text and JSON output contracts" {
     );
     try std.testing.expectEqualStrings("", stdout_capture.bytes.items);
     try std.testing.expectEqualStrings(
-        "fx ask: failed to read prompt from stdin\n",
+        "x1 ask: failed to read prompt from stdin\n",
         stderr_capture.bytes.items,
     );
 
@@ -5310,31 +5259,7 @@ test "runWithDeps threads timeout into ask tool context" {
     try std.testing.expectEqualStrings("assistant text", stdout_capture.bytes.items);
 }
 
-test "cli ask admits default-safe web_search without a rule" {
-    const alloc = std.testing.allocator;
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    var stdout_capture: TestCapture = .{};
-    defer stdout_capture.deinit(alloc);
-    var stderr_capture: TestCapture = .{};
-    defer stderr_capture.deinit(alloc);
-
-    var ctx = AskContext.init(alloc, testConfig(), testPromptRunDeps(&stdout_capture, &stderr_capture, testPresentKeyStartup), "/tmp/workspace");
-    defer ctx.deinit();
-    const call = ToolCall{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current news\"}",
-    };
-
-    try std.testing.expectEqual(ToolPermissionDecision.once, (try requestToolPermissionOutcome(&ctx, arena, call, .auto, &.{}, &.{})).decision);
-
-    ctx.permission_rules = try testPermissionRuleSet(alloc, "web_search", "*", .allow);
-    try std.testing.expectEqual(ToolPermissionDecision.once, (try requestToolPermissionOutcome(&ctx, arena, call, .auto, &.{}, &.{})).decision);
-}
-
-test "fx ask default user commands require configured authority or review" {
+test "x1 ask default user commands require configured authority or review" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
@@ -5380,7 +5305,7 @@ test "fx ask default user commands require configured authority or review" {
     try std.testing.expectEqual(types.ToolPermissionDenialReason.review_unavailable, automatic.denial_reason.?);
 }
 
-test "fx ask automatic review observes worker cancellation" {
+test "x1 ask automatic review observes worker cancellation" {
     const Provider = struct {
         fn review(
             _: ?*anyopaque,
@@ -5402,7 +5327,7 @@ test "fx ask automatic review observes worker cancellation" {
     var stderr_capture: TestCapture = .{};
     defer stderr_capture.deinit(alloc);
     var cfg = testConfig();
-    cfg.provider_set.gateway.permission_reviewer = .{ .review_fn = Provider.review };
+    cfg.provider_set.layerx1.permission_reviewer = .{ .review_fn = Provider.review };
     var ctx = AskContext.init(
         alloc,
         cfg,
@@ -5881,7 +5806,7 @@ test "disabled headless ask scope leaves the interactive SIGINT handler untouche
     try std.testing.expectEqual(@as(usize, 1), test_previous_sigint_count.load(.seq_cst));
 }
 
-test "fx ask auto mode applies automatic clear and caution without a prompt" {
+test "x1 ask auto mode applies automatic clear and caution without a prompt" {
     const FakeClassifier = struct {
         calls: usize = 0,
         decision: permission_auto_classifier.Decision = .clear,
@@ -5990,7 +5915,7 @@ test "fx ask auto mode applies automatic clear and caution without a prompt" {
     try std.testing.expectEqualStrings("", stderr_capture.bytes.items);
 }
 
-test "fx ask terminal permission prompt approves and denies run_command" {
+test "x1 ask terminal permission prompt approves and denies run_command" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
@@ -6039,7 +5964,7 @@ test "fx ask terminal permission prompt approves and denies run_command" {
     try std.testing.expectEqualStrings("", stdout_capture.bytes.items);
 }
 
-test "fx ask permission attention fires once after a prompt is published" {
+test "x1 ask permission attention fires once after a prompt is published" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
@@ -6082,7 +6007,7 @@ test "fx ask permission attention fires once after a prompt is published" {
     try std.testing.expectEqual(@as(usize, 1), capture.calls);
 }
 
-test "fx ask bell writes only to TTY stderr" {
+test "x1 ask bell writes only to TTY stderr" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -6104,7 +6029,7 @@ test "fx ask bell writes only to TTY stderr" {
     try std.testing.expectEqualStrings("", stdout_capture.bytes.items);
 }
 
-test "fx ask registers notification handlers only when configured" {
+test "x1 ask registers notification handlers only when configured" {
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(std.testing.allocator);
     var stderr_capture: TestCapture = .{};
@@ -6133,7 +6058,7 @@ test "fx ask registers notification handlers only when configured" {
     try std.testing.expect(enabled.lifecycle_view.hasAttentionRequired());
 }
 
-test "fx ask captured and quiet permission paths bypass terminal prompt" {
+test "x1 ask captured and quiet permission paths bypass terminal prompt" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
@@ -6172,7 +6097,7 @@ test "fx ask captured and quiet permission paths bypass terminal prompt" {
     try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "noninteractive_permission_prompt_unavailable") != null);
 }
 
-test "fx ask permission prompt policy requires explicit captured-mode opt in and TTY stdin" {
+test "x1 ask permission prompt policy requires explicit captured-mode opt in and TTY stdin" {
     const Case = struct {
         output_mode: OutputMode,
         prompt_permissions: bool,
@@ -6203,7 +6128,7 @@ test "fx ask permission prompt policy requires explicit captured-mode opt in and
     }
 }
 
-test "fx ask captured permission prompt opt in uses the existing prompter" {
+test "x1 ask captured permission prompt opt in uses the existing prompter" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
@@ -6251,7 +6176,7 @@ test "fx ask captured permission prompt opt in uses the existing prompter" {
     try std.testing.expectEqual(@as(usize, 2), prompt.calls);
 }
 
-test "fx ask terminal permission prompt propagates prompt hook errors" {
+test "x1 ask terminal permission prompt propagates prompt hook errors" {
     const FailingPrompt = struct {
         fn prompt(
             _: ?*anyopaque,
@@ -6286,7 +6211,7 @@ test "fx ask terminal permission prompt propagates prompt hook errors" {
     try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "noninteractive_permission_prompt_unavailable") == null);
 }
 
-test "fx ask prepared file mutation callback preserves terminal permission prompt" {
+test "x1 ask prepared file mutation callback preserves terminal permission prompt" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6356,7 +6281,7 @@ test "fx ask prepared file mutation callback preserves terminal permission promp
     try std.testing.expectEqualStrings("", stdout_capture.bytes.items);
 }
 
-test "fx ask auto mode uses automatic allow for external prepared file mutation" {
+test "x1 ask auto mode uses automatic allow for external prepared file mutation" {
     const FakeClassifier = struct {
         calls: usize = 0,
         root_text: []const u8 = "",
@@ -6432,7 +6357,7 @@ test "fx ask auto mode uses automatic allow for external prepared file mutation"
     try std.testing.expectEqualStrings(target_path, authorization.input.path());
 }
 
-test "fx ask preserves CLI headless blocker diagnostics" {
+test "x1 ask preserves CLI headless blocker diagnostics" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6480,10 +6405,10 @@ test "fx ask preserves CLI headless blocker diagnostics" {
     ));
     const expected_configured_stderr = try std.fmt.allocPrint(
         arena,
-        "fx ask: permission required by configured rule\n" ++
-            "fx ask: blocked action: {s}\n" ++
-            "fx ask: reason=noninteractive_permission_prompt_unavailable\n" ++
-            "fx ask: rerun in the interactive shell to approve this action, or add a narrow matching permission rule before retrying\n",
+        "x1 ask: permission required by configured rule\n" ++
+            "x1 ask: blocked action: {s}\n" ++
+            "x1 ask: reason=noninteractive_permission_prompt_unavailable\n" ++
+            "x1 ask: rerun in the interactive shell to approve this action, or add a narrow matching permission rule before retrying\n",
         .{configured_label},
     );
     try std.testing.expectEqualStrings("", stdout_capture.bytes.items);
@@ -6537,10 +6462,10 @@ test "fx ask preserves CLI headless blocker diagnostics" {
     ));
     const expected_approval_stderr = try std.fmt.allocPrint(
         arena,
-        "fx ask: permission required for tool execution in noninteractive mode\n" ++
-            "fx ask: blocked action: {s}\n" ++
-            "fx ask: reason=noninteractive_permission_prompt_unavailable\n" ++
-            "fx ask: rerun with --auto to review this exact action automatically, or use the interactive shell to approve it\n",
+        "x1 ask: permission required for tool execution in noninteractive mode\n" ++
+            "x1 ask: blocked action: {s}\n" ++
+            "x1 ask: reason=noninteractive_permission_prompt_unavailable\n" ++
+            "x1 ask: rerun with --auto to review this exact action automatically, or use the interactive shell to approve it\n",
         .{approval_label},
     );
     try std.testing.expectEqualStrings("", stdout_capture.bytes.items);
@@ -6583,7 +6508,7 @@ test "fx ask preserves CLI headless blocker diagnostics" {
     try std.testing.expectEqualStrings("", stderr_capture.bytes.items);
 }
 
-test "fx ask ordinary multi-target admission preserves deny precedence without diagnostics" {
+test "x1 ask ordinary multi-target admission preserves deny precedence without diagnostics" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6960,7 +6885,7 @@ test "saved ask rejects a canonical one-off child during resume initialization" 
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);
@@ -7017,7 +6942,7 @@ test "saved ask rejects a canonical one-off child during resume initialization" 
     try expectAskSessionStoresUnavailable(&ctx);
 }
 
-test "fx ask renders one-off resume denial in text and JSON modes" {
+test "x1 ask renders one-off resume denial in text and JSON modes" {
     const alloc = std.testing.allocator;
     const cases = [_]struct {
         args: []const [:0]const u8,
@@ -7063,7 +6988,7 @@ test "fx ask renders one-off resume denial in text and JSON modes" {
         } else {
             try std.testing.expectEqualStrings("", stdout_capture.bytes.items);
             try std.testing.expectEqualStrings(
-                "fx ask: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n",
+                "x1 ask: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n",
                 stderr_capture.bytes.items,
             );
         }
@@ -7264,7 +7189,7 @@ test "saved ask classifies unsafe store failure by request mode" {
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io_mod.getIo(), "home");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    var blocker = try tmp.dir.createFile(io_mod.getIo(), "home/.fx", .{});
+    var blocker = try tmp.dir.createFile(io_mod.getIo(), "home/.x1", .{});
     blocker.close(io_mod.getIo());
 
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -7293,7 +7218,7 @@ test "saved ask classifies unsafe store failure by request mode" {
     try fresh_ctx.initializeSessionStores();
 
     try std.testing.expectEqualStrings(
-        "fx ask: warning: session persistence unavailable; error=SessionPathUnsafe; continuing without saving\n",
+        "x1 ask: warning: session persistence unavailable; error=SessionPathUnsafe; continuing without saving\n",
         stderr_capture.bytes.items,
     );
     try expectAskSessionStoresUnavailable(&fresh_ctx);
@@ -7604,7 +7529,7 @@ test "saved ask ignores existing legacy task files" {
         tasks_path,
         .{
             .truncate = true,
-            .permissions = std.Io.File.Permissions.fromMode(0o600),
+            .permissions = io_mod.permissionsFromMode(0o600),
         },
     );
     tasks_file.close(io_mod.getIo());
@@ -8045,31 +7970,7 @@ test "render final JSON includes the latest terminal recovery diagnostic" {
     );
 }
 
-test "cli json records built in web_search completion" {
-    const alloc = std.testing.allocator;
-    const records = try alloc.alloc(ToolCallRecord, 1);
-    records[0] = .{
-        .name = try alloc.dupe(u8, "web_search"),
-        .status = try alloc.dupe(u8, "success"),
-        .web_search_completion = .{ .searches = 3, .duration_ms = 42 },
-    };
-    const result = PromptRunResult{
-        .exit_code = 0,
-        .assistant_output = try alloc.dupe(u8, ""),
-        .tool_calls = records,
-    };
-    defer result.deinit(alloc);
-
-    const rendered = try renderFinalJsonResult(alloc, result);
-    defer alloc.free(rendered);
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, rendered, .{});
-    defer parsed.deinit();
-    const web_search = parsed.value.object.get("tool_calls").?.array.items[0].object.get("web_search").?.object;
-    try std.testing.expectEqual(@as(i64, 3), web_search.get("searches").?.integer);
-    try std.testing.expectEqual(@as(i64, 42), web_search.get("duration_ms").?.integer);
-}
-
-test "fx ask JSON captures HTTP 413 prompt-too-long blocker" {
+test "x1 ask JSON captures HTTP 413 prompt-too-long blocker" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -8084,7 +7985,7 @@ test "fx ask JSON captures HTTP 413 prompt-too-long blocker" {
     );
 
     try std.testing.expectEqual(@as(u8, 1), exit_code);
-    try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "fx ask: HTTP 413: provider payload rejected") != null);
+    try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "x1 ask: HTTP 413: provider payload rejected") != null);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, stdout_capture.bytes.items, .{});
     defer parsed.deinit();
@@ -8095,7 +7996,7 @@ test "fx ask JSON captures HTTP 413 prompt-too-long blocker" {
     try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("exit_code").?.integer);
 }
 
-test "fx ask formats restricted-provider HTTP errors without raw JSON" {
+test "x1 ask formats restricted-provider HTTP errors without raw JSON" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -8110,7 +8011,7 @@ test "fx ask formats restricted-provider HTTP errors without raw JSON" {
     );
 
     try std.testing.expectEqual(@as(u8, 1), exit_code);
-    try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "fx ask: API access denied · HTTP 403 · Provider: wafer") != null);
+    try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "x1 ask: API access denied · HTTP 403 · Provider: wafer") != null);
     try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "{\"error\"") == null);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, stdout_capture.bytes.items, .{});
@@ -8121,7 +8022,7 @@ test "fx ask formats restricted-provider HTTP errors without raw JSON" {
     try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("exit_code").?.integer);
 }
 
-test "fx ask text and JSON share the selected auth failure facts" {
+test "x1 ask text and JSON share the selected auth failure facts" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -8137,18 +8038,18 @@ test "fx ask text and JSON share the selected auth failure facts" {
 
     try std.testing.expectEqual(@as(u8, 1), exit_code);
     try std.testing.expectEqualStrings(
-        "fx ask: AI_GATEWAY_API_KEY authentication failed · HTTP 401\n",
+        "x1 ask: X1 subscription authentication failed · HTTP 401\n",
         stderr_capture.bytes.items,
     );
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, stdout_capture.bytes.items, .{});
     defer parsed.deinit();
     try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("exit_code").?.integer);
     try std.testing.expectEqualStrings(
-        "AI_GATEWAY_API_KEY authentication failed · HTTP 401\n",
+        "X1 subscription authentication failed · HTTP 401\n",
         parsed.value.object.get("output").?.string,
     );
     const auth_failure = parsed.value.object.get("auth_failure").?.object;
-    try std.testing.expectEqualStrings("AI_GATEWAY_API_KEY", auth_failure.get("source").?.string);
+    try std.testing.expectEqualStrings("X1 subscription", auth_failure.get("source").?.string);
     try std.testing.expectEqualStrings("http_unauthorized", auth_failure.get("reason").?.string);
     try std.testing.expectEqual(@as(i64, 401), auth_failure.get("http_status").?.integer);
     try std.testing.expect(std.mem.find(u8, stdout_capture.bytes.items, "secret-key") == null);
@@ -8200,7 +8101,7 @@ test "saved API key 401 discards the fresh pristine session" {
     try std.testing.expectEqual(@as(usize, 0), parsed.value.object.get("tool_calls").?.array.items.len);
     try std.testing.expect(parsed.value.object.get("auth_failure") != null);
 
-    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/fx-test");
+    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/x1-test");
     defer store.deinit(alloc);
     var sessions = try store.list(alloc);
     defer {
@@ -8210,7 +8111,7 @@ test "saved API key 401 discards the fresh pristine session" {
     try std.testing.expectEqual(@as(usize, 0), sessions.items.len);
     try std.testing.expectError(
         error.NoSavedSessions,
-        store.resumeTargetForWrite(alloc, .last, "/tmp/fx-test", .{}),
+        store.resumeTargetForWrite(alloc, .last, "/tmp/x1-test", .{}),
     );
 }
 
@@ -8262,12 +8163,12 @@ test "saved failures retain ineligible session lifecycles" {
             var seed_store = try session_store.Store.initFromHome(
                 alloc,
                 home,
-                "/tmp/fx-test",
+                "/tmp/x1-test",
             );
             defer seed_store.deinit(alloc);
             var seed_state = try testAskDurableState(
                 alloc,
-                "/tmp/fx-test",
+                "/tmp/x1-test",
                 "cli-protected-resume",
             );
             defer seed_state.deinit(alloc);
@@ -8314,7 +8215,7 @@ test "saved failures retain ineligible session lifecycles" {
         var store = try session_store.Store.initFromHome(
             alloc,
             home,
-            "/tmp/fx-test",
+            "/tmp/x1-test",
         );
         defer store.deinit(alloc);
         var loaded = try store.loadReadOnly(alloc, session_id);
@@ -8353,7 +8254,7 @@ test "saved auth fact followed by a prompt error retains the session" {
         runWithDeps(alloc, &.{"hello"}, testConfig(), deps),
     );
     try std.testing.expectEqual(@as(usize, 0), probe.calls);
-    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/fx-test");
+    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/x1-test");
     defer store.deinit(alloc);
     var sessions = try store.list(alloc);
     defer {
@@ -8398,7 +8299,7 @@ test "indeterminate saved auth cleanup keeps the primary result and session id" 
     try std.testing.expectEqual(@as(usize, 1), probe.calls);
     try std.testing.expect(probe.borrowers_detached);
     try std.testing.expectEqualStrings(
-        "fx ask: AI_GATEWAY_API_KEY authentication failed · HTTP 401\n",
+        "x1 ask: X1 subscription authentication failed · HTTP 401\n",
         stderr_capture.bytes.items,
     );
     var parsed = try std.json.parseFromSlice(
@@ -8411,20 +8312,20 @@ test "indeterminate saved auth cleanup keeps the primary result and session id" 
     try std.testing.expect(parsed.value.object.get("error") == null);
     try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("exit_code").?.integer);
     try std.testing.expectEqualStrings(
-        "AI_GATEWAY_API_KEY authentication failed · HTTP 401\n",
+        "X1 subscription authentication failed · HTTP 401\n",
         parsed.value.object.get("output").?.string,
     );
     const session_id = parsed.value.object.get("session_id").?.string;
     try std.testing.expect(session_id.len > 0);
 
-    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/fx-test");
+    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/x1-test");
     defer store.deinit(alloc);
     var loaded = try store.loadReadOnly(alloc, session_id);
     defer loaded.deinit(alloc);
     try std.testing.expectEqual(@as(usize, 0), loaded.history.len);
 }
 
-test "fx ask JSON records permission-denied tool calls as error status" {
+test "x1 ask JSON records permission-denied tool calls as error status" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8459,7 +8360,7 @@ test "fx ask JSON records permission-denied tool calls as error status" {
     );
 }
 
-test "fx ask JSON permission-denied capture is best effort under allocation failure" {
+test "x1 ask JSON permission-denied capture is best effort under allocation failure" {
     var failing = std.testing.FailingAllocator.init(
         std.testing.allocator,
         .{ .fail_index = 0 },
@@ -8486,7 +8387,7 @@ test "fx ask JSON permission-denied capture is best effort under allocation fail
     try std.testing.expectEqual(@as(usize, 0), ctx.tool_call_records.items.len);
 }
 
-test "fx ask JSON captures parallel tool results without corrupting records" {
+test "x1 ask JSON captures parallel tool results without corrupting records" {
     const alloc = std.heap.c_allocator;
     const thread_count = 16;
     const calls_per_thread = 256;
@@ -8622,7 +8523,7 @@ fn checkAskJsonCaptureAllocationFailures(alloc: Allocator) !void {
     );
 }
 
-test "fx ask JSON capture cleans up every allocation failure" {
+test "x1 ask JSON capture cleans up every allocation failure" {
     try std.testing.checkAllAllocationFailures(
         std.testing.allocator,
         checkAskJsonCaptureAllocationFailures,
@@ -8630,7 +8531,7 @@ test "fx ask JSON capture cleans up every allocation failure" {
     );
 }
 
-test "fx ask JSON records ask_user_question text for matching assertions" {
+test "x1 ask JSON records ask_user_question text for matching assertions" {
     const alloc = std.testing.allocator;
     const records = try alloc.alloc(ToolCallRecord, 1);
     records[0] = .{
@@ -8654,7 +8555,7 @@ test "fx ask JSON records ask_user_question text for matching assertions" {
     try std.testing.expectEqualStrings("What is your GitHub handle?", tool_call.get("question").?.string);
 }
 
-test "fx ask JSON clips ask_user_question text at a UTF-8 boundary" {
+test "x1 ask JSON clips ask_user_question text at a UTF-8 boundary" {
     const alloc = std.testing.allocator;
     var question_bytes: [257]u8 = undefined;
     @memset(question_bytes[0..255], 'a');
@@ -8709,7 +8610,7 @@ test "json run with missing API key prints diagnostic then final object" {
     const exit_code = try runWithDeps(alloc, &.{ "--json", "hello" }, testConfig(), testPromptRunDeps(&stdout_capture, &stderr_capture, testMissingKeyStartup));
 
     try std.testing.expectEqual(@as(u8, 1), exit_code);
-    try std.testing.expectEqualStrings("fx ask: " ++ credentials.missing_credential_message ++ "\n", stderr_capture.bytes.items);
+    try std.testing.expectEqualStrings("x1 ask: " ++ credentials.missing_layerx1_credential_message ++ "\n", stderr_capture.bytes.items);
     try std.testing.expectEqualStrings(
         "{\"output\":\"\",\"final_output\":\"\",\"exit_code\":1,\"model\":\"\",\"session_id\":\"\",\"steps\":0,\"tool_calls\":[],\"error\":\"MissingCredentials\"}\n",
         stdout_capture.bytes.items,
@@ -8727,9 +8628,9 @@ test "recovery continuation checks local checkpoint before credentials" {
     defer test_home.deinit();
 
     const session_id = "completed-session";
-    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/fx-test");
+    var store = try session_store.Store.initFromHome(alloc, home, "/tmp/x1-test");
     defer store.deinit(alloc);
-    var state = try testAskDurableState(alloc, "/tmp/fx-test", session_id);
+    var state = try testAskDurableState(alloc, "/tmp/x1-test", session_id);
     defer state.deinit(alloc);
     var writable = try store.startWritableSession(alloc, state);
     writable.deinit(alloc);
@@ -8805,7 +8706,7 @@ test "missing API key returns before project context gathering" {
     try std.testing.expectEqual(@as(usize, 0), test_gather_project_context_calls);
 }
 
-test "fx ask emits one discovery warning when catalog truncation and a skill read report it" {
+test "x1 ask emits one discovery warning when catalog truncation and a skill read report it" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -8830,7 +8731,7 @@ test "fx ask emits one discovery warning when catalog truncation and a skill rea
     try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "[context] skill catalog omitted 1 entries") != null);
 }
 
-test "fx ask carries resolved auto mode and initial registry context into the queued prompt" {
+test "x1 ask carries resolved auto mode and initial registry context into the queued prompt" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -8852,7 +8753,7 @@ test "fx ask carries resolved auto mode and initial registry context into the qu
     );
 }
 
-test "default fx ask passes canonical image paths as initial context targets" {
+test "default x1 ask passes canonical image paths as initial context targets" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8890,7 +8791,7 @@ test "default fx ask passes canonical image paths as initial context targets" {
     try std.testing.expect(TestContextRegistryFixture.targets_match);
 }
 
-test "default fx ask omits disabled registry context without gathering" {
+test "default x1 ask omits disabled registry context without gathering" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -8908,7 +8809,7 @@ test "default fx ask omits disabled registry context without gathering" {
     try std.testing.expectEqual(@as(usize, 0), TestContextRegistryFixture.gather_calls);
 }
 
-test "default fx ask preserves project context gathering error mappings" {
+test "default x1 ask preserves project context gathering error mappings" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -8978,7 +8879,7 @@ test "quiet suppresses streaming while quiet json captures final output" {
     try std.testing.expectEqualStrings("", stderr_capture.bytes.items);
 }
 
-test "fx ask JSON recovery keeps stdout structured and reports progress on stderr" {
+test "x1 ask JSON recovery keeps stdout structured and reports progress on stderr" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -9002,7 +8903,7 @@ test "fx ask JSON recovery keeps stdout structured and reports progress on stder
     );
 }
 
-test "fx ask JSON reports the consumed attempt after retry admission failure" {
+test "x1 ask JSON reports the consumed attempt after retry admission failure" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -9030,7 +8931,7 @@ test "fx ask JSON reports the consumed attempt after retry admission failure" {
     try std.testing.expect(std.mem.find(u8, stderr_capture.bytes.items, "recovery paused after 1/2 attempts") != null);
 }
 
-test "fx ask JSON preserves partial output on prompt failure" {
+test "x1 ask JSON preserves partial output on prompt failure" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);
@@ -9062,7 +8963,7 @@ test "fx ask JSON preserves partial output on prompt failure" {
     try std.testing.expectEqualStrings("", stderr_capture.bytes.items);
 }
 
-test "fx ask raw output still propagates prompt failure" {
+test "x1 ask raw output still propagates prompt failure" {
     const alloc = std.testing.allocator;
     var stdout_capture: TestCapture = .{};
     defer stdout_capture.deinit(alloc);

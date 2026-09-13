@@ -1,13 +1,13 @@
-# libfx
+# libx1
 
-`libfx` embeds fx agents and interactive terminals in JavaScript
+`libx1` embeds x1 agents and interactive terminals in JavaScript
 applications. It supports Node.js hosts and browser environments with
 JavaScript Promise Integration (JSPI).
 
 ## Installation
 
 ```sh
-npm install libfx
+npm install libx1
 ```
 
 Requirements:
@@ -15,30 +15,30 @@ Requirements:
 - Node.js 20 or later
 - Chrome or Edge 137 or later for browser WebAssembly
 - JSPI when using the WebAssembly backend
-- A Vercel AI Gateway credential or a host-provided authenticated `fetch`
+- A LayerX1 credential or a host-provided authenticated `fetch`
 
 The package includes:
 
 - Native Node addons for Linux and macOS on x64 and arm64
-- `fx-core.wasm` for headless agents
-- `fx-term.wasm` for interactive terminals
+- `x1-core.wasm` for headless agents
+- `x1-term.wasm` for interactive terminals
 - A dependency-free JavaScript host layer
 
 ## Exports
 
 | Import | Environment | Description |
 | --- | --- | --- |
-| `libfx` | Node.js or browser | Environment-aware default |
-| `libfx/node` | Node.js | Native-first Node entry point |
-| `libfx/browser` | Browser | WebAssembly browser entry point |
-| `libfx/wasm` | Browser or Node.js | Direct WebAssembly host layer |
+| `libx1` | Node.js or browser | Environment-aware default |
+| `libx1/node` | Node.js | Native-first Node entry point |
+| `libx1/browser` | Browser | WebAssembly browser entry point |
+| `libx1/wasm` | Browser or Node.js | Direct WebAssembly host layer |
 
 Public exports:
 
-- `createFxAgent()` creates a headless ACP agent.
-- `createFxTerminal()` runs the interactive fx terminal.
+- `createX1Agent()` creates a headless ACP agent.
+- `createX1Terminal()` runs the interactive x1 terminal.
 - `supportsJspi()` detects WebAssembly JSPI support.
-- `xtermAdapter()` connects fx to an xterm.js terminal.
+- `xtermAdapter()` connects x1 to an xterm.js terminal.
 - `encodeXtermKeyEvent()` translates browser keyboard events into terminal input.
 
 ## Headless agent
@@ -47,11 +47,11 @@ The default Node entry point prefers the native addon and falls back to
 WebAssembly when necessary.
 
 ```js
-import { createFxAgent } from "libfx";
+import { createX1Agent } from "libx1";
 
-const agent = await createFxAgent({
+const agent = await createX1Agent({
   env: {
-    AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+    X1_API_KEY: process.env.X1_API_KEY,
   },
   onEvent(event) {
     console.log(event.type);
@@ -95,7 +95,7 @@ Image prompt blocks are not currently supported.
 
 ### Agent lifecycle
 
-The object returned by `createFxAgent()` provides:
+The object returned by `createX1Agent()` provides:
 
 | Member | Description |
 | --- | --- |
@@ -138,17 +138,17 @@ Browser hosts always use WebAssembly.
 
 ```js
 import {
-  createFxAgent,
+  createX1Agent,
   supportsJspi,
-} from "libfx/browser";
+} from "libx1/browser";
 
 if (!supportsJspi()) {
   throw new Error("This browser does not support WebAssembly JSPI.");
 }
 
-const agent = await createFxAgent({
+const agent = await createX1Agent({
   env: {
-    AI_GATEWAY_API_KEY: "<short-lived credential>",
+    X1_API_KEY: "<short-lived credential>",
   },
 });
 
@@ -160,7 +160,7 @@ for await (const update of turn) {
 }
 ```
 
-The browser entry point resolves `fx-core.wasm` and `fx-term.wasm` relative to
+The browser entry point resolves `x1-core.wasm` and `x1-term.wasm` relative to
 the installed package. Pass `wasm` explicitly to provide a URL, `Response`,
 `ArrayBuffer`, typed array, or precompiled `WebAssembly.Module`.
 
@@ -175,17 +175,17 @@ Install xterm.js in the host application:
 npm install @xterm/xterm @xterm/addon-fit
 ```
 
-Create the terminal and connect it to fx:
+Create the terminal and connect it to x1:
 
 ```js
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import {
-  createFxTerminal,
+  createX1Terminal,
   supportsJspi,
   xtermAdapter,
-} from "libfx/browser";
+} from "libx1/browser";
 
 if (!supportsJspi()) {
   throw new Error("This browser does not support WebAssembly JSPI.");
@@ -201,10 +201,10 @@ terminal.loadAddon(fit);
 terminal.open(document.querySelector("#terminal"));
 fit.fit();
 
-const runtime = await createFxTerminal({
+const runtime = await createX1Terminal({
   terminal: xtermAdapter(terminal),
   env: {
-    AI_GATEWAY_API_KEY: "<short-lived credential>",
+    X1_API_KEY: "<short-lived credential>",
   },
 });
 
@@ -222,18 +222,18 @@ The terminal runtime provides:
 | --- | --- |
 | `interactive` | Resolves after the terminal is ready for input |
 | `exited` | Resolves with the terminal exit code |
-| `write(data)` | Writes input directly to fx |
-| `resize()` | Notifies fx of terminal geometry changes |
+| `write(data)` | Writes input directly to x1 |
+| `resize()` | Notifies x1 of terminal geometry changes |
 | `abort()` | Stops the terminal and releases subscriptions |
 
-Try the hosted terminal at [fx.sh/try](https://fx.sh/try).
+Try the hosted terminal at [layerx1.com](https://layerx1.com).
 
 ## Backend selection
 
 Node hosts may select a backend explicitly:
 
 ```js
-const agent = await createFxAgent({
+const agent = await createX1Agent({
   backend: "native",
 });
 ```
@@ -244,10 +244,10 @@ const agent = await createFxAgent({
 | `native` | Require the native backend and fail if it cannot load |
 | `wasm` | Require WebAssembly and JSPI |
 
-The native loader checks `libfx.node` followed by the platform-specific addon:
+The native loader checks `libx1.node` followed by the platform-specific addon:
 
 ```text
-libfx.<platform>-<arch>.node
+libx1.<platform>-<arch>.node
 ```
 
 Supported packaged targets:
@@ -261,7 +261,7 @@ If no compatible native backend is available and JSPI cannot run, startup
 rejects with:
 
 ```js
-error.code === "LIBFX_JSPI_REQUIRED"
+error.code === "LIBX1_JSPI_REQUIRED"
 ```
 
 On Node versions where JSPI remains behind a flag, start the process with:
@@ -276,25 +276,27 @@ Hosts may provide adapters for runtime state and external effects:
 
 | Option | Purpose |
 | --- | --- |
-| `fetch` | Routes Gateway requests through the host |
+| `fetch` | Routes LayerX1 inference requests through the host |
 | `env` | Supplies runtime configuration without changing process globals |
 | `onEvent` | Receives runtime, ACP, terminal, and lifecycle events |
 | `onPermission` | Resolves agent permission requests |
 | `configStore` | Persists accepted configuration values |
 | `sessionStore` | Persists agent or terminal sessions |
-| `oauthSessionStore` | Persists browser device-login sessions |
+| `oauthSessionStore` | Persists WASM LayerX1 session bytes when the host supplies them |
 | `promptHistoryStore` | Stores terminal prompt history |
 | `openUrl` | Opens authentication and verification URLs |
 | `workspace` | Provides the constrained browser workspace adapter |
 
 ## Security boundaries
 
-`nativeAddon` and `env.FX_GATEWAY_CHAT_URL` are trusted host configuration. Do
+`nativeAddon` and `env.X1_E2E_LAYERX1_RESPONSES_URL` are trusted host configuration. Do
 not populate them from request, tenant, or other untrusted input.
 
-The native backend sends production credentials only to the canonical Vercel
-AI Gateway endpoint. Custom Gateway endpoints are limited to explicit loopback
-HTTP URLs for local development.
+The native backend sends production credentials only to the canonical LayerX1
+inference endpoint. Custom endpoints are limited to explicit loopback
+HTTP URLs for local development. The native addon option is `responsesUrl`.
+`X1_GATEWAY_CHAT_URL` and `gatewayChatUrl` remain compatibility aliases for the
+same loopback override.
 
 The WebAssembly runtime intentionally does not provide:
 
@@ -308,7 +310,7 @@ The WebAssembly runtime intentionally does not provide:
 - Public web fetch, web search, and general outbound network access
 
 The embedded runtime tells the model not to retry unavailable network work
-through terminal commands. Use locally installed fx when the full native tool
+through terminal commands. Use locally installed x1 when the full native tool
 suite is required.
 
 The optional browser workspace exposes foreground terminal execution through
@@ -323,7 +325,7 @@ returning bounded output.
 
 ## Local development
 
-From the fx repository root, build the native addon and both WebAssembly
+From the x1 repository root, build the native addon and both WebAssembly
 surfaces:
 
 ```sh
@@ -357,5 +359,5 @@ These are local development pages and are not publicly hosted links.
 
 Maintainer references:
 
-- [SDK contributor guide](https://github.com/vercel-labs/fx/blob/main/sdk/AGENTS.md)
-- [Native Node-API design and security model](https://github.com/vercel-labs/fx/blob/main/sdk/NAPI.md)
+- [SDK contributor guide](AGENTS.md)
+- [Native Node-API design and security model](NAPI.md)

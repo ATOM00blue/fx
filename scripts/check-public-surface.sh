@@ -33,7 +33,7 @@ if [[ -n "$personal_project_slugs" ]]; then
   exit 1
 fi
 
-capture='tests/e2e/fixtures/fx-render-bug-20260510-075848.tar.gz'
+capture='tests/e2e/fixtures/x1-render-bug-20260510-075848.tar.gz'
 archive_listing="$(tar -tzvf "$capture")"
 unexpected_owners="$(grep -Ev '[[:space:]]root([/]|[[:space:]]+)root[[:space:]]' <<<"$archive_listing" || true)"
 if [[ -n "$unexpected_owners" ]]; then

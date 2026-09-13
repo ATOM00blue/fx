@@ -82,19 +82,15 @@ pub const unavailable_provider = Provider{
 };
 
 pub const Set = struct {
-    gateway: ?Provider = null,
-    codex: ?Provider = null,
-    grok: ?Provider = null,
+    layerx1: ?Provider = null,
 
-    pub fn gatewayOnly(provider: Provider) Set {
-        return .{ .gateway = provider };
+    pub fn x1Only(provider: Provider) Set {
+        return .{ .layerx1 = provider };
     }
 
     pub fn select(self: Set, provider: model_provider.ProviderId) ?Provider {
         return switch (provider) {
-            .gateway => self.gateway,
-            .codex => self.codex,
-            .grok => self.grok,
+            .layerx1 => self.layerx1,
         };
     }
 };
@@ -151,8 +147,6 @@ test "generation usage lookup dispatches through the injected provider" {
 }
 
 test "generation usage providers are selected by provider identity" {
-    const routes = Set.gatewayOnly(unavailable_provider);
-    try std.testing.expect(routes.select(.gateway) != null);
-    try std.testing.expect(routes.select(.codex) == null);
-    try std.testing.expect(routes.select(.grok) == null);
+    const routes = Set.x1Only(unavailable_provider);
+    try std.testing.expect(routes.select(.layerx1) != null);
 }

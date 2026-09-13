@@ -9,21 +9,21 @@ const server = createServer((request) => request.resume());
 await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
 const { port } = server.address();
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const addonPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libfx.node"));
+const addonPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libx1.node"));
 const nodeModuleUrl = pathToFileURL(resolve(scriptDir, "../node.js")).href;
 
 try {
   const worker = new Worker(`
     const { parentPort, workerData } = require("node:worker_threads");
     (async () => {
-      const { createFxAgent } = await import(workerData.nodeModuleUrl);
-      const agent = await createFxAgent({
+      const { createX1Agent } = await import(workerData.nodeModuleUrl);
+      const agent = await createX1Agent({
         nativeAddon: workerData.addonPath,
         backend: "native",
         env: {
-          AI_GATEWAY_API_KEY: "worker-termination-key",
-          FX_GATEWAY_CHAT_URL: workerData.gatewayUrl,
-          FX_MODEL: "native/test-model",
+          X1_API_KEY: "worker-termination-key",
+          X1_GATEWAY_CHAT_URL: workerData.gatewayUrl,
+          X1_MODEL: "native/test-model",
         },
       });
       const session = await agent.createSession();

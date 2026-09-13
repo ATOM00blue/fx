@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxAgent } from "../node.js";
+import { createX1Agent } from "../node.js";
 
 const server = createServer((request) => {
   request.resume();
@@ -11,7 +11,7 @@ const server = createServer((request) => {
 await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
 const { port } = server.address();
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const addon = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libfx.node"));
+const addon = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/lib/libx1.node"));
 const timeout = (label, ms = 5000) => new Promise((_, reject) => {
   setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), ms);
 });
@@ -19,7 +19,7 @@ try {
   let aborted = false;
   let fetchStartedResolve;
   const fetchStarted = new Promise((resolveStarted) => { fetchStartedResolve = resolveStarted; });
-  const agent = await createFxAgent({
+  const agent = await createX1Agent({
     nativeAddon: addon,
     backend: "native",
     fetch(input, init) {
@@ -28,9 +28,9 @@ try {
       return fetch(input, init);
     },
     env: {
-      AI_GATEWAY_API_KEY: "native-core-cancel-key",
-      FX_GATEWAY_CHAT_URL: `http://127.0.0.1:${port}/stall`,
-      FX_MODEL: "native/test-model",
+      X1_API_KEY: "native-core-cancel-key",
+      X1_GATEWAY_CHAT_URL: `http://127.0.0.1:${port}/stall`,
+      X1_MODEL: "native/test-model",
     },
   });
   const session = await agent.createSession();

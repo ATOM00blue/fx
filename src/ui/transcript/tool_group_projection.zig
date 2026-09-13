@@ -4,10 +4,15 @@ const transcript_blocks = @import("../render_engine/transcript_blocks.zig");
 const types = @import("../../core/shared/types.zig");
 const display_width = @import("../../core/shared/display_width.zig");
 const sort_utils = @import("../../core/shared/sort_utils.zig");
+const ui_render = @import("../render.zig");
+const user_message_card = @import("../assistant/user_message_card.zig");
+const vt_emulator = @import("../../core/terminal/engine.zig");
 
 const TranscriptEntry = transcript_blocks.TranscriptEntry;
 const ToolDetailRecord = transcript_blocks.ToolDetailRecord;
-const cancellation_follow_up = " · What can fx do differently?";
+const GroupMarkerKind = transcript_blocks.GroupMarkerKind;
+const cancellation_follow_up = " · What can x1 do differently?";
+pub const marker_blink_sgr = "\x1b[5m";
 
 pub const Projection = struct {
     entry_actions: std.ArrayList(transcript_blocks.EntryRenderAction) = .empty,
@@ -26,6 +31,7 @@ pub const Projection = struct {
         entry_index: usize,
         kind: transcript_blocks.TranscriptBlockKind,
         bytes: []u8,
+        group_marker: GroupMarkerKind,
     ) !void {
         errdefer alloc.free(bytes);
         try self.owned_overrides.append(alloc, .{
@@ -35,6 +41,7 @@ pub const Projection = struct {
         self.entry_actions.items[entry_index] = .{ .override = .{
             .kind = kind,
             .bytes = bytes,
+            .group_marker = group_marker,
         } };
     }
 
@@ -43,6 +50,7 @@ pub const Projection = struct {
         alloc: std.mem.Allocator,
         kind: transcript_blocks.TranscriptBlockKind,
         bytes: []u8,
+        group_marker: GroupMarkerKind,
     ) !void {
         const entry_index = self.entry_actions.items.len;
         errdefer alloc.free(bytes);
@@ -54,6 +62,7 @@ pub const Projection = struct {
         self.entry_actions.appendAssumeCapacity(.{ .override = .{
             .kind = kind,
             .bytes = bytes,
+            .group_marker = group_marker,
         } });
     }
 
@@ -109,9 +118,23 @@ const OwnedOverride = struct {
 
 pub const SummaryStyle = struct {
     marker_style: []const u8 = "",
+    success_marker_style: []const u8 = "",
+    failure_marker_style: []const u8 = "",
     text_style: []const u8 = "",
     reset_style: []const u8 = "",
+    blink_style: []const u8 = "",
 };
+
+pub fn liveTranscriptStyle() SummaryStyle {
+    return .{
+        .marker_style = user_message_card.promptMarkerStyle(),
+        .success_marker_style = ui_render.diff_added_marker_style,
+        .failure_marker_style = ui_render.diff_removed_marker_style,
+        .text_style = ui_render.statusline_style,
+        .reset_style = ui_render.reset_style,
+        .blink_style = marker_blink_sgr,
+    };
+}
 
 const BuildStats = struct {
     detail_lookups: usize = 0,
@@ -134,6 +157,7 @@ const command_category_index = 5;
 const Summary = struct {
     total: usize = 0,
     categories: [category_labels.len]usize = @splat(0),
+    running: usize = 0,
     failed: usize = 0,
     timed_out: usize = 0,
     denied: usize = 0,
@@ -226,6 +250,13 @@ fn isAttachedEntry(entry: TranscriptEntry) bool {
     };
 }
 
+fn isDiffBlock(entry: TranscriptEntry) bool {
+    return switch (entry) {
+        .raw_bytes => |raw| raw.class == .diff_block,
+        else => false,
+    };
+}
+
 fn isTransparentCompactEntry(entry: TranscriptEntry) bool {
     if (!transcript_blocks.isEntryVisibleInCompactPresentation(entry)) return true;
     return switch (entry) {
@@ -251,7 +282,10 @@ fn commandProcessTimedOut(record: *const ToolDetailRecord) bool {
 
 fn observeTool(summary: *Summary, detail: ?*const ToolDetailRecord) void {
     summary.total += 1;
-    const record = detail orelse return;
+    const record = detail orelse {
+        summary.running += 1;
+        return;
+    };
     if (record.activity_kind) |kind| {
         if (categoryIndex(kind)) |index| summary.categories[index] += 1;
     }
@@ -282,7 +316,38 @@ fn observeTool(summary: *Summary, detail: ?*const ToolDetailRecord) void {
             .cancelled => summary.cancelled += 1,
             .deferred => summary.deferred += 1,
         }
+    } else {
+        summary.running += 1;
     }
+}
+
+fn hasUnsuccessful(summary: Summary) bool {
+    return summary.failed != 0 or
+        summary.timed_out != 0 or
+        summary.denied != 0 or
+        summary.cancelled != 0 or
+        summary.deferred != 0 or
+        summary.completion_unreported != 0 or
+        summary.not_executed != 0;
+}
+
+fn groupMarkerKind(summary: Summary) GroupMarkerKind {
+    if (hasUnsuccessful(summary)) return .failure;
+    if (summary.running != 0) return .running;
+    if (summary.total == 0) return .none;
+    return .success;
+}
+
+fn markerStyleForKind(kind: GroupMarkerKind, style: SummaryStyle) []const u8 {
+    return switch (kind) {
+        .none, .running => style.marker_style,
+        .success => preferredMarkerStyle(style.success_marker_style, style.marker_style),
+        .failure => preferredMarkerStyle(style.failure_marker_style, style.marker_style),
+    };
+}
+
+fn preferredMarkerStyle(preferred: []const u8, fallback: []const u8) []const u8 {
+    return if (preferred.len != 0) preferred else fallback;
 }
 
 fn appendSegment(writer: *std.Io.Writer, count: usize, label: []const u8) !void {
@@ -357,8 +422,12 @@ fn applySummaryStyle(
     alloc: std.mem.Allocator,
     text: []const u8,
     style: SummaryStyle,
+    kind: GroupMarkerKind,
 ) ![]u8 {
-    if (style.marker_style.len == 0 and
+    const marker_style = markerStyleForKind(kind, style);
+    const blink = kind == .running and style.blink_style.len != 0;
+    if (marker_style.len == 0 and
+        !blink and
         style.text_style.len == 0 and
         style.reset_style.len == 0)
     {
@@ -373,7 +442,8 @@ fn applySummaryStyle(
 
     var out: std.Io.Writer.Allocating = .init(alloc);
     errdefer out.deinit();
-    try out.writer.writeAll(style.marker_style);
+    if (blink) try out.writer.writeAll(style.blink_style);
+    try out.writer.writeAll(marker_style);
     try out.writer.writeAll(marker);
     try out.writer.writeAll(style.reset_style);
     if (content_start < text.len) {
@@ -427,7 +497,7 @@ fn formatGroupHeader(
     defer alloc.free(plain);
     const clipped = try clipSummary(alloc, plain, cols);
     defer alloc.free(clipped);
-    return applySummaryStyle(alloc, clipped, style);
+    return applySummaryStyle(alloc, clipped, style, groupMarkerKind(summary));
 }
 
 fn formatGroupBlock(
@@ -549,7 +619,13 @@ fn installExpandedGroup(
             try std.fmt.allocPrint(alloc, "{s}\n{s}", .{ header, child })
         else
             try alloc.dupe(u8, child);
-        try projection.setOwnedOverride(alloc, status_index, .tool_status, bytes);
+        try projection.setOwnedOverride(
+            alloc,
+            status_index,
+            .tool_status,
+            bytes,
+            if (child_index == 0) groupMarkerKind(summary) else .none,
+        );
     }
 }
 
@@ -631,6 +707,8 @@ fn hideAttachedRows(
     var index = status_index + 1;
     while (index < entries.len) : (index += 1) {
         if (toolStatusEntryId(entries[index]) != null) break;
+        // File diff previews stay visible so edits show their changed rows.
+        if (isDiffBlock(entries[index])) break;
         if (isAttachedEntry(entries[index])) {
             entry_actions[index] = .hide;
             continue;
@@ -723,8 +801,14 @@ pub fn materializeExpandedRelationshipsRangeInterruptible(
                     override.bytes,
                     cols,
                     style,
+                    override.group_marker,
                 );
-                try projection.appendOwnedOverride(alloc, override.kind, bytes);
+                try projection.appendOwnedOverride(
+                    alloc,
+                    override.kind,
+                    bytes,
+                    override.group_marker,
+                );
             },
         }
     }
@@ -736,6 +820,7 @@ fn materializeExpandedOverride(
     bytes: []const u8,
     cols: u16,
     style: SummaryStyle,
+    group_marker: GroupMarkerKind,
 ) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);
     errdefer out.deinit();
@@ -747,7 +832,7 @@ fn materializeExpandedOverride(
         const clipped = try clipSummary(alloc, line, cols);
         defer alloc.free(clipped);
         if (std.mem.startsWith(u8, line, "●")) {
-            const styled = try applySummaryStyle(alloc, clipped, style);
+            const styled = try applySummaryStyle(alloc, clipped, style, group_marker);
             defer alloc.free(styled);
             try out.writer.writeAll(styled);
         } else {
@@ -998,7 +1083,13 @@ fn buildWithStyleAndStats(
                 style,
                 styles,
             );
-            try projection.setOwnedOverride(alloc, index, .tool_status, bytes);
+            try projection.setOwnedOverride(
+                alloc,
+                index,
+                .tool_status,
+                bytes,
+                groupMarkerKind(group.summary),
+            );
             index += 1;
             continue;
         }
@@ -1026,6 +1117,9 @@ fn buildWithStyleAndStats(
                 continue;
             }
             if (isAttachedEntry(entries[index])) {
+                // A diff preview ends the group so it renders directly under
+                // the file status it belongs to.
+                if (isDiffBlock(entries[index])) break;
                 projection.entry_actions.items[index] = .hide;
                 continue;
             }
@@ -1044,7 +1138,13 @@ fn buildWithStyleAndStats(
             style,
             styles,
         );
-        try projection.setOwnedOverride(alloc, first_index, .tool_status, bytes);
+        try projection.setOwnedOverride(
+            alloc,
+            first_index,
+            .tool_status,
+            bytes,
+            groupMarkerKind(summary),
+        );
     }
 
     return projection;
@@ -1293,7 +1393,7 @@ test "tool-heavy groups render every canonical action" {
 test "minimal tool group keeps cancellation in the header and child row" {
     const alloc = std.testing.allocator;
     const entries = [_]TranscriptEntry{
-        .{ .raw_bytes = .{ .id = 1, .bytes = "■ Cancelled sleep 30 · What can fx do differently?", .class = .tool_status } },
+        .{ .raw_bytes = .{ .id = 1, .bytes = "■ Cancelled sleep 30 · What can x1 do differently?", .class = .tool_status } },
     };
     const details = [_]ToolDetailRecord{
         .{ .entry_id = 1, .tool_name = @constCast("run_command"), .activity_kind = .command, .outcome = .cancelled },
@@ -1305,7 +1405,7 @@ test "minimal tool group keeps cancellation in the header and child row" {
     try std.testing.expectEqualStrings(
         "● 1 tool call · 1 command · 1 cancelled\n" ++
             "└ Cancelled sleep 30\n\n" ++
-            "■ Cancelled sleep 30 · What can fx do differently?",
+            "■ Cancelled sleep 30 · What can x1 do differently?",
         projection.entry_actions.items[0].override.bytes,
     );
 }
@@ -1387,7 +1487,7 @@ test "cancelled actions remain inside the message-delimited block" {
     try std.testing.expect(projection.entry_actions.items[3] == .hide);
 }
 
-test "assistant prose splits tool groups and attached rows stay inside their group" {
+test "assistant prose splits tool groups and diff previews stay visible" {
     const alloc = std.testing.allocator;
     var entries = [_]TranscriptEntry{
         .{ .raw_bytes = .{ .id = 1, .bytes = "command", .class = .tool_status } },
@@ -1408,7 +1508,7 @@ test "assistant prose splits tool groups and attached rows stay inside their gro
 
     try std.testing.expect(projection.entry_actions.items[0] == .override);
     try std.testing.expect(projection.entry_actions.items[1] == .hide);
-    try std.testing.expect(projection.entry_actions.items[2] == .hide);
+    try std.testing.expect(projection.entry_actions.items[2] == .keep);
     try std.testing.expect(projection.entry_actions.items[3] == .keep);
     try std.testing.expect(projection.entry_actions.items[4] == .override);
 }
@@ -1508,6 +1608,49 @@ test "different presentation groups remain separate within one turn" {
     try std.testing.expectEqualStrings(
         "● 1 tool call · 1 read\n└ Read second",
         projection.entry_actions.items[1].override.bytes,
+    );
+}
+
+test "consecutive completed compact groups keep one blank row" {
+    const alloc = std.testing.allocator;
+    const entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "● Read first", .class = .tool_status } },
+        .{ .raw_bytes = .{ .id = 2, .bytes = "● Read second", .class = .tool_status } },
+    };
+    const details = [_]ToolDetailRecord{
+        .{
+            .entry_id = 1,
+            .tool_name = @constCast("read_file"),
+            .activity_kind = .read,
+            .outcome = .completed,
+            .lifecycle_id = .{ .turn_id = 7, .call_id = @constCast("first") },
+            .presentation_group_id = .{ .turn_id = 7, .anchor_step_id = 11 },
+        },
+        .{
+            .entry_id = 2,
+            .tool_name = @constCast("read_file"),
+            .activity_kind = .read,
+            .outcome = .completed,
+            .lifecycle_id = .{ .turn_id = 7, .call_id = @constCast("second") },
+            .presentation_group_id = .{ .turn_id = 7, .anchor_step_id = 12 },
+        },
+    };
+
+    var projection = try build(alloc, &entries, &details, 120);
+    defer projection.deinit(alloc);
+
+    const rendered = try transcript_blocks.renderEntriesWithProjectionToBytes(
+        alloc,
+        &entries,
+        120,
+        .{},
+        projection.entry_actions.items,
+    );
+    defer alloc.free(rendered);
+
+    try std.testing.expectEqualStrings(
+        "● 1 tool call · 1 read\n└ Read first\n\n● 1 tool call · 1 read\n└ Read second",
+        rendered,
     );
 }
 
@@ -1687,7 +1830,7 @@ test "visible assistant messages split groups while silent entries do not" {
     }
 }
 
-test "message-delimited groups hide attached detail across compact-only entries" {
+test "message-delimited groups keep diff previews visible across compact-only entries" {
     const alloc = std.testing.allocator;
     var entries = [_]TranscriptEntry{
         .{ .raw_bytes = .{ .id = 1, .bytes = "command", .class = .tool_status } },
@@ -1714,9 +1857,34 @@ test "message-delimited groups hide attached detail across compact-only entries"
 
     try std.testing.expect(projection.entry_actions.items[0] == .override);
     try std.testing.expect(projection.entry_actions.items[1] == .keep);
-    try std.testing.expect(projection.entry_actions.items[2] == .hide);
+    try std.testing.expect(projection.entry_actions.items[2] == .keep);
     try std.testing.expect(projection.entry_actions.items[3] == .keep);
     try std.testing.expect(projection.entry_actions.items[4] == .override);
+}
+
+test "edit status keeps its diff preview visible and splits the next group" {
+    const alloc = std.testing.allocator;
+    const entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "● Edited README.md +2", .class = .tool_status } },
+        .{ .raw_bytes = .{
+            .id = 2,
+            .bytes = "\x1b[38;5;245m  │ 2   context\x1b[0m\n" ++
+                "\x1b[38;5;77m  │ 3 + added row\x1b[0m\n",
+            .class = .diff_block,
+        } },
+        .{ .raw_bytes = .{ .id = 3, .bytes = "● Read main.zig", .class = .tool_status } },
+    };
+    const details = [_]ToolDetailRecord{
+        .{ .entry_id = 1, .tool_name = @constCast("edit_file"), .activity_kind = .edit, .outcome = .completed },
+        .{ .entry_id = 3, .tool_name = @constCast("read_file"), .activity_kind = .read, .outcome = .completed },
+    };
+
+    var projection = try build(alloc, &entries, &details, 120);
+    defer projection.deinit(alloc);
+
+    try std.testing.expect(projection.entry_actions.items[0] == .override);
+    try std.testing.expect(projection.entry_actions.items[1] == .keep);
+    try std.testing.expect(projection.entry_actions.items[2] == .override);
 }
 
 test "ask activity remains outside tool groups" {
@@ -1852,6 +2020,67 @@ test "styled minimal summary preserves the clipped width" {
         try std.testing.expect(display_width.visibleWidthIgnoringAnsi(line) <= 2);
     }
     try std.testing.expectEqual(@as(usize, 2), line_count);
+}
+
+test "group marker color follows running success and failure" {
+    const alloc = std.testing.allocator;
+    const style = SummaryStyle{
+        .marker_style = "<white>",
+        .success_marker_style = "<green>",
+        .failure_marker_style = "<red>",
+        .text_style = "",
+        .reset_style = "<reset>",
+        .blink_style = "<blink>",
+    };
+
+    var running_summary = Summary{ .total = 1, .running = 1 };
+    running_summary.categories[categoryIndex(.read).?] = 1;
+    const running = try formatGroupHeader(alloc, running_summary, 80, style);
+    defer alloc.free(running);
+    try std.testing.expect(std.mem.startsWith(u8, running, "<blink><white>●<reset> 1 tool call · 1 read"));
+
+    var success_summary = Summary{ .total = 1 };
+    success_summary.categories[categoryIndex(.read).?] = 1;
+    const success = try formatGroupHeader(alloc, success_summary, 80, style);
+    defer alloc.free(success);
+    try std.testing.expect(std.mem.startsWith(u8, success, "<green>●<reset> 1 tool call · 1 read"));
+    try std.testing.expect(std.mem.find(u8, success, "<blink>") == null);
+
+    var failed_summary = Summary{ .total = 1, .failed = 1 };
+    failed_summary.categories[categoryIndex(.read).?] = 1;
+    const failed = try formatGroupHeader(alloc, failed_summary, 80, style);
+    defer alloc.free(failed);
+    try std.testing.expect(std.mem.startsWith(u8, failed, "<red>●<reset> 1 tool call · 1 read · 1 failed"));
+    try std.testing.expect(std.mem.find(u8, failed, "<blink>") == null);
+
+    var mixed_summary = Summary{ .total = 2, .running = 1 };
+    mixed_summary.categories[categoryIndex(.read).?] = 2;
+    const mixed = try formatGroupHeader(alloc, mixed_summary, 80, style);
+    defer alloc.free(mixed);
+    try std.testing.expect(std.mem.startsWith(u8, mixed, "<blink><white>●<reset> 2 tool calls · 2 read"));
+
+    var failed_while_running = Summary{ .total = 2, .running = 1, .failed = 1 };
+    failed_while_running.categories[categoryIndex(.command).?] = 2;
+    const failed_mixed = try formatGroupHeader(alloc, failed_while_running, 80, style);
+    defer alloc.free(failed_mixed);
+    try std.testing.expect(std.mem.startsWith(u8, failed_mixed, "<red>●<reset> 2 tool calls · 2 commands · 1 failed"));
+    try std.testing.expect(std.mem.find(u8, failed_mixed, "<blink>") == null);
+}
+
+test "format group header prints direct summary styles" {
+    const alloc = std.testing.allocator;
+    const style = SummaryStyle{
+        .marker_style = "<white>",
+        .success_marker_style = "<green>",
+        .failure_marker_style = "<red>",
+        .text_style = "",
+        .reset_style = "<reset>",
+    };
+    var summary = Summary{ .total = 1 };
+    summary.categories[0] = 1;
+    const bytes = try formatGroupHeader(alloc, summary, 80, style);
+    defer alloc.free(bytes);
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "<green>●<reset> 1 tool call · 1 read"));
 }
 
 test "expanded tool title stays primary while the group summary stays secondary" {
@@ -2035,4 +2264,230 @@ test "many presentation groups perform a bounded number of indexed detail lookup
     try std.testing.expect(projection.entry_actions.items[0] == .override);
     try std.testing.expect(projection.entry_actions.items[tool_count - 1] == .override);
     try std.testing.expect(stats.detail_lookups <= tool_count * 4);
+}
+
+const inspect_style = SummaryStyle{
+    .marker_style = "\x1b[38;5;255m",
+    .success_marker_style = "\x1b[38;5;71m",
+    .failure_marker_style = "\x1b[38;5;167m",
+    .text_style = "\x1b[38;5;245m",
+    .reset_style = "\x1b[0m",
+    .blink_style = marker_blink_sgr,
+};
+
+fn expectHeaderMarker(
+    bytes: []const u8,
+    kind: GroupMarkerKind,
+) !void {
+    const marker = "●";
+    const blink = marker_blink_sgr;
+    switch (kind) {
+        .running => {
+            try std.testing.expect(std.mem.startsWith(u8, bytes, blink));
+            try std.testing.expect(std.mem.find(u8, bytes[blink.len..], inspect_style.marker_style) != null);
+            try std.testing.expect(std.mem.find(u8, bytes[blink.len..], marker) != null);
+        },
+        .success => {
+            try std.testing.expect(std.mem.find(u8, bytes, blink) == null);
+            try std.testing.expect(std.mem.startsWith(u8, bytes, inspect_style.success_marker_style));
+            try std.testing.expect(std.mem.find(u8, bytes, marker) != null);
+        },
+        .failure => {
+            try std.testing.expect(std.mem.find(u8, bytes, blink) == null);
+            try std.testing.expect(std.mem.startsWith(u8, bytes, inspect_style.failure_marker_style));
+            try std.testing.expect(std.mem.find(u8, bytes, marker) != null);
+        },
+        .none => return error.TestUnexpectedResult,
+    }
+}
+
+fn firstHeaderLine(bytes: []const u8) []const u8 {
+    if (std.mem.indexOfScalar(u8, bytes, '\n')) |index| return bytes[0..index];
+    return bytes;
+}
+
+fn feedHeaderDot(bytes: []const u8) !vt_emulator.Cell {
+    var grid = try vt_emulator.Grid.init(std.testing.allocator, 80, 1);
+    defer grid.deinit();
+    try grid.feed(firstHeaderLine(bytes));
+    return grid.cellAt(1, 1) orelse return error.TestUnexpectedResult;
+}
+
+test "compact and expanded group markers use tool state for color and blink" {
+    const alloc = std.testing.allocator;
+    const style = inspect_style;
+
+    const running_entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "● Read past-tense.zig\n", .class = .tool_status } },
+    };
+    const running_details = [_]ToolDetailRecord{
+        .{ .entry_id = 1, .tool_name = @constCast("read_file"), .activity_kind = .read, .outcome = null },
+    };
+    var running = try buildStyled(alloc, &running_entries, &running_details, 80, style, .{});
+    defer running.deinit(alloc);
+    try expectHeaderMarker(running.entry_actions.items[0].override.bytes, .running);
+    const running_cell = try feedHeaderDot(running.entry_actions.items[0].override.bytes);
+    try std.testing.expect(running_cell.style.flags.blink);
+    try std.testing.expect(running_cell.style.fg.eql(.{ .indexed = 255 }));
+
+    const success_entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "● Reading still-ing.zig\n", .class = .tool_status } },
+        .{ .raw_bytes = .{ .id = 2, .bytes = "● Listed .\n", .class = .tool_status } },
+    };
+    const success_details = [_]ToolDetailRecord{
+        .{ .entry_id = 1, .tool_name = @constCast("read_file"), .activity_kind = .read, .outcome = .completed },
+        .{ .entry_id = 2, .tool_name = @constCast("list_files"), .activity_kind = .list, .outcome = .completed },
+    };
+    var success = try buildStyled(alloc, &success_entries, &success_details, 80, style, .{});
+    defer success.deinit(alloc);
+    try expectHeaderMarker(success.entry_actions.items[0].override.bytes, .success);
+    const success_cell = try feedHeaderDot(success.entry_actions.items[0].override.bytes);
+    try std.testing.expect(!success_cell.style.flags.blink);
+    try std.testing.expect(success_cell.style.fg.eql(.{ .indexed = 71 }));
+
+    const mixed_entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "● Read ok.zig\n", .class = .tool_status } },
+        .{ .raw_bytes = .{ .id = 2, .bytes = "● Ran zig test\n", .class = .tool_status } },
+    };
+    const mixed_details = [_]ToolDetailRecord{
+        .{ .entry_id = 1, .tool_name = @constCast("read_file"), .activity_kind = .read, .outcome = .completed },
+        .{
+            .entry_id = 2,
+            .tool_name = @constCast("run_command"),
+            .activity_kind = .command,
+            .outcome = .completed,
+            .command_process_presentation = .{ .exit_code = 1 },
+        },
+    };
+    var mixed = try buildStyled(alloc, &mixed_entries, &mixed_details, 80, style, .{});
+    defer mixed.deinit(alloc);
+    try expectHeaderMarker(mixed.entry_actions.items[0].override.bytes, .failure);
+
+    const cancelled_entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "■ Cancelled sleep 30 · What can x1 do differently?", .class = .tool_status } },
+    };
+    const cancelled_details = [_]ToolDetailRecord{
+        .{ .entry_id = 1, .tool_name = @constCast("run_command"), .activity_kind = .command, .outcome = .cancelled },
+    };
+    var cancelled = try buildStyled(alloc, &cancelled_entries, &cancelled_details, 80, style, .{});
+    defer cancelled.deinit(alloc);
+    try expectHeaderMarker(cancelled.entry_actions.items[0].override.bytes, .failure);
+    const cancelled_cell = try feedHeaderDot(cancelled.entry_actions.items[0].override.bytes);
+    try std.testing.expect(!cancelled_cell.style.flags.blink);
+    try std.testing.expect(cancelled_cell.style.fg.eql(.{ .indexed = 167 }));
+
+    const resumed_entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "● Running leftover.zig\n", .class = .tool_status } },
+    };
+    const resumed_details = [_]ToolDetailRecord{
+        .{
+            .entry_id = 1,
+            .tool_name = @constCast("read_file"),
+            .activity_kind = .read,
+            .outcome = .completed,
+            .lifecycle_id = .{ .turn_id = 3, .call_id = @constCast("resumed") },
+            .presentation_group_id = .{ .turn_id = 3, .anchor_step_id = 1 },
+        },
+    };
+    var resumed = try buildStyled(alloc, &resumed_entries, &resumed_details, 80, style, .{});
+    defer resumed.deinit(alloc);
+    try expectHeaderMarker(resumed.entry_actions.items[0].override.bytes, .success);
+
+    var relationships = try buildExpandedRelationshipsInterruptible(
+        alloc,
+        &success_entries,
+        &success_details,
+        null,
+    );
+    defer relationships.deinit(alloc);
+    try std.testing.expectEqual(
+        GroupMarkerKind.success,
+        relationships.entry_actions.items[0].override.group_marker,
+    );
+    var expanded = try materializeExpandedRelationshipsRangeInterruptible(
+        alloc,
+        &relationships,
+        0,
+        80,
+        style,
+        null,
+    );
+    defer expanded.deinit(alloc);
+    try expectHeaderMarker(expanded.entry_actions.items[0].override.bytes, .success);
+
+    var narrow = try materializeExpandedRelationshipsRangeInterruptible(
+        alloc,
+        &relationships,
+        0,
+        12,
+        style,
+        null,
+    );
+    defer narrow.deinit(alloc);
+    try expectHeaderMarker(narrow.entry_actions.items[0].override.bytes, .success);
+    var narrow_lines = std.mem.splitScalar(u8, narrow.entry_actions.items[0].override.bytes, '\n');
+    while (narrow_lines.next()) |line| {
+        try std.testing.expect(display_width.visibleWidthIgnoringAnsi(line) <= 12);
+    }
+
+    const one_tool_entries = [_]TranscriptEntry{
+        .{ .raw_bytes = .{ .id = 1, .bytes = "● Read solo.zig\n", .class = .tool_status } },
+    };
+    const one_tool_details = [_]ToolDetailRecord{
+        .{ .entry_id = 1, .tool_name = @constCast("read_file"), .activity_kind = .read, .outcome = .completed },
+    };
+    var one_tool = try buildStyled(alloc, &one_tool_entries, &one_tool_details, 80, style, .{});
+    defer one_tool.deinit(alloc);
+    try expectHeaderMarker(one_tool.entry_actions.items[0].override.bytes, .success);
+}
+
+test "unsuccessful tool outcomes paint a static red group marker" {
+    const alloc = std.testing.allocator;
+    const style = inspect_style;
+    const cases = [_]Summary{
+        .{ .total = 1, .failed = 1 },
+        .{ .total = 1, .timed_out = 1 },
+        .{ .total = 1, .denied = 1 },
+        .{ .total = 1, .cancelled = 1 },
+        .{ .total = 1, .deferred = 1 },
+        .{ .total = 1, .completion_unreported = 1 },
+        .{ .total = 1, .not_executed = 1 },
+    };
+    for (cases) |summary| {
+        var counted = summary;
+        counted.categories[0] = 1;
+        const header = try formatGroupHeader(alloc, counted, 80, style);
+        defer alloc.free(header);
+        try expectHeaderMarker(header, .failure);
+        const cell = try feedHeaderDot(header);
+        try std.testing.expect(!cell.style.flags.blink);
+        try std.testing.expect(cell.style.fg.eql(.{ .indexed = 167 }));
+    }
+}
+
+test "live transcript style follows theme for running markers and keeps success green" {
+    const alloc = std.testing.allocator;
+    defer user_message_card.setStyle(false, null);
+    user_message_card.setStyle(false, null);
+    const dark = liveTranscriptStyle();
+    var running_summary = Summary{ .total = 1, .running = 1 };
+    running_summary.categories[0] = 1;
+    const dark_running = try formatGroupHeader(alloc, running_summary, 80, dark);
+    defer alloc.free(dark_running);
+    try std.testing.expect(std.mem.startsWith(u8, dark_running, marker_blink_sgr));
+    try std.testing.expect(std.mem.find(u8, dark_running, user_message_card.promptMarkerStyle()) != null);
+
+    user_message_card.setStyle(true, null);
+    const light = liveTranscriptStyle();
+    const light_running = try formatGroupHeader(alloc, running_summary, 80, light);
+    defer alloc.free(light_running);
+    try std.testing.expect(std.mem.startsWith(u8, light_running, marker_blink_sgr));
+    try std.testing.expect(!std.mem.eql(u8, dark_running, light_running));
+
+    var success_summary = Summary{ .total = 1 };
+    success_summary.categories[0] = 1;
+    const light_success = try formatGroupHeader(alloc, success_summary, 80, light);
+    defer alloc.free(light_success);
+    try std.testing.expect(std.mem.find(u8, light_success, marker_blink_sgr) == null);
+    try std.testing.expect(std.mem.startsWith(u8, light_success, ui_render.diff_added_marker_style));
 }

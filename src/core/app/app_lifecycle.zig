@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const io_mod = @import("../shared/io.zig");
 const agent_steps = @import("../config/agent_steps.zig");
 const config_runtime = @import("../config/config_runtime.zig");
@@ -29,6 +30,11 @@ const CursorPosition = shell_runtime.CursorPosition;
 const TerminalState = shell_runtime.TerminalState;
 const TranscriptRuntime = transcript_runtime.TranscriptRuntime;
 pub const ResizeHandler = shell_runtime.ResizeHandler;
+/// Shared Windows console-control handler (empty struct on other
+/// platforms). Re-exported so headless CLI layers can arm CTRL_C
+/// cancellation through the same registration the interactive
+/// abnormal-exit path uses.
+pub const windows_console_control = shell_runtime.console_control;
 pub const default_permission_mode = config_runtime.default_permission_mode;
 
 /// Compile-time terminal restoration for one async-signal-safe `write(2)` call.
@@ -76,9 +82,17 @@ fn tmuxAbnormalExitHandler(sig: std.posix.SIG) callconv(.c) void {
 }
 
 /// Install handlers for SIGTERM and SIGHUP so an externally-terminated
-/// fx restores terminal state before dying. SIGINT is not included
-/// because raw mode disables terminal-generated SIGINT.
+/// x1 restores terminal state before dying. SIGINT is not included
+/// because raw mode disables terminal-generated SIGINT. On Windows the
+/// same guarantee is provided by the shared console-control handler for
+/// CTRL_CLOSE, CTRL_BREAK, CTRL_LOGOFF, and CTRL_SHUTDOWN events.
 pub fn installAbnormalExitHandlers(tmux: ?[]const u8) void {
+    if (comptime builtin.os.tag == .windows) {
+        windows_console_control.setAbnormalExitRestore(
+            if (tmux == null) abnormal_exit_restore else tmux_abnormal_exit_restore,
+        );
+        return;
+    }
     if (!shell_runtime.supports_resize_signal) return;
 
     const handler: std.posix.Sigaction.handler_fn = if (tmux == null)
@@ -101,6 +115,10 @@ pub fn installAbnormalExitHandlers(tmux: ?[]const u8) void {
 }
 
 pub fn uninstallAbnormalExitHandlers() void {
+    if (comptime builtin.os.tag == .windows) {
+        windows_console_control.setAbnormalExitRestore(null);
+        return;
+    }
     if (!shell_runtime.supports_resize_signal) return;
 
     if (old_sigterm_action) |old| {
@@ -119,7 +137,7 @@ pub const StartupState = struct {
     credential: ?credentials.Credential = null,
     credential_onboarding_skipped: bool = false,
     stored_key_status: credentials.StoredKeyReadStatus = .not_attempted,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     selected_model: []u8 = &.{},
     configured_model: []u8 = &.{},
     model_source: config_runtime.ModelSource = .compiled_default,
@@ -212,7 +230,7 @@ pub const StartupState = struct {
 
 pub const StartupStatus = struct {
     workspace_root: []u8,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     selected_model: []const u8,
     owned_selected_model: ?[]u8 = null,
     auth: auth_runtime.StatusSnapshot = .{},
@@ -250,7 +268,7 @@ pub const BootstrapConfig = struct {
     default_agent_step_limit: usize,
     secret_store: host.SecretStore,
     resize_handler: ResizeHandler,
-    fx_version: []const u8 = "",
+    x1_version: []const u8 = "",
     record_requested: bool = false,
 };
 
@@ -422,8 +440,7 @@ fn loadStartupStateFromOwnedWorkspace(
     state.max_tool_result_bytes = tool_result_limits.resolveMaxToolResultBytes(settings.max_tool_result_bytes, tool_result_limits.default_max_tool_result_bytes);
     state.context_limits = config_runtime.resolveContextLimits(settings, &.{});
     state.context_enabled = settings.context orelse true;
-    state.fast_mode = settings.fast_mode orelse
-        (state.provider == .gateway and state.model_source == .compiled_default);
+    state.fast_mode = settings.fast_mode orelse false;
     state.fast_mode_source = detailed.sources.fast_mode;
     state.slash_menu_categories = settings.slash_menu_categories orelse true;
     state.auto_upgrade = settings.auto_upgrade orelse true;
@@ -480,7 +497,7 @@ pub fn bootstrapInteractiveApp(cfg: BootstrapConfig) !StartupState {
         state.workspace_root,
         cfg.shell.layout.cols,
         cfg.shell.layout.rows,
-        cfg.fx_version,
+        cfg.x1_version,
         cfg.record_requested,
     ) catch |err| {
         debug_trace.logf("record", "startup recording failed err={s}", .{@errorName(err)});
@@ -1092,7 +1109,7 @@ fn shutdownCleanupRow(shell: *const TranscriptRuntime) u16 {
 
 fn loadPermissionMode(configured: ?PermissionMode) PermissionMode {
     const fallback = configured orelse default_permission_mode;
-    const mode = io_mod.getenv("FX_PERMISSION_MODE") orelse return fallback;
+    const mode = io_mod.getenv("X1_PERMISSION_MODE") orelse return fallback;
     return config_runtime.parsePermissionMode(mode) orelse fallback;
 }
 
@@ -1100,7 +1117,7 @@ fn loadAgentStepLimit(fallback: usize, configured: ?usize) usize {
     return agent_steps.resolveMaxAgentStepsWithOverride(
         configured,
         fallback,
-        io_mod.getenv("FX_MAX_AGENT_STEPS"),
+        io_mod.getenv("X1_MAX_AGENT_STEPS"),
     );
 }
 
@@ -1108,47 +1125,23 @@ fn configuredProviderSelection(
     default_model: []const u8,
     settings: *const config_runtime.Settings,
 ) !model_provider.ProviderSelection {
-    const provider = settings.provider orelse .gateway;
-    const model = settings.models.get(provider) orelse switch (provider) {
-        .gateway => default_model,
-        .codex => return error.CodexModelNotSelected,
-        .grok => return error.GrokModelNotSelected,
-    };
+    const provider = settings.provider orelse .layerx1;
+    const model = settings.models.get(provider) orelse default_model;
     return .{ .provider = provider, .model = model };
 }
 
 fn initialModelId(default_model: []const u8, configured: ?[]const u8) []const u8 {
-    const model = io_mod.getenv("FX_MODEL") orelse return configured orelse default_model;
+    const model = io_mod.getenv("X1_MODEL") orelse return configured orelse default_model;
     const trimmed = std.mem.trim(u8, model, " \t\r\n");
     return if (trimmed.len > 0) trimmed else configured orelse default_model;
 }
 
-test "startup provider chooses only its provider-scoped model" {
-    var gateway_settings = config_runtime.Settings{ .provider = .gateway };
-    gateway_settings.models.values[@intFromEnum(model_provider.ProviderId.gateway)] = @constCast("gateway/model");
-    gateway_settings.models.values[@intFromEnum(model_provider.ProviderId.codex)] = @constCast("gpt-model");
-    const gateway = try configuredProviderSelection("default/model", &gateway_settings);
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, gateway.provider);
-    try std.testing.expectEqualStrings("gateway/model", gateway.model);
-
-    var codex_settings = config_runtime.Settings{ .provider = .codex };
-    codex_settings.models.values[@intFromEnum(model_provider.ProviderId.gateway)] = @constCast("gateway/model");
-    codex_settings.models.values[@intFromEnum(model_provider.ProviderId.codex)] = @constCast("gpt-model");
-    const codex = try configuredProviderSelection("default/model", &codex_settings);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, codex.provider);
-    try std.testing.expectEqualStrings("gpt-model", codex.model);
-
-    const missing_codex = config_runtime.Settings{ .provider = .codex };
-    try std.testing.expectError(
-        error.CodexModelNotSelected,
-        configuredProviderSelection("default/model", &missing_codex),
-    );
-
-    var grok_settings = config_runtime.Settings{ .provider = .grok };
-    grok_settings.models.values[@intFromEnum(model_provider.ProviderId.grok)] = @constCast("grok-model");
-    const grok = try configuredProviderSelection("default/model", &grok_settings);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, grok.provider);
-    try std.testing.expectEqualStrings("grok-model", grok.model);
+test "startup provider chooses the x1-scoped model" {
+    var settings = config_runtime.Settings{ .provider = .layerx1 };
+    settings.models.values[@intFromEnum(model_provider.ProviderId.layerx1)] = @constCast("x1/model");
+    const selected = try configuredProviderSelection("default/model", &settings);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, selected.provider);
+    try std.testing.expectEqualStrings("x1/model", selected.model);
 }
 
 fn loadInitialModel(alloc: Allocator, default_model: []const u8, configured: ?[]const u8) ![]u8 {
@@ -1156,7 +1149,7 @@ fn loadInitialModel(alloc: Allocator, default_model: []const u8, configured: ?[]
 }
 
 fn hasProcessModelOverride() bool {
-    const model = io_mod.getenv("FX_MODEL") orelse return false;
+    const model = io_mod.getenv("X1_MODEL") orelse return false;
     return std.mem.trim(u8, model, " \t\r\n").len > 0;
 }
 
@@ -1166,7 +1159,7 @@ fn loadStartupStatusModel(alloc: Allocator, default_model: []const u8, configure
 }
 
 fn credentialOnboardingDisabled() bool {
-    const value = io_mod.getenv("FX_SKIP_ONBOARDING") orelse return false;
+    const value = io_mod.getenv("X1_SKIP_ONBOARDING") orelse return false;
     const trimmed = std.mem.trim(u8, value, " \t\r\n");
     if (trimmed.len == 0) return false;
     return !std.mem.eql(u8, trimmed, "0") and !std.ascii.eqlIgnoreCase(trimmed, "false");
@@ -1175,7 +1168,7 @@ fn credentialOnboardingDisabled() bool {
 const SoundEnvLevel = enum { off, on, max };
 
 fn soundEnvOverride() ?SoundEnvLevel {
-    const value = io_mod.getenv("FX_SOUND") orelse return null;
+    const value = io_mod.getenv("X1_SOUND") orelse return null;
     const trimmed = std.mem.trim(u8, value, " \t\r\n");
     if (trimmed.len == 0) return null;
     if (std.ascii.eqlIgnoreCase(trimmed, "max")) return .max;
@@ -1253,7 +1246,7 @@ test "permission mode loader defaults to auto" {
 
 test "permission mode environment accepts yolo without changing fallback" {
     var env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "FX_PERMISSION_MODE", .value = "yolo" },
+        .{ .key = "X1_PERMISSION_MODE", .value = "yolo" },
     });
     defer env.deinit();
 
@@ -1988,10 +1981,9 @@ test "startup credential modes select a refresh policy, never a narrower source 
 
 test "loadStartupState applies core env overrides" {
     var env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "FX_MODEL", .value = "  env-model  " },
-        .{ .key = "AI_GATEWAY_API_KEY", .value = "gateway-key" },
-        .{ .key = "FX_PERMISSION_MODE", .value = "auto" },
-        .{ .key = "FX_MAX_AGENT_STEPS", .value = "37" },
+        .{ .key = "X1_MODEL", .value = "  env-model  " },
+        .{ .key = "X1_PERMISSION_MODE", .value = "auto" },
+        .{ .key = "X1_MAX_AGENT_STEPS", .value = "37" },
     });
     defer env.deinit();
 
@@ -2009,21 +2001,20 @@ test "loadStartupState applies core env overrides" {
     try std.testing.expectEqualStrings("default-model", state.configured_model);
     try std.testing.expectEqual(config_runtime.ModelSource.process_override, state.model_source);
     try std.testing.expect(!state.fast_mode);
-    try std.testing.expectEqualStrings("gateway-key", state.apiKey().?);
-    try std.testing.expectEqual(credentials.Source.ai_gateway_api_key, state.credential.?.source);
+    try std.testing.expect(state.apiKey() == null);
+    try std.testing.expect(state.credential == null);
     try std.testing.expectEqual(PermissionMode.auto, state.permission_mode);
     try std.testing.expectEqual(@as(usize, 37), state.agent_step_limit);
 }
 
-test "loadStartupState defaults fast mode on only for the compiled Gateway default and preserves explicit preferences" {
+test "loadStartupState keeps X1 fast mode explicit" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "absent");
     try tmp.dir.createDirPath(io_mod.getIo(), "configured");
     try tmp.dir.createDirPath(io_mod.getIo(), "disabled");
-    try tmp.dir.createDirPath(io_mod.getIo(), "codex");
 
     const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
     defer std.testing.allocator.free(home_root);
@@ -2033,16 +2024,14 @@ test "loadStartupState defaults fast mode on only for the compiled Gateway defau
     defer std.testing.allocator.free(configured_root);
     const disabled_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "disabled");
     defer std.testing.allocator.free(disabled_root);
-    const codex_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "codex");
-    defer std.testing.allocator.free(codex_root);
 
     const fixture = try std.fmt.allocPrint(
         std.testing.allocator,
-        "{{\"workspaces\":{{\"{s}\":{{\"model\":\"openai/gpt-5\"}},\"{s}\":{{\"fast_mode\":false}},\"{s}\":{{\"provider\":\"codex\",\"codex_model\":\"gpt-5.4-mini\"}}}}}}\n",
-        .{ configured_root, disabled_root, codex_root },
+        "{{\"workspaces\":{{\"{s}\":{{\"model\":\"openai/gpt-5\"}},\"{s}\":{{\"fast_mode\":false}}}}}}\n",
+        .{ configured_root, disabled_root },
     );
     defer std.testing.allocator.free(fixture);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", fixture);
+    try writeFixtureFile(tmp.dir, "home/.x1/settings.json", fixture);
 
     var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
     defer env.deinit();
@@ -2051,7 +2040,7 @@ test "loadStartupState defaults fast mode on only for the compiled Gateway defau
     defer absent.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("zai/glm-5.2", absent.selected_model);
     try std.testing.expectEqualStrings("zai/glm-5.2", absent.configured_model);
-    try std.testing.expect(absent.fast_mode);
+    try std.testing.expect(!absent.fast_mode);
 
     var configured = try loadStartupStateForWorkspace(std.testing.allocator, configured_root, "zai/glm-5.2", 25);
     defer configured.deinit(std.testing.allocator);
@@ -2062,19 +2051,13 @@ test "loadStartupState defaults fast mode on only for the compiled Gateway defau
     var disabled = try loadStartupStateForWorkspace(std.testing.allocator, disabled_root, "zai/glm-5.2", 25);
     defer disabled.deinit(std.testing.allocator);
     try std.testing.expect(!disabled.fast_mode);
-
-    var codex = try loadStartupStateForWorkspace(std.testing.allocator, codex_root, "zai/glm-5.2", 25);
-    defer codex.deinit(std.testing.allocator);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, codex.provider);
-    try std.testing.expectEqualStrings("gpt-5.4-mini", codex.selected_model);
-    try std.testing.expect(!codex.fast_mode);
 }
 
 test "loadStartupState resolves startup scrollback default and explicit false" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "absent");
     try tmp.dir.createDirPath(io_mod.getIo(), "disabled");
 
@@ -2091,7 +2074,7 @@ test "loadStartupState resolves startup scrollback default and explicit false" {
         .{disabled_root},
     );
     defer std.testing.allocator.free(fixture);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", fixture);
+    try writeFixtureFile(tmp.dir, "home/.x1/settings.json", fixture);
 
     var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
     defer env.deinit();
@@ -2109,7 +2092,7 @@ test "loadStartupState resolves slash menu categories default and explicit false
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
 
     const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
@@ -2124,7 +2107,7 @@ test "loadStartupState resolves slash menu categories default and explicit false
     defer initial.deinit(std.testing.allocator);
     try std.testing.expect(initial.slash_menu_categories);
 
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"slash_menu_categories\":false}\n");
+    try writeFixtureFile(tmp.dir, "home/.x1/settings.json", "{\"slash_menu_categories\":false}\n");
     var hidden = try loadStartupStateForWorkspace(std.testing.allocator, workspace_root, "default-model", 25);
     defer hidden.deinit(std.testing.allocator);
     try std.testing.expect(!hidden.slash_menu_categories);
@@ -2140,8 +2123,8 @@ test "loadStartupState resolves max_agent_steps default zero and positive values
     try tmp.dir.createDirPath(io_mod.getIo(), "absent");
     try tmp.dir.createDirPath(io_mod.getIo(), "zero");
     try tmp.dir.createDirPath(io_mod.getIo(), "positive");
-    try writeFixtureFile(tmp.dir, "zero/.fx.json", "{\"max_agent_steps\":0}");
-    try writeFixtureFile(tmp.dir, "positive/.fx.json", "{\"max_agent_steps\":50}");
+    try writeFixtureFile(tmp.dir, "zero/.x1.json", "{\"max_agent_steps\":0}");
+    try writeFixtureFile(tmp.dir, "positive/.x1.json", "{\"max_agent_steps\":50}");
 
     const absent_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "absent");
     defer std.testing.allocator.free(absent_root);
@@ -2172,7 +2155,7 @@ test "loadStartupState resolves max_tool_result_bytes default and explicit value
 
     try tmp.dir.createDirPath(io_mod.getIo(), "absent");
     try tmp.dir.createDirPath(io_mod.getIo(), "explicit");
-    try writeFixtureFile(tmp.dir, "explicit/.fx.json", "{\"max_tool_result_bytes\":131072}");
+    try writeFixtureFile(tmp.dir, "explicit/.x1.json", "{\"max_tool_result_bytes\":131072}");
 
     const absent_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "absent");
     defer std.testing.allocator.free(absent_root);
@@ -2196,7 +2179,7 @@ test "loadStartupState falls back to auto for invalid first_call_tool_choice" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"first_call_tool_choice\":\"required\"}");
+    try writeFixtureFile(tmp.dir, "workspace/.x1.json", "{\"first_call_tool_choice\":\"required\"}");
 
     const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
     defer std.testing.allocator.free(workspace_root);
@@ -2210,7 +2193,7 @@ test "loadStartupState falls back to auto for invalid first_call_tool_choice" {
 test "loadStartupState diagnoses the retired fuzzy skill setting" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
 
     const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
@@ -2218,7 +2201,7 @@ test "loadStartupState diagnoses the retired fuzzy skill setting" {
     const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
     defer std.testing.allocator.free(workspace_root);
 
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"skill_match_fuzzy\":true}");
+    try writeFixtureFile(tmp.dir, "home/.x1/settings.json", "{\"skill_match_fuzzy\":true}");
 
     var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
     defer env.deinit();
@@ -2231,8 +2214,8 @@ test "loadStartupState diagnoses the retired fuzzy skill setting" {
 
 test "credential onboarding can be skipped independently from Keychain" {
     var env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "FX_SKIP_ONBOARDING", .value = "1" },
-        .{ .key = "FX_DISABLE_KEYCHAIN", .value = "1" },
+        .{ .key = "X1_SKIP_ONBOARDING", .value = "1" },
+        .{ .key = "X1_DISABLE_KEYCHAIN", .value = "1" },
     });
     defer env.deinit();
 

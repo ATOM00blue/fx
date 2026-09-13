@@ -174,7 +174,7 @@ pub const EphemeralStore = struct {
         var writer_file = std.Io.Dir.createFileAbsolute(io_mod.getIo(), temp_path, .{
             .read = true,
             .exclusive = true,
-            .permissions = std.Io.File.Permissions.fromMode(0o600),
+            .permissions = io_mod.permissionsFromMode(0o600),
         }) catch |err| switch (err) {
             error.PathAlreadyExists => return error.ReplayNameCollision,
             else => return error.EphemeralReplayUnavailable,
@@ -821,7 +821,7 @@ fn randomReplayStem(alloc: Allocator) ![]u8 {
     const random_hex = std.fmt.bytesToHex(random, .lower);
     return std.fmt.allocPrint(
         alloc,
-        "fx-command-replay-{s}",
+        "x1-command-replay-{s}",
         .{&random_hex},
     );
 }
@@ -1398,7 +1398,7 @@ test "command replay capture spills without losing callback order" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -1501,7 +1501,7 @@ test "saved and ephemeral replay backings share collision handling" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -1519,7 +1519,7 @@ test "saved and ephemeral replay backings share collision handling" {
     );
     defer capability.deinit();
 
-    const stem = "fx-command-replay-fixed-collision";
+    const stem = "x1-command-replay-fixed-collision";
     var saved = try createSpoolWithStem(alloc, .{ .saved = &capability }, stem);
     defer {
         saved.file.deinit();
@@ -1828,7 +1828,7 @@ test "saved command replay pages and searches beyond eight mebibytes with bounde
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -1886,7 +1886,7 @@ test "command replay reader rejects descriptor and frame corruption" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -1907,7 +1907,7 @@ test "command replay reader rejects descriptor and frame corruption" {
     var malformed = try capability.createExclusiveFile(
         alloc,
         .command_artifacts,
-        "fx-command-replay-malformed.bin",
+        "x1-command-replay-malformed.bin",
     );
     defer malformed.deinit();
     try malformed.writeAll("not-a-replay");
@@ -1916,19 +1916,19 @@ test "command replay reader rejects descriptor and frame corruption" {
     try std.testing.expectError(
         error.InvalidReplayHeader,
         Reader.open(alloc, &capability, .{
-            .handle = "fx-command-replay-malformed.bin",
+            .handle = "x1-command-replay-malformed.bin",
             .framed_bytes = "not-a-replay".len,
         }),
     );
     try std.testing.expectError(
         error.ReplaySizeMismatch,
         Reader.open(alloc, &capability, .{
-            .handle = "fx-command-replay-malformed.bin",
+            .handle = "x1-command-replay-malformed.bin",
             .framed_bytes = 1,
         }),
     );
 
-    const empty_handle = "fx-command-replay-empty-frame.bin";
+    const empty_handle = "x1-command-replay-empty-frame.bin";
     var empty_replay = [_]u8{0} ** (replay_magic.len + frame_header_bytes);
     @memcpy(empty_replay[0..replay_magic.len], replay_magic);
     var empty_file = try capability.createExclusiveFile(
@@ -1971,7 +1971,7 @@ test "failed ephemeral replay reader construction leaves its backing reusable" {
     var store = EphemeralStore.initForTesting(alloc, temp_path);
     defer store.deinit();
 
-    var spool = try store.createSpoolWithStem(alloc, "fx-command-replay-invalid-header");
+    var spool = try store.createSpoolWithStem(alloc, "x1-command-replay-invalid-header");
     defer {
         spool.file.deinit();
         store.delete(spool.handle);
@@ -2004,7 +2004,7 @@ test "command replay cleanup removes tentative and retained spools exactly once"
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,

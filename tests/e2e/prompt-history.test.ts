@@ -36,9 +36,9 @@ function rejectedGatewayEnv(
   return {
     ...REJECTED_GATEWAY_AUTH,
     HOME: home,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: FAKE_GATEWAY_MODEL,
+    X1_GATEWAY_BASE_URL: gateway.baseUrl,
+    X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+    X1_MODEL: FAKE_GATEWAY_MODEL,
   };
 }
 
@@ -87,7 +87,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
   serialTest(
     "accepted prompts and slash commands survive restart",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-prompt-history-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-prompt-history-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -105,7 +105,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
           cwd: workspaceRoot,
           env: rejectedGatewayEnv(home, gateway),
         });
-        await session.waitForText("Run /help", TIMEOUT);
+        await session.waitForText("layerx1.com", TIMEOUT);
         await session.sendText("PLAN10_PROMPT_HISTORY_SENTINEL");
         await session.waitForText("HTTP 401", TIMEOUT);
         await session.sendText("/help");
@@ -116,7 +116,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
         await session.waitForSessionEnd(TIMEOUT);
         session = null;
 
-        const historyPath = join(home, ".fx", "history.jsonl");
+        const historyPath = join(home, ".x1", "history.jsonl");
         const history = readFileSync(historyPath, "utf8");
         expect(history).toContain("PLAN10_PROMPT_HISTORY_SENTINEL");
         expect(history).toContain("/help");
@@ -126,7 +126,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
           cwd: workspaceRoot,
           env: rejectedGatewayEnv(home, gateway),
         });
-        await session.waitForText("Run /help", TIMEOUT);
+        await session.waitForText("layerx1.com", TIMEOUT);
         await session.sendKeys("Up");
         let pane = await session.waitForPane(
           (current) => currentComposerLine(current).includes("/quit"),
@@ -157,7 +157,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
   serialTest(
     "read-only prompt-history bootstrap does not create state in an unwritable home",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-prompt-history-no-create-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-prompt-history-no-create-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -173,8 +173,8 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
               HOME: realpathSync(home),
             },
           });
-          await session.waitForText("Run /help", TIMEOUT);
-          expect(existsSync(join(home, ".fx"))).toBe(false);
+          await session.waitForText("layerx1.com", TIMEOUT);
+          expect(existsSync(join(home, ".x1"))).toBe(false);
         } finally {
           chmodSync(home, 0o700);
         }
@@ -188,7 +188,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
   serialTest(
     "recording can be disabled from settings",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-prompt-history-scope-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-prompt-history-scope-"));
       try {
         const home = join(root, "home");
         const workspaceA = join(root, "workspace-a");
@@ -211,7 +211,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
             cwd: realpathSync(workspace),
             env: rejectedGatewayEnv(home, gateway),
           });
-          await session.waitForText("Run /help", TIMEOUT);
+          await session.waitForText("layerx1.com", TIMEOUT);
           await session.sendText(prompt);
           await session.waitForText("HTTP 401", TIMEOUT);
           await session.sendText("/quit");
@@ -219,7 +219,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
           session = null;
         }
 
-        const historyPath = join(home, ".fx", "history.jsonl");
+        const historyPath = join(home, ".x1", "history.jsonl");
         expect(readFileSync(historyPath, "utf8")).toContain(
           "PLAN10_HISTORY_WORKSPACE_A",
         );
@@ -231,8 +231,8 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
           cwd: realpathSync(workspaceA),
           env: rejectedGatewayEnv(home, gateway),
         });
-        await session.waitForText("Run /help", TIMEOUT);
-        await disablePromptHistory(session, join(home, ".fx", "settings.json"));
+        await session.waitForText("layerx1.com", TIMEOUT);
+        await disablePromptHistory(session, join(home, ".x1", "settings.json"));
         await session.sendText("PLAN10_HISTORY_DISABLED");
         await session.waitForText("HTTP 401", TIMEOUT);
         await session.waitForPane(hasEmptyComposer, TIMEOUT);
@@ -300,12 +300,12 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
   serialTest(
     "startup scans beyond one mebibyte of newer interleaved workspace records",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-prompt-history-large-"));
+      const root = mkdtempSync(join(tmpdir(), "x1-prompt-history-large-"));
       try {
         const home = join(root, "home");
         const workspaceA = join(root, "workspace-a");
         const workspaceB = join(root, "workspace-b");
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        mkdirSync(join(home, ".x1"), { recursive: true, mode: 0o700 });
         mkdirSync(workspaceA);
         mkdirSync(workspaceB);
         const workspaceARoot = realpathSync(workspaceA);
@@ -330,11 +330,11 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
           }));
         }
         writeFileSync(
-          join(home, ".fx", "history.jsonl"),
+          join(home, ".x1", "history.jsonl"),
           records.join("\n") + "\n",
           { mode: 0o600 },
         );
-        writeFileSync(join(home, ".fx", "sessions"), "blocked\n", {
+        writeFileSync(join(home, ".x1", "sessions"), "blocked\n", {
           mode: 0o600,
         });
 
@@ -345,7 +345,7 @@ describe.skipIf(!tmuxAvailable())("prompt history", () => {
             HOME: home,
           },
         });
-        await session.waitForText("Run /help", TIMEOUT);
+        await session.waitForText("layerx1.com", TIMEOUT);
         await session.sendKeys("Up");
         const pane = await session.waitForText("PLAN10_HISTORY_KEPT_099", TIMEOUT);
         expect(pane).toContain("PLAN10_HISTORY_KEPT_099");

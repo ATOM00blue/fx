@@ -437,9 +437,9 @@ fn composeEmptyRow(
 
 fn skillSourceScopeLabel(source: skill_runtime.SkillSource) []const u8 {
     return switch (source) {
-        .global_fx => "fx · Global",
-        .workspace_fx => "fx · Workspace",
-        .workspace_shared => "fx · Workspace",
+        .global_x1 => "x1 · Global",
+        .workspace_x1 => "x1 · Workspace",
+        .workspace_shared => "x1 · Workspace",
         .workspace_opencode => "OpenCode · Workspace",
         .global_opencode => "OpenCode · Global",
         .workspace_codex => "Codex · Workspace",
@@ -466,13 +466,13 @@ fn visibleSkillCount(projection: SkillsMenuProjection) usize {
 }
 
 test "skills menu labels native workspace skills with lowercase product name" {
-    try std.testing.expectEqualStrings("fx · Workspace", skillSourceScopeLabel(.workspace_fx));
+    try std.testing.expectEqualStrings("x1 · Workspace", skillSourceScopeLabel(.workspace_x1));
 }
 
 test "skills menu renders source tabs and single-line results" {
     const alloc = std.testing.allocator;
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "managed", .description = "Managed skill description.", .path = "/tmp/managed/SKILL.md", .source = .global_fx },
+        .{ .name = "managed", .description = "Managed skill description.", .path = "/tmp/managed/SKILL.md", .source = .global_x1 },
         .{ .name = "workspace", .description = "Workspace skill description.", .path = "/tmp/workspace/SKILL.md", .source = .workspace_codex },
     };
     const projection: SkillsMenuProjection = .{
@@ -513,7 +513,7 @@ test "skills menu narrow header always shows the active source" {
         .name = "managed",
         .description = "description",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     const projection: SkillsMenuProjection = .{
         .active = true,
@@ -543,28 +543,28 @@ test "skills menu narrow header always shows the active source" {
             display_width.visibleWidthIgnoringAnsi(all_header.items) <= width,
         );
 
-        var fx_prepared = try prepareSkillsMenu(alloc, .{
+        var x1_prepared = try prepareSkillsMenu(alloc, .{
             .active = true,
             .items = &skills,
-            .source_filter = .fx,
+            .source_filter = .x1,
         }, 3);
-        defer fx_prepared.deinit(alloc);
-        var fx_header = try composeSkillsMenuRow(alloc, fx_prepared, 0, width);
-        defer fx_header.deinit(alloc);
-        try std.testing.expect(std.mem.find(u8, fx_header.items, "[fx]") != null);
-        try std.testing.expect(std.mem.find(u8, fx_header.items, "[Fx]") == null);
+        defer x1_prepared.deinit(alloc);
+        var x1_header = try composeSkillsMenuRow(alloc, x1_prepared, 0, width);
+        defer x1_header.deinit(alloc);
+        try std.testing.expect(std.mem.find(u8, x1_header.items, "[x1]") != null);
+        try std.testing.expect(std.mem.find(u8, x1_header.items, "[fx]") == null);
         try std.testing.expect(
-            display_width.visibleWidthIgnoringAnsi(fx_header.items) <= width,
+            display_width.visibleWidthIgnoringAnsi(x1_header.items) <= width,
         );
     }
 }
 
 test "skills menu navigation budget counts whole items" {
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = "one", .path = "/tmp/one", .source = .global_fx },
-        .{ .name = "two", .description = "two", .path = "/tmp/two", .source = .global_fx },
-        .{ .name = "three", .description = "three", .path = "/tmp/three", .source = .global_fx },
-        .{ .name = "four", .description = "four", .path = "/tmp/four", .source = .global_fx },
+        .{ .name = "one", .description = "one", .path = "/tmp/one", .source = .global_x1 },
+        .{ .name = "two", .description = "two", .path = "/tmp/two", .source = .global_x1 },
+        .{ .name = "three", .description = "three", .path = "/tmp/three", .source = .global_x1 },
+        .{ .name = "four", .description = "four", .path = "/tmp/four", .source = .global_x1 },
     };
     const projection: SkillsMenuProjection = .{ .active = true, .items = &skills };
 
@@ -575,13 +575,13 @@ test "skills menu navigation budget counts whole items" {
 test "inline skills menu shows six roomy items and prioritizes selection when tiny" {
     const alloc = std.testing.allocator;
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = "", .path = "/tmp/one", .source = .global_fx },
-        .{ .name = "two", .description = "", .path = "/tmp/two", .source = .global_fx },
-        .{ .name = "three", .description = "", .path = "/tmp/three", .source = .global_fx },
-        .{ .name = "four", .description = "", .path = "/tmp/four", .source = .global_fx },
-        .{ .name = "five", .description = "", .path = "/tmp/five", .source = .global_fx },
-        .{ .name = "six", .description = "", .path = "/tmp/six", .source = .global_fx },
-        .{ .name = "seven", .description = "", .path = "/tmp/seven", .source = .global_fx },
+        .{ .name = "one", .description = "", .path = "/tmp/one", .source = .global_x1 },
+        .{ .name = "two", .description = "", .path = "/tmp/two", .source = .global_x1 },
+        .{ .name = "three", .description = "", .path = "/tmp/three", .source = .global_x1 },
+        .{ .name = "four", .description = "", .path = "/tmp/four", .source = .global_x1 },
+        .{ .name = "five", .description = "", .path = "/tmp/five", .source = .global_x1 },
+        .{ .name = "six", .description = "", .path = "/tmp/six", .source = .global_x1 },
+        .{ .name = "seven", .description = "", .path = "/tmp/seven", .source = .global_x1 },
     };
     const projection: SkillsMenuProjection = .{
         .active = true,
@@ -611,7 +611,7 @@ test "inline skills menu keeps an empty result visible at one row" {
         .name = "managed",
         .description = "",
         .path = "/tmp/managed",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     const projection: SkillsMenuProjection = .{
         .active = true,
@@ -629,9 +629,9 @@ test "inline skills menu keeps an empty result visible at one row" {
 test "skills menu keeps the selected whole item in its window" {
     const alloc = std.testing.allocator;
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = "one description", .path = "/tmp/one", .source = .global_fx },
-        .{ .name = "two", .description = "two description", .path = "/tmp/two", .source = .global_fx },
-        .{ .name = "three", .description = "three description", .path = "/tmp/three", .source = .global_fx },
+        .{ .name = "one", .description = "one description", .path = "/tmp/one", .source = .global_x1 },
+        .{ .name = "two", .description = "two description", .path = "/tmp/two", .source = .global_x1 },
+        .{ .name = "three", .description = "three description", .path = "/tmp/three", .source = .global_x1 },
     };
     const projection: SkillsMenuProjection = .{
         .active = true,
@@ -655,7 +655,7 @@ test "skills menu clips long names with a Unicode ellipsis" {
         .name = "very-long-skill-name-that-will-not-fit",
         .description = "A very long description.",
         .path = "/tmp/long/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     const projection: SkillsMenuProjection = .{ .active = true, .items = &skills };
     var prepared = try prepareSkillsMenu(alloc, projection, 8);
@@ -674,7 +674,7 @@ test "skills menu empty states stay compact and identify the source" {
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     const projection: SkillsMenuProjection = .{
         .active = true,
@@ -697,7 +697,7 @@ test "skills menu degrades to one complete item in a tiny row budget" {
         .name = "managed",
         .description = "managed description",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     const projection: SkillsMenuProjection = .{ .active = true, .items = &skills };
     var prepared = try prepareSkillsMenu(alloc, projection, 3);
@@ -716,7 +716,7 @@ test "prepared skills menu aligns sources beside the widest visible name" {
     const skills = [_]skill_runtime.Skill{
         .{ .name = "a", .description = "compat", .path = "/tmp/a", .source = .global_claw },
         .{ .name = "workspace", .description = "workspace", .path = "/tmp/workspace", .source = .workspace_shared },
-        .{ .name = "managed", .description = "managed", .path = "/tmp/managed", .source = .global_fx },
+        .{ .name = "managed", .description = "managed", .path = "/tmp/managed", .source = .global_x1 },
         .{ .name = "much-longer", .description = "compat", .path = "/tmp/much-longer", .source = .global_opencode },
     };
     const projection: SkillsMenuProjection = .{
@@ -790,7 +790,7 @@ test "skills menu result rows preserve content within one through four columns" 
         .name = "managed",
         .description = "managed description",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     };
 
     for (1..5) |width| {

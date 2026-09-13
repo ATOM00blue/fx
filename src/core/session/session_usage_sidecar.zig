@@ -99,7 +99,7 @@ pub fn capture(
         return .{ .invalid = @errorName(err) };
     };
     if (initial.kind != .file or initial.nlink != 1 or
-        initial.permissions.toMode() & 0o777 != 0o600)
+        !io_mod.permissionsPrivateFile(initial.permissions))
     {
         return .{ .invalid = "unsafe_initial_shape" };
     }
@@ -120,7 +120,7 @@ pub fn capture(
     const verified = file.stat(io_mod.getIo()) catch |err|
         return .{ .invalid = @errorName(err) };
     if (verified.kind != .file or verified.nlink != 1 or
-        verified.permissions.toMode() & 0o777 != 0o600)
+        !io_mod.permissionsPrivateFile(verified.permissions))
     {
         return .{ .invalid = "unsafe_verified_shape" };
     }
@@ -601,7 +601,7 @@ test "torn exact settlement republishes stale backlog without reapplying totals"
             .billable_web_search_calls = 0,
         },
     };
-    const exact = stream_provider.UsageOutcome{ .exact = .codex };
+    const exact = stream_provider.UsageOutcome{ .exact = .layerx1 };
 
     var checkpoint_context: u8 = 0;
     var publication_context: u8 = 0;
@@ -653,7 +653,7 @@ test "torn exact settlement republishes stale backlog without reapplying totals"
     var lookup = LookupProbe{};
     var publication = PublicationProbe{};
     var resumed = session_usage.Usage.initFreshWithProviders(.{
-        .codex = .{ .context = &lookup, .lookup_fn = LookupProbe.lookup },
+        .layerx1 = .{ .context = &lookup, .lookup_fn = LookupProbe.lookup },
     });
     defer resumed.deinit(alloc);
     resumed.configurePublicationSink(.{

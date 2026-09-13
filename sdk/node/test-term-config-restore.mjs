@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import xtermHeadless from "@xterm/headless";
-import { createFxTerminal, supportsJspi, xtermAdapter } from "../node.js";
+import { createX1Terminal, supportsJspi, xtermAdapter } from "../node.js";
 
 const { Terminal } = xtermHeadless;
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/fx-term.wasm"));
+const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/x1-term.wasm"));
 if (!supportsJspi()) process.exit(2);
 
 const wasm = await readFile(wasmPath);
@@ -26,14 +26,14 @@ async function verifyStartup(label, configStore, expectedEvent, trigger, expecte
   const stderrDecoder = new TextDecoder();
   let stderrText = "";
   let exited;
-  const runtime = await createFxTerminal({
+  const runtime = await createX1Terminal({
   backend: "wasm",
     wasm,
     terminal: xtermAdapter(terminal),
     env: {
-      AI_GATEWAY_API_KEY: "config-restore-test-key",
-      FX_TRACE_STDERR: "1",
-      FX_TRACE_SCOPES: "host_config",
+      X1_API_KEY: "config-restore-test-key",
+      X1_TRACE_STDERR: "1",
+      X1_TRACE_SCOPES: "host_config",
     },
     configStore,
     stderr(chunk) { stderrText += stderrDecoder.decode(chunk, { stream: true }); },
@@ -47,7 +47,7 @@ async function verifyStartup(label, configStore, expectedEvent, trigger, expecte
 
   const flush = () => new Promise((resolveFlush) => terminal.write("", resolveFlush));
   const deadline = performance.now() + 5000;
-  while (!terminalGrid(terminal).includes("Run /help for commands")) {
+  while (!terminalGrid(terminal).includes("layerx1.com")) {
     await flush();
     if (exited !== undefined) throw new Error(`${label} exited during startup with code ${exited}`);
     if (performance.now() >= deadline) throw new Error(`timed out waiting for ${label} startup:\n${terminalGrid(terminal)}`);

@@ -30,6 +30,21 @@ pub const ProcessInstanceToken = struct {
         var parts = std.mem.splitScalar(u8, text, ':');
         const platform = parts.next() orelse
             return error.InvalidProcessInstanceToken;
+        if (std.mem.eql(u8, platform, "windows")) {
+            // Windows tokens carry the process creation FILETIME; it is
+            // absolute time, so no separate boot identity is required.
+            const creation_filetime = parts.next() orelse
+                return error.InvalidProcessInstanceToken;
+            if (parts.next() != null or
+                !isCanonicalDecimal(creation_filetime))
+            {
+                return error.InvalidProcessInstanceToken;
+            }
+            var windows_token = ProcessInstanceToken{};
+            @memcpy(windows_token.bytes[0..text.len], text);
+            windows_token.len = @intCast(text.len);
+            return windows_token;
+        }
         const boot_id = parts.next() orelse
             return error.InvalidProcessInstanceToken;
         if (!isLowerHex(boot_id, 32)) {

@@ -3473,7 +3473,7 @@ fn FramePaintContext(comptime App: type) type {
                 .tool_label = self.footer_frame.toolLabel(),
                 .shimmer_pos = self.footer_frame.shimmer_pos,
                 .style = self.activity_style,
-                .thinking_blink = self.footer_frame.thinking_blink,
+                .thinking_rotation = self.footer_frame.thinking_rotation,
             });
         }
     };
@@ -4831,7 +4831,7 @@ test "core.app_render_runtime projects only the visible inline completion suffix
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.textReplacementState().replace(alloc, "explain $man");
@@ -5327,7 +5327,7 @@ test "core.app_render_runtime main skill menu origins share the inline footer" {
         .name = "pure-core",
         .description = "Keep data transformations pure.",
         .path = "/skills/pure-core/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = CoordinatorTestApp{
         .alloc = alloc,
@@ -5387,7 +5387,7 @@ test "core.app_render_runtime main skill menu origins share the inline footer" {
         .{ .label = "Keep going", .description = null },
     };
     const entries = [_]types.QuestionBatchEntry{
-        .{ .question = "What should fx do next?", .options = &options },
+        .{ .question = "What should x1 do next?", .options = &options },
     };
     try app.question_prompt.syncFrom(alloc, &entries);
     app.shell.render_requests.request(.modal);
@@ -5590,13 +5590,13 @@ test "core.app_render_runtime inline menus survive the VT size and resize matrix
     defer file.close(io_mod.getIo());
 
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = "", .path = "/skills/one/SKILL.md", .source = .global_fx },
-        .{ .name = "two", .description = "", .path = "/skills/two/SKILL.md", .source = .global_fx },
-        .{ .name = "three", .description = "", .path = "/skills/three/SKILL.md", .source = .global_fx },
-        .{ .name = "four", .description = "", .path = "/skills/four/SKILL.md", .source = .global_fx },
-        .{ .name = "five", .description = "", .path = "/skills/five/SKILL.md", .source = .global_fx },
-        .{ .name = "six", .description = "", .path = "/skills/six/SKILL.md", .source = .global_fx },
-        .{ .name = "seven", .description = "", .path = "/skills/seven/SKILL.md", .source = .global_fx },
+        .{ .name = "one", .description = "", .path = "/skills/one/SKILL.md", .source = .global_x1 },
+        .{ .name = "two", .description = "", .path = "/skills/two/SKILL.md", .source = .global_x1 },
+        .{ .name = "three", .description = "", .path = "/skills/three/SKILL.md", .source = .global_x1 },
+        .{ .name = "four", .description = "", .path = "/skills/four/SKILL.md", .source = .global_x1 },
+        .{ .name = "five", .description = "", .path = "/skills/five/SKILL.md", .source = .global_x1 },
+        .{ .name = "six", .description = "", .path = "/skills/six/SKILL.md", .source = .global_x1 },
+        .{ .name = "seven", .description = "", .path = "/skills/seven/SKILL.md", .source = .global_x1 },
     };
     var summaries: [25]@import("../session/session_store.zig").SessionSummary = undefined;
     for (&summaries) |*summary| {
@@ -5738,13 +5738,13 @@ test "core.app_render_runtime width-changed queued editor keeps mention navigati
     defer file.close(io_mod.getIo());
 
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = "", .path = "/tmp/one", .source = .global_fx },
-        .{ .name = "two", .description = "", .path = "/tmp/two", .source = .global_fx },
-        .{ .name = "three", .description = "", .path = "/tmp/three", .source = .global_fx },
-        .{ .name = "four", .description = "", .path = "/tmp/four", .source = .global_fx },
-        .{ .name = "five", .description = "", .path = "/tmp/five", .source = .global_fx },
-        .{ .name = "six", .description = "", .path = "/tmp/six", .source = .global_fx },
-        .{ .name = "seven", .description = "", .path = "/tmp/seven", .source = .global_fx },
+        .{ .name = "one", .description = "", .path = "/tmp/one", .source = .global_x1 },
+        .{ .name = "two", .description = "", .path = "/tmp/two", .source = .global_x1 },
+        .{ .name = "three", .description = "", .path = "/tmp/three", .source = .global_x1 },
+        .{ .name = "four", .description = "", .path = "/tmp/four", .source = .global_x1 },
+        .{ .name = "five", .description = "", .path = "/tmp/five", .source = .global_x1 },
+        .{ .name = "six", .description = "", .path = "/tmp/six", .source = .global_x1 },
+        .{ .name = "seven", .description = "", .path = "/tmp/seven", .source = .global_x1 },
     };
     var app = CoordinatorTestApp{
         .alloc = alloc,
@@ -5840,8 +5840,8 @@ test "core.app_render_runtime active setup hub stays on the inline transcript su
 
     try std.testing.expect(!app.terminal.catalogMenuScreenActive());
     try std.testing.expect(try coordinatorGridContains(app.shell.shadow_vt.?.*, "Setup"));
-    try std.testing.expect(try coordinatorGridContains(app.shell.shadow_vt.?.*, "Connections"));
-    try std.testing.expect(try coordinatorGridContains(app.shell.shadow_vt.?.*, "Credential source"));
+    try std.testing.expect(try coordinatorGridContains(app.shell.shadow_vt.?.*, "X1 account"));
+    try std.testing.expect(!(try coordinatorGridContains(app.shell.shadow_vt.?.*, "LayerX1")));
     try std.testing.expect(try coordinatorGridContains(app.shell.shadow_vt.?.*, "Enter Open"));
     try std.testing.expect(!(try coordinatorGridContains(app.shell.shadow_vt.?.*, "test-model")));
     try std.testing.expect(try coordinatorGridContains(app.shell.shadow_vt.?.*, "setup transcript stays behind"));
@@ -5934,7 +5934,7 @@ test "core.app_render_runtime file approval returns to the preserved inline skil
         .name = "pure-core",
         .description = "Keep data transformations pure.",
         .path = "/skills/pure-core/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     const preview_lines = [_]diff_mod.PreviewLine{
         .{ .op = .addition, .new_line = 1, .text = "after" },
@@ -6344,7 +6344,7 @@ test "core.app_render_runtime question prompt exits the full transcript screen b
         .{ .label = "Keep going", .description = null },
     };
     const entries = [_]types.QuestionBatchEntry{
-        .{ .question = "What should fx do next?", .options = &options },
+        .{ .question = "What should x1 do next?", .options = &options },
     };
     try app.question_prompt.syncFrom(alloc, &entries);
 
@@ -6856,7 +6856,7 @@ test "core.app_render_runtime coordinator physically scrolls preserved shell row
 
     var terminal = try vt_emulator.Grid.init(alloc, layout.cols, layout.rows);
     defer terminal.deinit();
-    const shell_markers = "\x1b[1;1HSHELL01\nSHELL02\nSHELL03\nSHELL04\nSHELL05\nSHELL06\nSHELL07\n$ fx";
+    const shell_markers = "\x1b[1;1HSHELL01\nSHELL02\nSHELL03\nSHELL04\nSHELL05\nSHELL06\nSHELL07\n$ x1";
     try terminal.feed(shell_markers);
     try app.shell.shadow_vt.?.feed(shell_markers);
 

@@ -88,12 +88,7 @@ test "context notice body drops legacy markers from every line" {
 }
 
 pub const CredentialSource = enum {
-    vercel_oidc_token,
-    ai_gateway_api_key,
-    fx_login,
-    stored_key,
-    chatgpt_subscription,
-    grok_subscription,
+    layerx1_subscription,
 };
 
 pub fn parseCredentialSource(text: []const u8) ?CredentialSource {
@@ -188,7 +183,7 @@ pub const StreamState = struct {
     /// wall-clock blink. Monotonic for the whole turn: tool boundaries never
     /// reset it.
     turn_started_ms: i64 = 0,
-    /// When fx started waiting on user input (approval or question); 0 means
+    /// When x1 started waiting on user input (approval or question); 0 means
     /// not waiting. While set, the Thinking clock freezes at this instant;
     /// on resume the wait is excluded by shifting turn_started_ms forward.
     waiting_since_ms: i64 = 0,
@@ -575,7 +570,7 @@ pub const FinalToolIdentity = enum {
 };
 
 pub const ToolExecutionProvenance = enum {
-    fx_local,
+    x1_local,
     provider_executed,
 };
 
@@ -620,7 +615,7 @@ pub const ToolCall = struct {
     provisional_id: ?[]const u8 = null,
     provider_result: ?[]const u8 = null,
     final_identity: FinalToolIdentity = .valid,
-    provenance: ToolExecutionProvenance = .fx_local,
+    provenance: ToolExecutionProvenance = .x1_local,
 };
 
 pub const WebSearchProgress = union(enum) {
@@ -802,7 +797,7 @@ pub const TerminalFailurePresentation = enum {
             .session_not_found => "terminal session not found",
             .invalid_lifecycle => "terminal session is in an invalid lifecycle state",
             .authority_denied => "terminal authority denied",
-            .authority_retired => "saved terminal authority is from an older fx version; start a new terminal",
+            .authority_retired => "saved terminal authority is from an older x1 version; start a new terminal",
             .lease_conflict => "terminal control lease conflict",
             .cursor_gap => "terminal output cursor gap",
             .screen_unavailable => "terminal screen is unavailable",
@@ -2679,13 +2674,13 @@ test "HistoryTurn helpers duplicate and free owned turns" {
             };
             break :blk files;
         } },
-        .log_path = try alloc.dupe(u8, "/tmp/fx.log"),
+        .log_path = try alloc.dupe(u8, "/tmp/x1.log"),
         .expect_url = true,
         .url = try alloc.dupe(u8, "http://localhost:3000"),
     } };
     const background_copy = try dupeHistoryTurn(alloc, background_original);
     try std.testing.expectEqualStrings("run dev", background_copy.background_command.user.text);
-    try std.testing.expectEqualStrings("/tmp/fx.log", background_copy.background_command.log_path);
+    try std.testing.expectEqualStrings("/tmp/x1.log", background_copy.background_command.log_path);
     try std.testing.expectEqualStrings("http://localhost:3000", background_copy.background_command.url.?);
     try std.testing.expectEqualStrings("Starting the server.", background_copy.background_command.assistant.?);
     try std.testing.expectEqualStrings("src/main.zig", background_copy.background_command.execution.files[0].path);
@@ -2710,10 +2705,10 @@ test "HistoryTurn helpers duplicate and free owned turns" {
         } },
         .cancelled_command = .{
             .output_replay = .{ .available = .{
-                .handle = try alloc.dupe(u8, "fx-command-replay.bin"),
+                .handle = try alloc.dupe(u8, "x1-command-replay.bin"),
                 .framed_bytes = 42,
             } },
-            .command_artifact_handle = try alloc.dupe(u8, "fx-command.log"),
+            .command_artifact_handle = try alloc.dupe(u8, "x1-command.log"),
         },
         .terminal_reason = .failed,
     } };
@@ -2723,7 +2718,7 @@ test "HistoryTurn helpers duplicate and free owned turns" {
     const copied_presentation = interrupted_copy.interrupted.cancelled_command.?;
     const original_presentation = interrupted_original.interrupted.cancelled_command.?;
     try std.testing.expectEqualStrings(
-        "fx-command-replay.bin",
+        "x1-command-replay.bin",
         copied_presentation.output_replay.?.available.handle,
     );
     try std.testing.expect(

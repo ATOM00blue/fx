@@ -11,6 +11,7 @@ const credentials = @import("../auth/credentials.zig");
 const config_runtime = @import("../config/config_runtime.zig");
 const model_provider = @import("../config/model_provider.zig");
 const host = @import("../hosts/host.zig");
+const runtime_profile = @import("../hosts/runtime_profile.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const record_tape = @import("../workspace/record_tape.zig");
 const statusline_identity = @import("../workspace/statusline_identity.zig");
@@ -202,7 +203,7 @@ pub fn Runtime(comptime App: type) type {
                 else
                     host.unavailable_secret_store,
                 .resize_handler = resize_handler,
-                .fx_version = App.app_version,
+                .x1_version = App.app_version,
                 .record_requested = record_requested,
             });
             defer startup.deinit(app.alloc);
@@ -220,9 +221,9 @@ pub fn Runtime(comptime App: type) type {
                 startup.stored_key_status,
                 startup.credential_onboarding_skipped,
             );
-            if (comptime @hasDecl(@TypeOf(app.auth), "refreshChatGptSourceInventory")) {
-                app.auth.refreshChatGptSourceInventory(app.alloc) catch |err| {
-                    debug_trace.logf("auth", "startup ChatGPT inventory refresh failed err={s}", .{@errorName(err)});
+            if (comptime @hasDecl(@TypeOf(app.auth), "refreshLayerX1SourceInventory")) {
+                app.auth.refreshLayerX1SourceInventory(app.alloc) catch |err| {
+                    debug_trace.logf("auth", "startup X1 inventory refresh failed err={s}", .{@errorName(err)});
                 };
             } else {
                 app.auth.refreshSourceInventory(app.alloc) catch |err| {
@@ -231,10 +232,12 @@ pub fn Runtime(comptime App: type) type {
             }
             const startup_auth_view = app.auth.view();
             if (startup_auth_view.active_source == null and !startup_auth_view.onboarding_skipped) {
-                app.auth.openOnboardingPicker(app.alloc);
+                if (comptime runtime_profile.allows(App, .native_auth)) {
+                    app.auth.openOnboardingPicker(app.alloc);
+                }
             }
             if (comptime @hasField(App, "terminal_input_runtime") and @hasField(App, "terminal")) {
-                // Own theme protocol bytes even under FX_THEME; probing stays gated.
+                // Own theme protocol bytes even under X1_THEME; probing stays gated.
                 app.terminal_input_runtime.terminal_theme_monitor.start();
                 if (startup.theme_monitor_enabled) {
                     app.terminal.enableThemeNotifications() catch |err| {
@@ -250,7 +253,7 @@ pub fn Runtime(comptime App: type) type {
                 prompt_history_unavailable =
                     (try app.prompt_history.initialize(
                         app.alloc,
-                        shared_io.getenv("HOME"),
+                        shared_io.homeDir(),
                         startup.prompt_history_enabled,
                         startup.prompt_history_store_allowed,
                     )) == .unavailable;
@@ -260,7 +263,7 @@ pub fn Runtime(comptime App: type) type {
             {
                 _ = try app.session.initializeProfileUsage(
                     app.alloc,
-                    shared_io.getenv("HOME"),
+                    shared_io.homeDir(),
                 );
             }
 
@@ -342,12 +345,12 @@ pub fn Runtime(comptime App: type) type {
                 const welcome_preview = debug_trace.terminalPreview(welcome_preview_buf[0..], welcome_message);
                 debug_trace.logf(
                     "paint",
-                    "welcome_write bytes={d} reserved_rows={d} has_version={s} has_help={s} has_feedback={s} preview=\"{s}\"",
+                    "welcome_write bytes={d} reserved_rows={d} has_mark={s} has_url={s} has_feedback={s} preview=\"{s}\"",
                     .{
                         welcome_message.len,
                         ui_render.welcome_message_reserved_rows,
-                        if (std.mem.find(u8, welcome_message, " v") != null) "true" else "false",
-                        if (std.mem.find(u8, welcome_message, "Run /help") != null) "true" else "false",
+                        if (std.mem.find(u8, welcome_message, "X1") != null) "true" else "false",
+                        if (std.mem.find(u8, welcome_message, "layerx1.com") != null) "true" else "false",
                         if (std.mem.find(u8, welcome_message, "Feedback?") != null) "true" else "false",
                         welcome_preview,
                     },
@@ -370,17 +373,6 @@ pub fn Runtime(comptime App: type) type {
                 });
                 defer app.alloc.free(skills_summary);
                 try writeCollapsedStartupNotice(app, "skills", skills_summary, skills_body);
-            }
-            if (comptime @hasField(App, "auth")) {
-                const auth_view = app.auth.view();
-                if (auth_view.active_source == null and auth_view.stored_key_status == .unavailable) {
-                    debug_trace.logf("keychain", "interactive read skipped", .{});
-                    try app.writeDomainNotice(.{
-                        .topic = "keychain",
-                        .tone = .warning,
-                        .body = "fx could not access " ++ credentials.stored_key_backend_label ++ ". Continuing without an API key.",
-                    }, true);
-                }
             }
             var recording = try record_tape.captureStatus(app.alloc);
             defer recording.deinit(app.alloc);
@@ -473,7 +465,7 @@ const TestCapture = struct {
     footer_rows: u16 = 0,
     default_model: []const u8 = "",
     default_agent_step_limit: usize = 0,
-    fx_version: []const u8 = "",
+    x1_version: []const u8 = "",
     configured_model: [64]u8 = undefined,
     configured_model_len: usize = 0,
     configured_model_source: config_runtime.ModelSource = .compiled_default,
@@ -641,7 +633,7 @@ fn testDeps() BootstrapDeps(TestApp) {
         .load_skills = loadSkillsForTest,
         .skill_root_policy = .{
             .workspace_roots = &test_workspace_skill_roots,
-            .managed_root_source = .global_fx,
+            .managed_root_source = .global_x1,
             .global_roots = &test_global_skill_roots,
         },
         .welcome_message = welcomeMessageForTest,
@@ -660,7 +652,7 @@ fn bootstrapInteractiveAppForTest(cfg: app_lifecycle.BootstrapConfig) !app_lifec
     capture.footer_rows = cfg.footer_rows;
     capture.default_model = cfg.default_model;
     capture.default_agent_step_limit = cfg.default_agent_step_limit;
-    capture.fx_version = cfg.fx_version;
+    capture.x1_version = cfg.x1_version;
     try std.testing.expect(cfg.terminal == &active_app_for_pointer_check.?.terminal);
     active_app_for_pointer_check.?.shell.layout = .{
         .rows = 24,
@@ -695,7 +687,7 @@ fn makeStartupState(alloc: Allocator) !app_lifecycle.StartupState {
         errdefer alloc.free(credential_team);
         state.credential = .{
             .token = credential_token,
-            .source = .ai_gateway_api_key,
+            .source = .layerx1_subscription,
             .team_id = credential_team,
         };
     }
@@ -767,7 +759,7 @@ fn loadSkillsForTest(
     errdefer alloc.free(diagnostics);
     diagnostics[0] = .{
         .path = try alloc.dupe(u8, "/skills/hostile\npath/body-sentinel"),
-        .source = .global_fx,
+        .source = .global_x1,
         .scope = .candidate,
         .cause = .{ .invalid_metadata = .missing_name },
     };
@@ -882,7 +874,7 @@ test "app_bootstrap_runtime transfers startup state and starts a fresh session" 
     try std.testing.expectEqual(@as(u16, 4), capture.footer_rows);
     try std.testing.expectEqualStrings("default-model", capture.default_model);
     try std.testing.expectEqual(@as(usize, 24), capture.default_agent_step_limit);
-    try std.testing.expectEqualStrings(TestApp.app_version, capture.fx_version);
+    try std.testing.expectEqualStrings(TestApp.app_version, capture.x1_version);
     try std.testing.expectEqualStrings(
         "configured-model",
         capture.configuredModel(),
@@ -919,7 +911,7 @@ test "app_bootstrap_runtime transfers startup state and starts a fresh session" 
 
     try std.testing.expectEqualStrings("/workspace", app.workspace_root);
     try std.testing.expectEqualStrings("api-key", app.auth.apiKey().?);
-    try std.testing.expectEqual(types.CredentialSource.ai_gateway_api_key, app.auth.credentialSource().?);
+    try std.testing.expectEqual(types.CredentialSource.layerx1_subscription, app.auth.credentialSource().?);
     try std.testing.expectEqualStrings("team_123", app.auth.gatewayTeam().?);
     const auth_view = app.auth.view();
     try std.testing.expectEqual(credentials.StoredKeyReadStatus.not_found, auth_view.stored_key_status);

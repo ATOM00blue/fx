@@ -1454,7 +1454,7 @@ fn parsePreferences(alloc: Allocator, value: std.json.Value) !session_codec.Dura
         .provider = if (object.get("provider")) |provider_value| blk: {
             if (provider_value != .string) return error.InvalidEventFrame;
             break :blk model_provider.parse(provider_value.string) orelse return error.InvalidEventFrame;
-        } else .gateway,
+        } else .layerx1,
         .model = model,
         .effort = types.ReasoningEffort.parse(
             try requireString(object, "effort"),
@@ -2731,7 +2731,7 @@ test "recovery checkpoint events replace and clear deterministically" {
         .assistant_source = @constCast("partial"),
         .cause = .network_interrupted,
         .action = .continuing_response,
-        .authority = .{ .provider = .gateway, .model = @constCast("test/model") },
+        .authority = .{ .provider = .layerx1, .model = @constCast("test/model") },
         .requested_fast_mode = false,
         .fast_mode = false,
         .max_provider_attempts = 10,

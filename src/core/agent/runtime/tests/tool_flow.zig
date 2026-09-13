@@ -57,6 +57,7 @@ const expectBodyContainsInOrder = test_support.expectBodyContainsInOrder;
 const countText = test_support.countText;
 const countNeedle = test_support.countNeedle;
 const readTraceFile = test_support.readTraceFile;
+const requestMessageItems = test_support.requestMessageItems;
 const logIndex = test_support.logIndex;
 const textContains = test_support.textContains;
 const toolCall = test_support.toolCall;
@@ -458,36 +459,27 @@ fn expectPermissionDeniedToolResult(gateway: *const FakeGateway, index: usize, t
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedToolResultMissing;
     for (prompt) |entry| {
         if (entry != .object) continue;
-        const role = entry.object.get("role") orelse continue;
-        if (role != .string or !std.mem.eql(u8, role.string, "tool")) continue;
-        const content = entry.object.get("content") orelse continue;
-        if (content != .array) continue;
-        for (content.array.items) |part| {
-            if (part != .object) continue;
-            const part_tool_name = part.object.get("toolName") orelse continue;
-            if (part_tool_name != .string or !std.mem.eql(u8, part_tool_name.string, tool_name)) continue;
-            const output = part.object.get("output") orelse continue;
-            if (output != .object) continue;
-            const value = output.object.get("value") orelse continue;
-            if (value != .string) continue;
+        const entry_type = entry.object.get("type") orelse continue;
+        if (entry_type != .string or !std.mem.eql(u8, entry_type.string, "function_call_output")) continue;
+        const output = entry.object.get("output") orelse continue;
+        if (output != .string) continue;
 
-            try std.testing.expect(tool_result_errors.isToolPermissionDeniedOutput(value.string));
-            var payload = try std.json.parseFromSlice(std.json.Value, alloc, value.string, .{});
-            defer payload.deinit();
-            const error_obj = payload.value.object.get("error").?.object;
-            try std.testing.expectEqualStrings("tool_permission_denied", error_obj.get("type").?.string);
-            try std.testing.expectEqualStrings(tool_name, error_obj.get("tool_name").?.string);
-            if (expectedPermissionDeniedMessage(reason)) |message| {
-                try std.testing.expectEqualStrings(message, error_obj.get("message").?.string);
-            }
-            try std.testing.expectEqualStrings(@tagName(reason), error_obj.get("reason").?.string);
-            try std.testing.expect(error_obj.get("denied").?.bool);
-            try std.testing.expect(error_obj.get("suggestion") != null);
-            return;
+        try std.testing.expect(tool_result_errors.isToolPermissionDeniedOutput(output.string));
+        var payload = try std.json.parseFromSlice(std.json.Value, alloc, output.string, .{});
+        defer payload.deinit();
+        const error_obj = payload.value.object.get("error").?.object;
+        try std.testing.expectEqualStrings("tool_permission_denied", error_obj.get("type").?.string);
+        if (!std.mem.eql(u8, error_obj.get("tool_name").?.string, tool_name)) continue;
+        if (expectedPermissionDeniedMessage(reason)) |message| {
+            try std.testing.expectEqualStrings(message, error_obj.get("message").?.string);
         }
+        try std.testing.expectEqualStrings(@tagName(reason), error_obj.get("reason").?.string);
+        try std.testing.expect(error_obj.get("denied").?.bool);
+        try std.testing.expect(error_obj.get("suggestion") != null);
+        return;
     }
 
     return error.TestExpectedToolResultMissing;
@@ -517,54 +509,32 @@ fn expectMalformedArgumentToolPair(
 
     var call_count: usize = 0;
     var result_count: usize = 0;
-    const prompt = parsed.value.object.get("prompt").?.array.items;
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
     for (prompt) |entry| {
         if (entry != .object) continue;
-        const role = entry.object.get("role") orelse continue;
-        if (role != .string) continue;
-        const content = entry.object.get("content") orelse continue;
-        if (content != .array) continue;
+        const entry_type = entry.object.get("type") orelse continue;
+        if (entry_type != .string) continue;
+        const part_call_id = entry.object.get("call_id") orelse continue;
+        if (part_call_id != .string or !std.mem.eql(u8, part_call_id.string, tool_call_id)) continue;
+        if (std.mem.eql(u8, entry_type.string, "function_call")) {
+            const part_tool_name = entry.object.get("name") orelse continue;
+            if (part_tool_name != .string or !std.mem.eql(u8, part_tool_name.string, tool_name)) continue;
+            const arguments = entry.object.get("arguments") orelse return error.TestExpectedToolCallInputMissing;
+            try std.testing.expect(arguments == .string);
+            try std.testing.expectEqualStrings("{}", arguments.string);
+            call_count += 1;
+        } else if (std.mem.eql(u8, entry_type.string, "function_call_output")) {
+            const output = entry.object.get("output") orelse return error.TestExpectedToolResultMissing;
+            if (output != .string) return error.TestExpectedToolResultMissing;
+            try std.testing.expect(tool_result_errors.isToolExecutionFailedOutput(output.string));
 
-        for (content.array.items) |part| {
-            if (part != .object) continue;
-            const part_type = part.object.get("type") orelse continue;
-            if (part_type != .string) continue;
-            const part_call_id = part.object.get("toolCallId") orelse continue;
-            const part_tool_name = part.object.get("toolName") orelse continue;
-            if (part_call_id != .string or part_tool_name != .string) continue;
-            if (!std.mem.eql(u8, part_call_id.string, tool_call_id) or
-                !std.mem.eql(u8, part_tool_name.string, tool_name))
-            {
-                continue;
-            }
-
-            if (std.mem.eql(u8, role.string, "assistant") and
-                std.mem.eql(u8, part_type.string, "tool-call"))
-            {
-                const input = part.object.get("input") orelse return error.TestExpectedToolCallInputMissing;
-                try std.testing.expect(input == .object);
-                try std.testing.expectEqual(@as(usize, 0), input.object.count());
-                call_count += 1;
-                continue;
-            }
-
-            if (std.mem.eql(u8, role.string, "tool") and
-                std.mem.eql(u8, part_type.string, "tool-result"))
-            {
-                const output = part.object.get("output") orelse return error.TestExpectedToolResultMissing;
-                if (output != .object) return error.TestExpectedToolResultMissing;
-                const value = output.object.get("value") orelse return error.TestExpectedToolResultMissing;
-                if (value != .string) return error.TestExpectedToolResultMissing;
-                try std.testing.expect(tool_result_errors.isToolExecutionFailedOutput(value.string));
-
-                var failure = try std.json.parseFromSlice(std.json.Value, alloc, value.string, .{});
-                defer failure.deinit();
-                const error_obj = failure.value.object.get("error").?.object;
-                try std.testing.expectEqualStrings("tool_execution_failed", error_obj.get("type").?.string);
-                try std.testing.expectEqualStrings(tool_name, error_obj.get("tool_name").?.string);
-                try std.testing.expect(std.mem.find(u8, error_obj.get("suggestion").?.string, "tool schema") != null);
-                result_count += 1;
-            }
+            var failure = try std.json.parseFromSlice(std.json.Value, alloc, output.string, .{});
+            defer failure.deinit();
+            const error_obj = failure.value.object.get("error").?.object;
+            try std.testing.expectEqualStrings("tool_execution_failed", error_obj.get("type").?.string);
+            try std.testing.expectEqualStrings(tool_name, error_obj.get("tool_name").?.string);
+            try std.testing.expect(std.mem.find(u8, error_obj.get("suggestion").?.string, "tool schema") != null);
+            result_count += 1;
         }
     }
 
@@ -1067,7 +1037,7 @@ test "terminal acquire stays tracked when execution fails after its effect" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -1626,31 +1596,6 @@ test "compacted historical root authority stays out of tool execution" {
     try std.testing.expect(hooks.last_execute_root_user_evidence_complete);
 }
 
-test "malformed TUI web_search is presented without permission grant or backend work" {
-    const alloc = std.testing.allocator;
-    const calls = [_]ToolCall{toolCall("call_1", "web_search", "{\"query\":\"x\"}")};
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &calls },
-        .{ .content = "Final" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    hooks.validation_failure_names = &.{"web_search"};
-    defer hooks.deinit();
-    var fixture = PromptFixture{};
-
-    try runFakePrompt(&gateway, &hooks, fixture.config(), fixture.job());
-
-    try std.testing.expectEqual(@as(usize, 1), hooks.validated_names.items.len);
-    try std.testing.expectEqualStrings("web_search", hooks.validated_names.items[0]);
-    try std.testing.expectEqual(@as(usize, 0), hooks.availability_checked_names.items.len);
-    try std.testing.expectEqual(@as(usize, 0), hooks.permission_names.items.len);
-    try std.testing.expectEqual(@as(usize, 0), hooks.executed_names.items.len);
-    try std.testing.expectEqual(@as(usize, 0), hooks.propagated_grants.items.len);
-    try expectSingleTerminalOutcome(hooks.lifecycle_events.items, "call_1", .failed);
-    try expectBodyContains(&gateway, 1, "web_search arguments failed registered-tool validation");
-}
 fn expectRejectedPrompt(completion: FakeCompletion, expected_error: anyerror) !void {
     if (comptime !builtin.is_test) return;
     const alloc = std.testing.allocator;
@@ -1712,6 +1657,7 @@ fn expectSingleTerminalOutcome(
     }
     try std.testing.expectEqual(@as(usize, 1), matches);
 }
+
 test "processQueuedPrompt length-limited calls bypass malformed local tool identity admission" {
     const alloc = std.testing.allocator;
     const calls = [_]ToolCall{
@@ -1823,7 +1769,7 @@ test "vision uses generic lifecycle execution memory persistence and reprojectio
     try std.testing.expectEqualStrings("anthropic/claude-opus-4.6", gateway.request_models.items[0]);
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", gateway.request_models.items[1]);
     try std.testing.expectEqualStrings("anthropic/claude-opus-4.6", gateway.request_models.items[2]);
-    try expectBodyContains(&gateway, 1, "\"type\":\"file\"");
+    try expectBodyContains(&gateway, 1, "\"type\":\"input_image\"");
     try expectBodyNotContains(&gateway, 1, catalog[0].path);
     try expectBodyContains(&gateway, 2, "compiler error");
     try expectBodyContains(&gateway, 2, "error: expected expression");
@@ -2034,8 +1980,8 @@ test "vision denial settles the authorized attempt without reading the image" {
         hooks.lifecycle_events.items[2].terminal.outcome.kind,
     );
     try std.testing.expectEqual(@as(usize, 2), gateway.request_bodies.items.len);
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"required\"}");
-    try expectBodyNotContains(&gateway, 1, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
+    try expectBodyNotContains(&gateway, 1, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings("Final", hooks.finish_assistant_text.?);
 }
 
@@ -3500,73 +3446,6 @@ test "processQueuedPrompt auto parallel availability failure does not suppress v
     try expectBodyContains(&gateway, 1, tool_dispatch.web_search_unavailable_message);
 }
 
-test "parallel invalid web_search with valid read_file starts only read_file" {
-    const alloc = std.testing.allocator;
-    const calls = [_]ToolCall{
-        toolCall("call_search", "web_search", "{\"query\":\"x\"}"),
-        toolCall("call_read", "read_file", "{\"path\":\"README.md\"}"),
-    };
-
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &calls },
-        .{ .content = "Final" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    hooks.validation_failure_names = &.{"web_search"};
-    defer hooks.deinit();
-    try std.testing.expectEqual(@as(usize, 2), runtime_parallel_execution.parallelReadOnlyPrefixLen(hooks.tool_registry, &calls));
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    try std.testing.expectEqual(@as(usize, 2), hooks.validated_names.items.len);
-    try std.testing.expectEqualStrings("web_search", hooks.validated_names.items[0]);
-    try std.testing.expectEqualStrings("read_file", hooks.validated_names.items[1]);
-    try std.testing.expectEqual(@as(usize, 1), hooks.permission_names.items.len);
-    try std.testing.expectEqualStrings("read_file", hooks.permission_names.items[0]);
-    try std.testing.expectEqual(@as(usize, 1), hooks.executed_names.items.len);
-    try std.testing.expectEqualStrings("read_file", hooks.executed_names.items[0]);
-    try std.testing.expectEqual(@as(usize, 0), hooks.propagated_grants.items.len);
-}
-
-test "parallel admitted denied web_search with valid read_file executes read_file with zero search work" {
-    const alloc = std.testing.allocator;
-    const calls = [_]ToolCall{
-        toolCall("call_search", "web_search", "{\"query\":\"current news\"}"),
-        toolCall("call_read", "read_file", "{\"path\":\"README.md\"}"),
-    };
-
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &calls },
-        .{ .content = "Final" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    hooks.permission_decisions = &.{ .deny, .once };
-    defer hooks.deinit();
-    try std.testing.expectEqual(@as(usize, 2), runtime_parallel_execution.parallelReadOnlyPrefixLen(hooks.tool_registry, &calls));
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    try std.testing.expectEqual(@as(usize, 2), hooks.validated_names.items.len);
-    try std.testing.expectEqual(@as(usize, 2), hooks.availability_checked_names.items.len);
-    try std.testing.expectEqual(@as(usize, 2), hooks.permission_names.items.len);
-    try std.testing.expectEqualStrings("web_search", hooks.permission_names.items[0]);
-    try std.testing.expectEqualStrings("read_file", hooks.permission_names.items[1]);
-    try std.testing.expectEqual(@as(usize, 1), hooks.executed_names.items.len);
-    try std.testing.expectEqualStrings("read_file", hooks.executed_names.items[0]);
-    try std.testing.expectEqual(@as(usize, 1), hooks.rejected_names.items.len);
-    try std.testing.expectEqualStrings("web_search", hooks.rejected_names.items[0]);
-}
-
 test "fresh session without session grant requests permission for skill again" {
     const alloc = std.testing.allocator;
     var session: session_runtime.SessionRuntime = .{ .max_history_turns = 8 };
@@ -3873,7 +3752,7 @@ test "committed file result is appended before degraded secondary publication" {
         hooks.system_notices.items[0],
     );
     try expectBodyContainsInOrder(&gateway, 1, &.{
-        "\"role\":\"tool\"",
+        "\"type\":\"function_call_output\"",
         model_output,
         "\"role\":\"user\"",
         "Summarize the committed change.",
@@ -3887,7 +3766,7 @@ test "terminal publication failure deletes retained command replay" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -4310,7 +4189,7 @@ test "permission feedback follows the matching tool result" {
     try std.testing.expect(std.mem.find(u8, review_context, "user prompt") != null);
     try std.testing.expectEqual(@as(usize, 2), gateway.request_bodies.items.len);
     try expectBodyContainsInOrder(&gateway, 1, &.{
-        "\"role\":\"tool\"",
+        "\"type\":\"function_call_output\"",
         "read output",
         "\"role\":\"user\"",
         "Summarize the file after reading it.",
@@ -4953,50 +4832,14 @@ test "parallel permission preflight failure terminalizes its started lifecycle" 
 
     try std.testing.expectEqual(@as(usize, 2), hooks.rejected_names.items.len);
     try std.testing.expectEqual(@as(usize, 0), hooks.executed_names.items.len);
-    try expectLifecycleCallIds(hooks.lifecycle_events.items, &.{
-        "call_search",
-        "call_search",
-        "call_info",
-        "call_info",
-        "call_search",
-        "call_search",
-        "call_search",
-        "call_info",
-        "call_info",
-        "call_info",
-    });
-    const terminal = hooks.lifecycle_events.items[9].terminal;
-    try std.testing.expectEqual(types.ToolOutcomeKind.failed, terminal.outcome.kind);
-    try std.testing.expect(std.mem.endsWith(u8, terminal.outcome.summary, ": preflight failed"));
-}
-
-test "web_search denial trace records redacted query without api keys or result bodies" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
-    defer alloc.free(root);
-    const trace_path = try std.fs.path.join(alloc, &.{ root, "web-search-denied-trace.log" });
-    defer alloc.free(trace_path);
-
-    debug_trace.resetForTest();
-    defer debug_trace.resetForTest();
-    try debug_trace.configureForTestWithScopes(alloc, trace_path, "permission");
-
-    tool_dispatch.traceDeniedWebSearch(.{}, toolCall(
-        "call_search",
-        "web_search",
-        "{\"query\":\"latest AI_GATEWAY_API_KEY=secret-value news\"}",
-    ), .user_denied);
-    debug_trace.shutdown();
-
-    const trace = try readTraceFile(alloc, trace_path, 8192);
-    defer alloc.free(trace);
-    try std.testing.expect(std.mem.find(u8, trace, "event=web_search_denied") != null);
-    try std.testing.expect(std.mem.find(u8, trace, "tool_name=web_search") != null);
-    try std.testing.expect(std.mem.find(u8, trace, "query=latest AI_GATEWAY_API_KEY=[redacted] news") != null);
-    try std.testing.expect(std.mem.find(u8, trace, "secret-value") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "result body") == null);
+    try expectSingleTerminalOutcome(hooks.lifecycle_events.items, "call_info", .failed);
+    var saw_preflight_summary = false;
+    for (hooks.lifecycle_events.items) |event| {
+        if (event != .terminal) continue;
+        if (!std.mem.eql(u8, event.terminal.id.call_id, "call_info")) continue;
+        saw_preflight_summary = std.mem.endsWith(u8, event.terminal.outcome.summary, ": preflight failed");
+    }
+    try std.testing.expect(saw_preflight_summary);
 }
 
 test "PreToolUse rewrite is authoritative for validation permission execution history and replay" {

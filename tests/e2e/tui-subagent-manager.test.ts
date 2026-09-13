@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN } from "../evals/eval-helpers";
+import { X1_BIN } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -212,14 +212,14 @@ afterEach(async () => {
 });
 
 function createFixture() {
-  root = realpathSync(mkdtempSync(join(tmpdir(), "fx-subagent-manager-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "x1-subagent-manager-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   const stderrPath = join(root, "stderr.log");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".x1"), { recursive: true });
   mkdirSync(workspace);
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".x1", "settings.json"),
     JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
   );
   writeFileSync(stderrPath, "");
@@ -268,7 +268,7 @@ type ConfigurationControl = {
 function configurationControlPath(
   fixture: ReturnType<typeof createFixture>,
 ): string {
-  const sessionsDir = join(fixture.home, ".fx", "sessions");
+  const sessionsDir = join(fixture.home, ".x1", "sessions");
   const path = readdirSync(sessionsDir)
     .map((id) => join(sessionsDir, id, "subagent", "control.json"))
     .find((candidate) => existsSync(candidate));
@@ -319,13 +319,13 @@ function relationshipTestEnv(
     HOME: fixture.home,
     AI_GATEWAY_API_KEY: key,
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_SKIP_ONBOARDING: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_SOUND: "0",
+    X1_GATEWAY_BASE_URL: gateway.baseUrl,
+    X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+    X1_MODEL: FAKE_GATEWAY_MODEL,
+    X1_DISABLE_KEYCHAIN: "1",
+    X1_SKIP_ONBOARDING: "1",
+    X1_AUTO_UPGRADE: "0",
+    X1_SOUND: "0",
     NO_COLOR: "1",
   }).filter((entry): entry is [string, string] => entry[1] !== undefined));
 }
@@ -336,7 +336,7 @@ async function seedSavedChat(
   key: string,
   title: string,
 ): Promise<SeededChat> {
-  const child = Bun.spawn([FX_BIN, "ask", "--json", "--auto", title], {
+  const child = Bun.spawn([X1_BIN, "ask", "--json", "--auto", title], {
     cwd: fixture.workspace,
     env: relationshipTestEnv(fixture, gateway, key),
     stdout: "pipe",
@@ -360,7 +360,7 @@ function readRelationshipControl(
 ): RelationshipControl | null {
   const path = join(
     fixture.home,
-    ".fx",
+    ".x1",
     "sessions",
     sessionId,
     "subagent",
@@ -381,9 +381,9 @@ async function launch(
       HOME: fixture.home,
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_AUTO_UPGRADE: "0",
-      FX_TRACE_LOG: tracePath,
-      FX_TRACE_SCOPES: tracePath ? "subagent" : undefined,
+      X1_AUTO_UPGRADE: "0",
+      X1_TRACE_LOG: tracePath,
+      X1_TRACE_SCOPES: tracePath ? "subagent" : undefined,
       NO_COLOR: "1",
     },
     width: 80,
@@ -549,12 +549,12 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "isolated-surface-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_RECORD: tapePath,
-            FX_RECORD_INPUT: "1",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_RECORD: tapePath,
+            X1_RECORD_INPUT: "1",
             NO_COLOR: "1",
           },
           width: 96,
@@ -585,7 +585,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const childId = child.match(/isolated-child\s+·\s+([^\s]+)/)?.[1];
         if (!childId) throw new Error("isolated child did not expose its immutable ID");
         const control = JSON.parse(readFileSync(
-          join(fixture.home, ".fx", "sessions", childId, "subagent", "control.json"),
+          join(fixture.home, ".x1", "sessions", childId, "subagent", "control.json"),
           "utf8",
         )) as { configuration: { permission_mode: string } };
         expect(control.configuration.permission_mode).toBe("auto");
@@ -728,19 +728,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         HOME: fixture.home,
         AI_GATEWAY_API_KEY: "terminal-safe-child-key",
         VERCEL_OIDC_TOKEN: undefined,
-        FX_GATEWAY_BASE_URL: gateway.baseUrl,
-        FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-        FX_MODEL: FAKE_GATEWAY_MODEL,
-        FX_AUTO_UPGRADE: "0",
-        FX_DISABLE_KEYCHAIN: "1",
-        FX_SKIP_ONBOARDING: "1",
-        FX_SOUND: "0",
+        X1_GATEWAY_BASE_URL: gateway.baseUrl,
+        X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+        X1_MODEL: FAKE_GATEWAY_MODEL,
+        X1_AUTO_UPGRADE: "0",
+        X1_DISABLE_KEYCHAIN: "1",
+        X1_SKIP_ONBOARDING: "1",
+        X1_SOUND: "0",
         NO_COLOR: "1",
       };
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env,
           width: 180,
@@ -797,7 +797,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
           parent_id: string | null;
           configuration: { name: string };
         };
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         const control = readdirSync(sessionsDir)
           .map((id) => join(sessionsDir, id, "subagent", "control.json"))
           .filter((path) => existsSync(path))
@@ -820,7 +820,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         session = null;
 
         session = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${control.parent_id}`,
+          cmd: `${X1_BIN} resume ${control.parent_id}`,
           cwd: fixture.workspace,
           env,
           width: 180,
@@ -882,7 +882,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
       );
       const childName = "default-yolo-child";
@@ -907,19 +907,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "default-yolo-child-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -955,7 +955,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         if (!childId) throw new Error("default-yolo child did not expose its ID");
         const childRoot = join(
           fixture.home,
-          ".fx",
+          ".x1",
           "sessions",
           childId,
           "subagent",
@@ -1023,19 +1023,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-file-authority-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 104,
@@ -1092,7 +1092,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
   );
 
   test(
-    "one Ctrl-C cancels a streaming persistent child without exiting Fx",
+    "one Ctrl-C cancels a streaming persistent child without exiting x1",
     async () => {
       const fixture = createFixture();
       const childName = "ctrl-c-child";
@@ -1135,13 +1135,13 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         HOME: fixture.home,
         AI_GATEWAY_API_KEY: "child-ctrl-c-key",
         VERCEL_OIDC_TOKEN: undefined,
-        FX_GATEWAY_BASE_URL: gateway.baseUrl,
-        FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-        FX_MODEL: FAKE_GATEWAY_MODEL,
-        FX_AUTO_UPGRADE: "0",
-        FX_DISABLE_KEYCHAIN: "1",
-        FX_SKIP_ONBOARDING: "1",
-        FX_SOUND: "0",
+        X1_GATEWAY_BASE_URL: gateway.baseUrl,
+        X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+        X1_MODEL: FAKE_GATEWAY_MODEL,
+        X1_AUTO_UPGRADE: "0",
+        X1_DISABLE_KEYCHAIN: "1",
+        X1_SKIP_ONBOARDING: "1",
+        X1_SOUND: "0",
         NO_COLOR: "1",
       };
       type Control = {
@@ -1162,7 +1162,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
           }>;
         };
       };
-      const sessionsDir = join(fixture.home, ".fx", "sessions");
+      const sessionsDir = join(fixture.home, ".x1", "sessions");
       const cancelledDeliveries = (childId: string) => {
         const communication = JSON.parse(readFileSync(
           join(sessionsDir, childId, "subagent", "communication.json"),
@@ -1174,7 +1174,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       };
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env,
           width: 96,
@@ -1239,7 +1239,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         session = null;
 
         session = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${control.parent_id}`,
+          cmd: `${X1_BIN} resume ${control.parent_id}`,
           cwd: fixture.workspace,
           env,
           width: 96,
@@ -1284,7 +1284,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
       );
       const childPrompt = "ASK_WRITE_CHILD_PROMPT";
@@ -1320,19 +1320,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "ask-write-child-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 112,
@@ -1347,7 +1347,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         expect(gateway.requests.some((request) =>
           request.body.includes("permission_escalation")
         )).toBe(true);
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         const controls = readdirSync(sessionsDir)
           .map((id) => join(sessionsDir, id, "subagent", "control.json"))
           .filter((path) => existsSync(path));
@@ -1367,7 +1367,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
       );
       const childPrompt = "AUTO_WRITE_CHILD_PROMPT";
@@ -1401,19 +1401,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "auto-write-child-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 112,
@@ -1444,7 +1444,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
       );
       const childPrompt = "AUTO_DELETE_CHILD_PROMPT";
@@ -1478,19 +1478,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "auto-delete-child-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 112,
@@ -1526,7 +1526,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
       );
       const childName = "always-write-child";
@@ -1586,19 +1586,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "always-write-child-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 112,
@@ -1643,7 +1643,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         expect(secondOutcome).not.toContain(`Subagent ${childName} needs permission`);
         expect(readFileSync(marker, "utf8")).toBe("SECOND\n");
 
-        const sessionRoot = join(fixture.home, ".fx", "sessions");
+        const sessionRoot = join(fixture.home, ".x1", "sessions");
         const authorityGrants = readdirSync(sessionRoot).flatMap((id) => {
           const path = join(sessionRoot, id, "subagent", "communication.json");
           if (!existsSync(path)) return [];
@@ -1752,19 +1752,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "command-stream-child-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -1851,19 +1851,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "fast-route-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -1929,7 +1929,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
           child_id: string;
           configuration: { name: string };
         };
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         const controls = readdirSync(sessionsDir)
           .map((id) => join(sessionsDir, id, "subagent", "control.json"))
           .filter((path) => existsSync(path))
@@ -1999,10 +1999,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "same-active-turn-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 96,
@@ -2033,7 +2033,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             };
           };
         };
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         let sessionIds: string[] = [];
         let rootState: { id: string; frames: HistoryFrame[] } | undefined;
         const persistenceDeadline = Date.now() + TIMEOUT;
@@ -2139,10 +2139,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-two-fake-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 96,
@@ -2281,7 +2281,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         }
 
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: relationshipTestEnv(fixture, gateway, key),
           width: 74,
@@ -2368,7 +2368,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         }
 
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: relationshipTestEnv(fixture, gateway, key),
           width: 40,
@@ -2431,7 +2431,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       const tapePath = join(root!, "model-approved-reparent.fxtape");
-      const sessionsDir = join(fixture.home, ".fx", "sessions");
+      const sessionsDir = join(fixture.home, ".x1", "sessions");
       const parentName = "approved-reparent-parent";
       const childName = "approved-reparent-child";
       const createParentCallId = "approved_reparent_create_parent";
@@ -2528,20 +2528,20 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "approved-reparent-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
-            FX_RECORD: tapePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
+            X1_RECORD: tapePath,
             NO_COLOR: "1",
           },
           width: 132,
@@ -2674,11 +2674,11 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "direct-tty-reparent-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_RECORD: tapePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_RECORD: tapePath,
             NO_COLOR: "1",
           },
           width: 160,
@@ -2704,7 +2704,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             generation: number;
           }>;
         };
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         const controlPathFor = (id: string) =>
           join(sessionsDir, id, "subagent", "control.json");
         const readControl = (path: string) =>
@@ -2944,7 +2944,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
       );
       const resumedStderrPath = join(root!, "resumed-stderr.log");
@@ -3000,10 +3000,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-three-restart-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 108,
@@ -3036,7 +3036,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         if (!childId) throw new Error("running child did not expose its ID");
         const controlPath = join(
           fixture.home,
-          ".fx",
+          ".x1",
           "sessions",
           childId,
           "subagent",
@@ -3071,16 +3071,16 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         session = null;
 
         session = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${controlBeforeCrash.parent_id}`,
+          cmd: `${X1_BIN} resume ${controlBeforeCrash.parent_id}`,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-three-restart-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 108,
@@ -3222,11 +3222,11 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-three-direct-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_RECORD: parentTapePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_RECORD: parentTapePath,
             NO_COLOR: "1",
           },
           width: 96,
@@ -3261,17 +3261,17 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const mainCursorBefore = active.cursorPosition();
 
         direct = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${childId}`,
+          cmd: `${X1_BIN} resume ${childId}`,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-three-direct-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_RECORD: directTapePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_RECORD: directTapePath,
             NO_COLOR: "1",
           },
           width: 96,
@@ -3284,7 +3284,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
         const eventsPath = join(
           fixture.home,
-          ".fx",
+          ".x1",
           "sessions",
           childId,
           "events.jsonl",
@@ -3427,10 +3427,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "external-owner-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 96,
@@ -3456,7 +3456,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         )?.[1];
         if (!childId) throw new Error("manager-created child did not expose its ID");
         const parentId = readdirSync(
-          join(fixture.home, ".fx", "sessions"),
+          join(fixture.home, ".x1", "sessions"),
           { withFileTypes: true },
         ).find((entry) =>
           entry.isDirectory() && entry.name !== "latest" && entry.name !== childId
@@ -3464,7 +3464,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         if (!parentId) throw new Error("parent session ID was not persisted");
         const controlPath = join(
           fixture.home,
-          ".fx",
+          ".x1",
           "sessions",
           childId,
           "subagent",
@@ -3479,16 +3479,16 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         session = null;
 
         direct = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${childId}`,
+          cmd: `${X1_BIN} resume ${childId}`,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "external-owner-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 96,
@@ -3508,7 +3508,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         await direct.waitForText("EXTERNAL_OWNER_STREAM_HELD", TIMEOUT);
         const childEventsPath = join(
           fixture.home,
-          ".fx",
+          ".x1",
           "sessions",
           childId,
           "events.jsonl",
@@ -3516,17 +3516,17 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const childEventsBeforeResume = readFileSync(childEventsPath, "utf8");
 
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "external-owner-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_TRACE_LOG: parentTracePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_TRACE_LOG: parentTracePath,
             NO_COLOR: "1",
           },
           width: 96,
@@ -3596,7 +3596,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const idleActions = await parent.waitForPane(
           (pane) =>
             pane.includes(`Actions — ${childName}`) &&
-            pane.includes("another Fx process owns this child"),
+            pane.includes("another x1 process owns this child"),
           TIMEOUT,
         );
         expect(idleActions).not.toContain("C cancel");
@@ -3631,7 +3631,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         await parent.sendKeys("Tab");
         await parent.sendLiteralText("x");
         const queuedActions = await parent.waitForText(
-          "another Fx process owns this child",
+          "another x1 process owns this child",
           TIMEOUT,
         );
         expect(queuedActions).not.toContain("C cancel");
@@ -3663,7 +3663,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const locallyOwnedChild = await parent.waitForPane(
           (pane) =>
             pane.includes(childName) &&
-            !pane.includes("another Fx process owns this child") &&
+            !pane.includes("another x1 process owns this child") &&
             ((pane.includes(`Actions — ${childName}`) &&
               (pane.includes("Current state: idle") ||
                 pane.includes("Current state: interrupted"))) ||
@@ -3671,7 +3671,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
           TIMEOUT,
         );
         expect(locallyOwnedChild).not.toContain(
-          "another Fx process owns this child",
+          "another x1 process owns this child",
         );
         expect(gateway.requests.filter((request) =>
           latestPrompt(request.body).includes(directMessage)
@@ -3709,7 +3709,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       const fixture = createFixture();
       const tapePath = join(fixture.home, "inline-child-approval-toggle.fxtape");
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
       );
       const marker = join(fixture.workspace, "child-approval-effect.txt");
@@ -3783,11 +3783,11 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-two-approval-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_RECORD: tapePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_RECORD: tapePath,
             NO_COLOR: "1",
           },
           width: 160,
@@ -4098,7 +4098,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         state: string;
         configuration: { name: string };
       };
-      const sessionsDir = join(fixture.home, ".fx", "sessions");
+      const sessionsDir = join(fixture.home, ".x1", "sessions");
       const readControls = () =>
         readdirSync(sessionsDir)
           .map((id) => join(sessionsDir, id, "subagent", "control.json"))
@@ -4122,7 +4122,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       }
 
       async function runAsk(args: string[]) {
-        const child = Bun.spawn([FX_BIN, "ask", ...args], {
+        const child = Bun.spawn([X1_BIN, "ask", ...args], {
           cwd: fixture.workspace,
           env,
           stdout: "pipe",
@@ -4138,7 +4138,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env,
           width: 80,
@@ -4277,19 +4277,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-local-quit",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -4354,20 +4354,20 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-local-models",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 72,
@@ -4454,7 +4454,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         await active.waitForText("CHILD_LOCAL_MODELS_READY", TIMEOUT);
         expect(gateway.requestCount()).toBe(requestCountBeforeModels);
 
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         const controlPath = readdirSync(sessionsDir)
           .map((id) => join(sessionsDir, id, "subagent", "control.json"))
           .find((path) => existsSync(path));
@@ -4489,19 +4489,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-pointer-selection",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 100,
@@ -4554,7 +4554,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       const childName = "child-local-skills";
       const childPrompt = "CHILD_LOCAL_SKILLS_INITIAL";
       const skillName = "child-local-skill";
-      const skillDir = join(fixture.home, ".fx", "skills", skillName);
+      const skillDir = join(fixture.home, ".x1", "skills", skillName);
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(
         join(skillDir, "SKILL.md"),
@@ -4580,19 +4580,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-local-skills",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 88,
@@ -4711,19 +4711,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       );
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-narrow-config",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 60,
@@ -4743,7 +4743,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         await active.sendKeys("Enter");
         await active.waitForText("CHILD_NARROW_CONFIG_READY", TIMEOUT);
 
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         const controlPath = readdirSync(sessionsDir)
           .map((id) => join(sessionsDir, id, "subagent", "control.json"))
           .find((path) => existsSync(path));
@@ -4821,19 +4821,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         HOME: fixture.home,
         AI_GATEWAY_API_KEY: "duration-configuration-key",
         VERCEL_OIDC_TOKEN: undefined,
-        FX_GATEWAY_BASE_URL: gateway.baseUrl,
-        FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-        FX_MODEL: FAKE_GATEWAY_MODEL,
-        FX_AUTO_UPGRADE: "0",
-        FX_DISABLE_KEYCHAIN: "1",
-        FX_SKIP_ONBOARDING: "1",
-        FX_SOUND: "0",
+        X1_GATEWAY_BASE_URL: gateway.baseUrl,
+        X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+        X1_MODEL: FAKE_GATEWAY_MODEL,
+        X1_AUTO_UPGRADE: "0",
+        X1_DISABLE_KEYCHAIN: "1",
+        X1_SKIP_ONBOARDING: "1",
+        X1_SOUND: "0",
         NO_COLOR: "1",
       };
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env,
           width: 96,
@@ -4901,7 +4901,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         session = null;
 
         session = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${withDuration.parent_id}`,
+          cmd: `${X1_BIN} resume ${withDuration.parent_id}`,
           cwd: fixture.workspace,
           env,
           width: 96,
@@ -5014,19 +5014,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         HOME: fixture.home,
         AI_GATEWAY_API_KEY: "configure-contention-key",
         VERCEL_OIDC_TOKEN: undefined,
-        FX_GATEWAY_BASE_URL: gateway.baseUrl,
-        FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-        FX_MODEL: FAKE_GATEWAY_MODEL,
-        FX_AUTO_UPGRADE: "0",
-        FX_DISABLE_KEYCHAIN: "1",
-        FX_SKIP_ONBOARDING: "1",
-        FX_SOUND: "0",
+        X1_GATEWAY_BASE_URL: gateway.baseUrl,
+        X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+        X1_MODEL: FAKE_GATEWAY_MODEL,
+        X1_AUTO_UPGRADE: "0",
+        X1_DISABLE_KEYCHAIN: "1",
+        X1_SKIP_ONBOARDING: "1",
+        X1_SOUND: "0",
         NO_COLOR: "1",
       };
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env,
           width: 96,
@@ -5174,7 +5174,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         session = null;
 
         session = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${final.parent_id}`,
+          cmd: `${X1_BIN} resume ${final.parent_id}`,
           cwd: fixture.workspace,
           env,
           width: 96,
@@ -5232,19 +5232,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-position",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 60,
@@ -5352,19 +5352,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-resize",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -5456,19 +5456,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-draft",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 72,
@@ -5609,7 +5609,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const record = JSON.parse(readFileSync(
           join(
             fixture.home,
-            ".fx",
+            ".x1",
             "sessions",
             childId,
             "subagent",
@@ -5634,19 +5634,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "child-visible",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -5744,7 +5744,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
     async () => {
       const fixture = createFixture();
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
       );
       const firstMarker = join(fixture.workspace, "child-approval-first.txt");
@@ -5786,10 +5786,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-two-simultaneous-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 160,
@@ -6021,10 +6021,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-three-assembled-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 112,
@@ -6059,7 +6059,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
           };
           queue: Array<{ content: string; status: string }>;
         };
-        const sessionsDir = join(fixture.home, ".fx", "sessions");
+        const sessionsDir = join(fixture.home, ".x1", "sessions");
         const readControls = () => readdirSync(sessionsDir)
           .map((id) => join(sessionsDir, id, "subagent", "control.json"))
           .filter((path) => existsSync(path))
@@ -6135,10 +6135,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "checkpoint-three-cancel-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 104,
@@ -6213,7 +6213,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const control = JSON.parse(readFileSync(
           join(
             fixture.home,
-            ".fx",
+            ".x1",
             "sessions",
             childId,
             "subagent",
@@ -6254,7 +6254,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       const resumedStderrPath = join(root!, "approval-shutdown-resumed.stderr");
       writeFileSync(resumedStderrPath, "");
       writeFileSync(
-        join(fixture.home, ".fx", "settings.json"),
+        join(fixture.home, ".x1", "settings.json"),
         JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
       );
       const marker = join(fixture.workspace, "cancelled-approval-effect.txt");
@@ -6294,10 +6294,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "cancel-blocked-approval-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -6348,7 +6348,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const control = JSON.parse(readFileSync(
           join(
             fixture.home,
-            ".fx",
+            ".x1",
             "sessions",
             childId,
             "subagent",
@@ -6367,7 +6367,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const communication = JSON.parse(readFileSync(
           join(
             fixture.home,
-            ".fx",
+            ".x1",
             "sessions",
             childId,
             "subagent",
@@ -6382,16 +6382,16 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
         if (!control.parent_id) throw new Error("approval child lost its root");
         session = await TmuxSession.create({
-          cmd: `${FX_BIN} resume ${control.parent_id}`,
+          cmd: `${X1_BIN} resume ${control.parent_id}`,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "cancel-blocked-approval-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 120,
@@ -6411,7 +6411,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const recoveredControl = JSON.parse(readFileSync(
           join(
             fixture.home,
-            ".fx",
+            ".x1",
             "sessions",
             childId,
             "subagent",
@@ -6426,7 +6426,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         const recoveredCommunication = JSON.parse(readFileSync(
           join(
             fixture.home,
-            ".fx",
+            ".x1",
             "sessions",
             childId,
             "subagent",
@@ -6498,11 +6498,11 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "selected-child-route-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_RECORD: tapePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_RECORD: tapePath,
             NO_COLOR: "1",
           },
           width: 90,
@@ -6608,11 +6608,11 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "manager-fake-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_RECORD: tapePath,
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_RECORD: tapePath,
             NO_COLOR: "1",
           },
           width: 90,
@@ -6964,10 +6964,10 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "manager-bounded-tree-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
             NO_COLOR: "1",
           },
           width: 100,
@@ -7025,18 +7025,18 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
         HOME: fixture.home,
         AI_GATEWAY_API_KEY: "zero-turn-resume-key",
         VERCEL_OIDC_TOKEN: undefined,
-        FX_GATEWAY_BASE_URL: gateway.baseUrl,
-        FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-        FX_MODEL: FAKE_GATEWAY_MODEL,
-        FX_AUTO_UPGRADE: "0",
-        FX_DISABLE_KEYCHAIN: "1",
-        FX_SKIP_ONBOARDING: "1",
-        FX_SOUND: "0",
+        X1_GATEWAY_BASE_URL: gateway.baseUrl,
+        X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+        X1_MODEL: FAKE_GATEWAY_MODEL,
+        X1_AUTO_UPGRADE: "0",
+        X1_DISABLE_KEYCHAIN: "1",
+        X1_SKIP_ONBOARDING: "1",
+        X1_SOUND: "0",
         NO_COLOR: "1",
       };
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env,
           width: 100,
@@ -7061,8 +7061,8 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
           TIMEOUT,
         );
 
-        const controls = readdirSync(join(fixture.home, ".fx", "sessions"))
-          .map((id) => join(fixture.home, ".fx", "sessions", id, "subagent", "control.json"))
+        const controls = readdirSync(join(fixture.home, ".x1", "sessions"))
+          .map((id) => join(fixture.home, ".x1", "sessions", id, "subagent", "control.json"))
           .filter((path) => existsSync(path))
           .map((path) => JSON.parse(readFileSync(path, "utf8")) as {
             child_id: string;
@@ -7079,7 +7079,7 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
 
         writeFileSync(fixture.stderrPath, "");
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env,
           width: 100,
@@ -7149,19 +7149,19 @@ describe.skipIf(!tmuxAvailable())("tui: Agents & processes", () => {
       });
       try {
         session = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: fixture.workspace,
           env: {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "nested-send-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_SKIP_ONBOARDING: "1",
-            FX_SOUND: "0",
+            X1_GATEWAY_BASE_URL: gateway.baseUrl,
+            X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+            X1_MODEL: FAKE_GATEWAY_MODEL,
+            X1_AUTO_UPGRADE: "0",
+            X1_DISABLE_KEYCHAIN: "1",
+            X1_SKIP_ONBOARDING: "1",
+            X1_SOUND: "0",
             NO_COLOR: "1",
           },
           width: 112,

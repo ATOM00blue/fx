@@ -13,16 +13,15 @@ const js_host_model_catalog = @import("gateway/js_host_model_catalog.zig");
 const oauth_transport = @import("core/auth/oauth_transport.zig");
 const output_contracts = @import("core/output/output_contracts.zig");
 const builtin_context = @import("builtins/context.zig");
-const builtin_gateway = @import("builtins/gateway.zig");
+const builtin_x1 = @import("builtins/x1.zig");
 const provider_catalog = @import("core/auth/provider_catalog.zig");
-const vercel_model_policy = @import("gateway/vercel_model_policy.zig");
 const builtin_modes = @import("builtins/modes.zig");
 
 const Allocator = std.mem.Allocator;
 
 comptime {
     if (build_options.wasm_surface != .core) {
-        @compileError("fx-core requires -Dwasm-surface=core");
+        @compileError("x1-core requires -Dwasm-surface=core");
     }
 }
 
@@ -32,11 +31,11 @@ pub fn main(init: std.process.Init) !void {
     io_mod.setIo(init.io);
     io_mod.setEnvironMap(init.environ_map);
     try acp_server.run(std.heap.c_allocator, .{
-        .default_model = builtin_gateway.default_model,
+        .default_model = builtin_x1.default_model,
         .default_agent_step_limit = 64,
         .gateway_retry_count = 0,
-        .gateway_chat_url = builtin_gateway.default_chat_url,
-        .gateway_models_path = builtin_gateway.models_path,
+        .gateway_chat_url = builtin_x1.default_chat_url,
+        .gateway_models_path = builtin_x1.models_path,
         .gateway_provider = js_host_gateway_provider,
         .provider_set = js_host_provider_set,
         .background_process_provider = background_process_provider.unavailable_provider,
@@ -52,6 +51,10 @@ pub fn main(init: std.process.Init) !void {
         .max_history_turns = 100,
         .context_registry = .{ .default_provider = builtin_context.provider },
         .mode_registry = builtin_modes.registry,
+        .credential_override = blk: {
+            const key = io_mod.getenv("X1_API_KEY") orelse break :blk null;
+            break :blk if (key.len == 0) null else key;
+        },
     });
 }
 
@@ -60,10 +63,9 @@ const js_host_gateway_provider = gateway_provider.Provider{
     .chat_url = .{ .resolve_fn = resolveChatUrl },
 };
 
-const js_host_provider_set = provider_set.gateway_only(.{
-    .presentation = provider_catalog.find(.gateway),
-    .auth_strategy = .vercel,
-    .fallback_model_capabilities_fn = vercel_model_policy.capabilitiesForModel,
+const js_host_provider_set = provider_set.x1Only(.{
+    .presentation = provider_catalog.find(.layerx1),
+    .auth_strategy = .layerx1,
     .agent_stream = js_host_stream_provider.provider(),
     .cli_model_catalog = .{ .fetch_fn = fetchCliModelCatalog },
     .model_catalog = js_host_model_catalog.provider,

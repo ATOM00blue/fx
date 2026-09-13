@@ -9,7 +9,7 @@ const WasmSurface = enum {
 };
 
 const PgsoArtifact = enum {
-    fx,
+    x1,
     file_index,
     ui_activity,
     approval_review,
@@ -50,7 +50,7 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(WasmSurface, "wasm_surface", .none);
 
     const exe = b.addExecutable(.{
-        .name = "fx",
+        .name = "x1",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -74,17 +74,23 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run fx");
+    const run_step = b.step("run", "Run x1");
     run_step.dependOn(&run_cmd.step);
 
+    const test_filter = b.option([]const u8, "test-filter", "Run only tests whose names contain this substring");
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .filters = if (test_filter) |filter| blk: {
+            const list = b.allocator.alloc([]const u8, 1) catch @panic("oom");
+            list[0] = filter;
+            break :blk list;
+        } else &.{},
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.step.dependOn(b.getInstallStep());
     run_exe_tests.setEnvironmentVariable(
-        "FX_TEST_PRODUCT_EXE",
-        b.getInstallPath(.bin, "fx"),
+        "X1_TEST_PRODUCT_EXE",
+        b.getInstallPath(.bin, "x1"),
     );
 
     const test_step = b.step("test", "Run tests");
@@ -284,13 +290,13 @@ pub fn build(b: *std.Build) void {
     );
     if (pgso_artifact) |artifact| {
         const selected: *std.Build.Step.Compile = switch (artifact) {
-            .fx => exe,
+            .x1 => exe,
             .file_index => file_index_bench,
             .ui_activity => ui_activity_bench,
             .approval_review => approval_review_bench,
         };
         const output_name = switch (artifact) {
-            .fx => "pgso/fx.bc",
+            .x1 => "pgso/x1.bc",
             .file_index => "pgso/file-index.bc",
             .ui_activity => "pgso/ui-activity.bc",
             .approval_review => "pgso/approval-review.bc",
@@ -320,13 +326,13 @@ fn addWasmArtifact(
         .os_tag = .wasi,
     });
     const name = switch (surface) {
-        .core => "fx-core",
-        .term => "fx-term",
+        .core => "x1-core",
+        .term => "x1-term",
         .none => unreachable,
     };
     const description = switch (surface) {
-        .core => "Build the headless fx WebAssembly artifact",
-        .term => "Build the terminal fx WebAssembly artifact",
+        .core => "Build the headless x1 WebAssembly artifact",
+        .term => "Build the terminal x1 WebAssembly artifact",
         .none => unreachable,
     };
 
@@ -384,7 +390,7 @@ fn addNapiArtifact(
         .none => unreachable,
     };
     const lib = b.addLibrary(.{
-        .name = "libfx",
+        .name = "libx1",
         .linkage = .dynamic,
         .root_module = b.createModule(.{
             .root_source_file = b.path(root),
@@ -403,8 +409,8 @@ fn addNapiArtifact(
     lib.root_module.addSystemIncludePath(.{ .cwd_relative = node_include });
     lib.linker_allow_shlib_undefined = true;
 
-    const install = b.addInstallArtifact(lib, .{ .dest_sub_path = "libfx.node" });
-    const step = b.step("libfx-napi", "Build the libfx Node-API core addon");
+    const install = b.addInstallArtifact(lib, .{ .dest_sub_path = "libx1.node" });
+    const step = b.step("libx1-napi", "Build the libx1 Node-API core addon");
     step.dependOn(&install.step);
     b.getInstallStep().dependOn(&install.step);
 }

@@ -491,9 +491,9 @@ fn applyWithTestControls(
     var random_bytes: [16]u8 = undefined;
     io_mod.getIo().random(&random_bytes);
     const suffix = std.fmt.bytesToHex(random_bytes, .lower);
-    var temp_name_buffer: [".fx-stage-".len + suffix.len]u8 = undefined;
-    @memcpy(temp_name_buffer[0..".fx-stage-".len], ".fx-stage-");
-    @memcpy(temp_name_buffer[".fx-stage-".len..], suffix[0..]);
+    var temp_name_buffer: [".x1-stage-".len + suffix.len]u8 = undefined;
+    @memcpy(temp_name_buffer[0..".x1-stage-".len], ".x1-stage-");
+    @memcpy(temp_name_buffer[".x1-stage-".len..], suffix[0..]);
     const temp_name = temp_name_buffer[0..];
 
     var stage = parent.createFile(io_mod.getIo(), temp_name, .{
@@ -1001,9 +1001,10 @@ fn validatePreimage(
             const expected_identity = prepared.policy_targets.items[0].expected_identity orelse
                 break :blk .stale;
             if (!identityEql(actual_identity, expected_identity)) break :blk .stale;
-            if (stat.permissions.toMode() & 0o222 == 0) break :blk .io_failure;
+            if (!io_mod.permissionsWritable(stat.permissions)) break :blk .io_failure;
             if (expected_permissions) |permissions| {
-                if (stat.permissions.toMode() != permissions.toMode()) break :blk .stale;
+                if (io_mod.permissionsMode(stat.permissions, .file) !=
+                    io_mod.permissionsMode(permissions, .file)) break :blk .stale;
             }
 
             var hasher = std.crypto.hash.sha2.Sha256.init(.{});
@@ -1752,7 +1753,7 @@ fn expectNoStageFiles(root: []const u8) !void {
     var walker = try dir.walk(std.testing.allocator);
     defer walker.deinit();
     while (try walker.next(std.testing.io)) |entry| {
-        try std.testing.expect(std.mem.find(u8, entry.path, ".fx-stage-") == null);
+        try std.testing.expect(std.mem.find(u8, entry.path, ".x1-stage-") == null);
     }
 }
 
@@ -2832,7 +2833,7 @@ test "apply rejects replaced staged sources without deleting foreign replacement
     var iterator = root_dir.iterate();
     var found_foreign = false;
     while (try iterator.next(std.testing.io)) |entry| {
-        if (std.mem.startsWith(u8, entry.name, ".fx-stage-")) {
+        if (std.mem.startsWith(u8, entry.name, ".x1-stage-")) {
             const foreign = try readTestFile(call_alloc, &tmp, entry.name);
             try std.testing.expectEqualStrings("foreign", foreign);
             found_foreign = true;
@@ -2880,7 +2881,7 @@ test "apply rejects in-place staged content changes before rename" {
     defer root_dir.close(std.testing.io);
     var iterator = root_dir.iterate();
     while (try iterator.next(std.testing.io)) |entry| {
-        try std.testing.expect(!std.mem.startsWith(u8, entry.name, ".fx-stage-"));
+        try std.testing.expect(!std.mem.startsWith(u8, entry.name, ".x1-stage-"));
     }
 }
 
@@ -3258,7 +3259,7 @@ test "apply preserves the existing destination mode" {
         defer file.close(std.testing.io);
         try file.setPermissions(
             std.testing.io,
-            std.Io.File.Permissions.fromMode(0o640),
+            io_mod.permissionsFromMode(0o640),
         );
     }
     var call_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -2,16 +2,16 @@
 import { strict as assert } from "node:assert";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxAgent } from "../node.js";
+import { createX1Agent } from "../node.js";
 
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultAddon = resolve(scriptDir, "../../zig-out/lib/libfx.node");
+const defaultAddon = resolve(scriptDir, "../../zig-out/lib/libx1.node");
 const addon = process.argv[2] || `./${relative(process.cwd(), defaultAddon)}`;
 const events = [];
-const agent = await createFxAgent({
+const agent = await createX1Agent({
   nativeAddon: addon,
   backend: "native",
-  env: { AI_GATEWAY_API_KEY: "native-core-test-key" },
+  env: { X1_API_KEY: "native-core-test-key" },
   onEvent(event) { events.push(event); },
 });
 const session = await agent.createSession();

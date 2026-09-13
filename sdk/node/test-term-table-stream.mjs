@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import xtermHeadless from "@xterm/headless";
-import { createFxTerminal, supportsJspi, xtermAdapter } from "../node.js";
+import { createX1Terminal, supportsJspi, xtermAdapter } from "../node.js";
 
 const { Terminal } = xtermHeadless;
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/fx-term.wasm"));
+const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/x1-term.wasm"));
 if (!supportsJspi()) process.exit(2);
 
 const terminal = new Terminal({ cols: 100, rows: 34, allowProposedApi: true, scrollback: 2000 });
@@ -23,19 +23,19 @@ const fetch = async () => new Response(new ReadableStream({
   start(controller) {
     for (let offset = 0; offset < markdown.length; offset += 4) {
       const delta = markdown.slice(offset, offset + 4);
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", delta })}\n\n`));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "response.output_text.delta", delta })}\n\n`));
     }
-    controller.enqueue(encoder.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":2}}}\n\n'));
-    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.enqueue(encoder.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+    controller.enqueue(encoder.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
     controller.close();
   },
 }), { status: 200, headers: { "content-type": "text/event-stream" } });
 
-const runtime = await createFxTerminal({
+const runtime = await createX1Terminal({
   backend: "wasm",
   wasm: await readFile(wasmPath),
   terminal: xtermAdapter(terminal),
-  env: { AI_GATEWAY_API_KEY: "table-stream-key" },
+  env: { X1_API_KEY: "table-stream-key" },
   fetch,
   configStore: { get(id) { return id === "model" ? "test/table-model" : null; }, set() {} },
 });
@@ -49,7 +49,7 @@ const grid = () => {
   return lines.join("\n");
 };
 const deadline = performance.now() + 5000;
-while (!grid().includes("Run /help for commands")) {
+while (!grid().includes("layerx1.com")) {
   await flush();
   if (performance.now() >= deadline) throw new Error(`timed out waiting for startup:\n${grid()}`);
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
@@ -78,6 +78,6 @@ const exitCode = await Promise.race([
   runtime.exited,
   new Promise((_, reject) => setTimeout(() => reject(new Error("exit timeout")), 5000)),
 ]);
-if (exitCode !== 0) throw new Error(`fx-term exited with ${exitCode}`);
+if (exitCode !== 0) throw new Error(`x1-term exited with ${exitCode}`);
 
 console.log("headless table stream passed: four-character deltas rendered one boxed table");

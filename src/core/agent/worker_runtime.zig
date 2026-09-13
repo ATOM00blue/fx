@@ -60,7 +60,11 @@ pub const QueuedPrompt = struct {
     images: []types.ImageAttachment,
     authorized_image_catalog: []types.ImageAttachment = &.{},
     model: []u8,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
+    /// Test-only compatibility seam for legacy FX route behavior. Product
+    /// callers leave this false and always use the X1 route.
+    legacy_gateway_semantics: bool = false,
+    legacy_refreshable_credential: bool = false,
     api_key: []u8,
     gateway_team: ?[]u8 = null,
     credential_source: ?types.CredentialSource = null,
@@ -1829,7 +1833,7 @@ test "terminal recovery pause admits continuation before worker cleanup" {
                 .assistant_source = @constCast("partial response"),
                 .cause = .network_interrupted,
                 .action = .paused,
-                .authority = .{ .provider = .gateway, .model = @constCast("model") },
+                .authority = .{ .provider = .layerx1, .model = @constCast("model") },
                 .requested_fast_mode = false,
                 .fast_mode = false,
                 .max_provider_attempts = 10,
@@ -4555,7 +4559,7 @@ test "typed lifecycle worker events duplicate and free every payload variant" {
         .{ .terminal = .{
             .id = .{ .turn_id = 1, .call_id = "final" },
             .outcome = .{ .kind = .completed, .summary = "Listed files" },
-            .command_artifact_handle = "fx-command-final.log",
+            .command_artifact_handle = "x1-command-final.log",
         } },
         .{ .turn_finished = .{ .turn_id = 1, .outcome = .completed } },
     };
@@ -5335,7 +5339,7 @@ test "question batch snapshot answer and cancellation" {
 test "question batch source distinguishes route recovery from agent questions" {
     const alloc = std.testing.allocator;
     const options = [_]types.QuestionOption{.{ .label = "Try again later", .description = null }};
-    const entries = [_]types.QuestionBatchEntry{.{ .question = "Route failed. What should fx do?", .options = &options }};
+    const entries = [_]types.QuestionBatchEntry{.{ .question = "Route failed. What should x1 do?", .options = &options }};
 
     var route_runtime = WorkerRuntime{};
     defer route_runtime.deinit(alloc);

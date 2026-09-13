@@ -1,8 +1,8 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>libfx browser terminal test</title>
+<title>libx1 browser terminal test</title>
 <script type="module">
-  import { createFxTerminal, supportsJspi } from "./browser.js";
+  import { createX1Terminal, supportsJspi } from "./browser.js";
 
   const decoder = new TextDecoder();
   const liveDraft = "INPUT_DURING_STREAM";
@@ -29,7 +29,7 @@
     },
   };
 
-  const testState = window.__fxBrowserTerminalTest = { state: "starting", stage: "boot" };
+  const testState = window.__x1BrowserTerminalTest = { state: "starting", stage: "boot" };
   try {
     if (!supportsJspi()) throw new Error("JSPI unavailable");
     const encoded = new TextEncoder();
@@ -52,9 +52,9 @@
         pull(controller) {
           if (sent) return;
           sent = true;
-          controller.enqueue(encoded.encode(`data: ${JSON.stringify({ type: "text-delta", id: "browser_followup_1", delta: text })}\n\n`));
-          controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop","raw":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":1}}}\n\n'));
-          controller.enqueue(encoded.encode("data: [DONE]\n\n"));
+          controller.enqueue(encoded.encode(`data: ${JSON.stringify({ type: "response.output_text.delta", id: "browser_followup_1", delta: text })}\n\n`));
+          controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+          controller.enqueue(encoded.encode(""));
           controller.close();
         },
       }), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -83,34 +83,34 @@
           streamChunkCount += 1;
           testState.chunks = streamChunkCount;
           if (streamChunkCount === 1) {
-            controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"STREAM_STARTED"}\n'));
+            controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"STREAM_STARTED"}\n'));
             return;
           }
           if (streamChunkCount <= 128) {
-            controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"."}\n'));
+            controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"."}\n'));
             return;
           }
           await bufferedStreamFinished;
-          controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"STREAM_FINISHED"}\n'));
-          controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":2}}}\n'));
-          controller.enqueue(encoded.encode("data: [DONE]\n"));
+          controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"STREAM_FINISHED"}\n'));
+          controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+          controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
           controller.close();
           streamSourceClosed = true;
         },
       }), { status: 200, headers: { "content-type": "text/event-stream" } });
     };
     testState.stage = "creating-runtime";
-    runtime = await createFxTerminal({
-      wasm: "../zig-out/bin/fx-term.wasm",
+    runtime = await createX1Terminal({
+      wasm: "../zig-out/bin/x1-term.wasm",
       terminal,
-      env: { AI_GATEWAY_API_KEY: "browser-terminal-test-key" },
+      env: { X1_API_KEY: "browser-terminal-test-key" },
       fetch: mockFetch,
     });
     testState.stage = "waiting-interactive";
     await runtime.interactive;
     testState.stage = "waiting-startup";
     const deadline = performance.now() + 10000;
-    while (!output.includes("Run /help for commands")) {
+    while (!output.includes("layerx1.com")) {
       if (performance.now() >= deadline) throw new Error("startup output missing");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -153,7 +153,7 @@
       if (performance.now() >= activeDeadline) throw new Error("active clear did not abort browser fetch");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    while (!output.slice(freshWelcomeOffset).includes("Run /help for commands")) {
+    while (!output.slice(freshWelcomeOffset).includes("layerx1.com")) {
       if (performance.now() >= activeDeadline) throw new Error("active clear did not render a fresh session");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -166,7 +166,7 @@
     }
     runtime.write("/exit\r");
     const code = await runtime.exited;
-    window.__fxBrowserTerminalTest = {
+    window.__x1BrowserTerminalTest = {
       state: "completed",
       code,
       output,
@@ -179,6 +179,6 @@
       resizeListeners: resizeListeners.size,
     };
   } catch (error) {
-    window.__fxBrowserTerminalTest = { state: "failed", error: error?.stack || String(error), output };
+    window.__x1BrowserTerminalTest = { state: "failed", error: error?.stack || String(error), output };
   }
 </script>

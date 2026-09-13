@@ -2346,7 +2346,7 @@ const ProjectionTestEnvironment = struct {
     fn init(alloc: Allocator) !ProjectionTestEnvironment {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
-        try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
         try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
         const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
         errdefer alloc.free(home);

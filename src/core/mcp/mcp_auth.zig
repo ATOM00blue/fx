@@ -1335,7 +1335,7 @@ fn requestInteractiveAuthorization(
             "Content-Type: text/plain; charset=utf-8\r\n" ++
             "Content-Length: 49\r\n" ++
             "Connection: close\r\n\r\n" ++
-            "Authorization received. You can return to fx now.",
+            "Authorization received. You can return to x1 now.",
     );
     try writer.interface.flush();
     return parseAuthorizationRedirect(alloc, target);
@@ -1467,7 +1467,7 @@ fn resolveClientRegistration(
     var payload: std.Io.Writer.Allocating = .init(alloc);
     defer payload.deinit();
     try payload.writer.writeAll(
-        "{\"client_name\":\"fx\",\"application_type\":\"native\",\"redirect_uris\":[",
+        "{\"client_name\":\"x1\",\"application_type\":\"native\",\"redirect_uris\":[",
     );
     try std.json.Stringify.value(redirect_uri, .{}, &payload.writer);
     try payload.writer.writeAll("],\"response_types\":[\"code\"],\"grant_types\":[\"authorization_code\"");
@@ -1871,8 +1871,8 @@ fn validateJsonContentType(content_type: ?[]const u8) !void {
 }
 
 fn setSocketTimeouts(socket: std.posix.socket_t, seconds: i64) void {
-    if (comptime host_target.is_wasm) return;
-    const timeout = std.posix.timeval{ .sec = seconds, .usec = 0 };
+    if (comptime host_target.is_wasm or builtin.os.tag == .windows) return;
+    const timeout = std.posix.timeval{ .sec = @intCast(seconds), .usec = 0 };
     const bytes = std.mem.asBytes(&timeout);
     std.posix.setsockopt(
         socket,

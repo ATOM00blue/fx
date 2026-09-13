@@ -67,8 +67,9 @@ pub const animation_padding: i16 = 8;
 const animation_max_phase: i16 = 31;
 pub const animation_interval_ms: i64 = 50;
 pub const max_consecutive_input_pending_aborts: u8 = 4;
-/// Marker blink half-period: 10 frames on, 10 frames off at the 50ms cadence,
-/// matching the 1s period of the wall-clock-synced thinking blink.
+/// Marker blink half-period: 10 frames on, 10 frames off at the 50ms cadence.
+/// The thinking rotation also advances one quarter-circle per half-period, so
+/// tool blink and thinking rotation share one tempo.
 pub const blink_half_period_frames: i16 = 10;
 
 comptime {
@@ -76,10 +77,13 @@ comptime {
     // the marker visibly stutters at the wrap.
     const cycle = animation_max_phase + animation_padding + 1;
     std.debug.assert(@mod(cycle, 2 * blink_half_period_frames) == 0);
-    // Frame-phase blink (tool markers) and wall-clock blink (thinking
+    // The thinking rotation must complete whole quarter turns within one phase
+    // cycle or its marker visibly stutters at the wrap.
+    std.debug.assert(@mod(cycle, 4 * blink_half_period_frames) == 0);
+    // Frame-phase blink (tool markers) and wall-clock rotation (thinking
     // counter) must share one tempo or the two markers drift visibly apart.
     std.debug.assert(
-        blink_half_period_frames * animation_interval_ms == activity_status.thinking_blink_half_period_ms,
+        blink_half_period_frames * animation_interval_ms == activity_status.thinking_marker_step_ms,
     );
 }
 

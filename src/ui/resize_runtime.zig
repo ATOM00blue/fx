@@ -43,6 +43,25 @@ pub const supports_resize_signal = switch (builtin.os.tag) {
     else => false,
 };
 
+/// Platforms where the interactive shell can detect terminal resizes:
+/// SIGWINCH where it exists, and a background console-size poller on
+/// Windows (which has no SIGWINCH). Kept separate from
+/// `supports_resize_signal` because that flag also gates POSIX signal
+/// concerns (abnormal-exit handlers, job control) that have no Windows
+/// equivalent in the same shape.
+pub const supports_resize_detection = supports_resize_signal or
+    builtin.os.tag == .windows;
+
+test "resize detection keeps signal-platform semantics and adds windows" {
+    try std.testing.expectEqual(
+        switch (builtin.os.tag) {
+            .windows => true,
+            else => supports_resize_signal,
+        },
+        supports_resize_detection,
+    );
+}
+
 pub const ResizeApprovalInterlock = struct {
     const resize_pending_bit: u8 = 1 << 0;
     const affirmative_claimed_bit: u8 = 1 << 1;
@@ -192,7 +211,7 @@ pub fn collectResizeFacts(
 ) !void {
     const now = io_mod.milliTimestamp();
 
-    if (supports_resize_signal) {
+    if (supports_resize_detection) {
         if (cursor_probe_allowed) resumeResizeCursorProbeAfterPaste(probe, now);
         switch (probe.poll(now)) {
             .none => {},
@@ -284,7 +303,7 @@ pub fn admitResizeSignal(
     debounce_ms: i64,
     source: []const u8,
 ) bool {
-    if (!supports_resize_signal or !resize_interlock.takeResizePending()) return false;
+    if (!supports_resize_detection or !resize_interlock.takeResizePending()) return false;
     shell.render_requests.observeResizeSignal(now_ms, debounce_ms);
     debug_trace.logf(
         "frame_schedule",

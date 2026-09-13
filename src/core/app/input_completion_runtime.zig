@@ -1514,13 +1514,13 @@ test "command skills navigation measures a width-changed queued editor before fr
     const alloc = std.testing.allocator;
     const rt = CompletionRuntime(SkillsNavigationTestApp);
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = "", .path = "/tmp/one", .source = .global_fx },
-        .{ .name = "two", .description = "", .path = "/tmp/two", .source = .global_fx },
-        .{ .name = "three", .description = "", .path = "/tmp/three", .source = .global_fx },
-        .{ .name = "four", .description = "", .path = "/tmp/four", .source = .global_fx },
-        .{ .name = "five", .description = "", .path = "/tmp/five", .source = .global_fx },
-        .{ .name = "six", .description = "", .path = "/tmp/six", .source = .global_fx },
-        .{ .name = "seven", .description = "", .path = "/tmp/seven", .source = .global_fx },
+        .{ .name = "one", .description = "", .path = "/tmp/one", .source = .global_x1 },
+        .{ .name = "two", .description = "", .path = "/tmp/two", .source = .global_x1 },
+        .{ .name = "three", .description = "", .path = "/tmp/three", .source = .global_x1 },
+        .{ .name = "four", .description = "", .path = "/tmp/four", .source = .global_x1 },
+        .{ .name = "five", .description = "", .path = "/tmp/five", .source = .global_x1 },
+        .{ .name = "six", .description = "", .path = "/tmp/six", .source = .global_x1 },
+        .{ .name = "seven", .description = "", .path = "/tmp/seven", .source = .global_x1 },
     };
     var app = SkillsNavigationTestApp{ .alloc = alloc };
     defer app.deinit();
@@ -1618,7 +1618,7 @@ test "root slash completion follows multiline and command argument ownership" {
         .name = "resume-helper",
         .description = "resume a workflow",
         .path = "/tmp/resume-helper/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = InlineCompletionTestApp{
         .alloc = alloc,
@@ -1641,7 +1641,7 @@ test "inline skill completion stays inactive when its suffix cannot render" {
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = InlineCompletionTestApp{
         .alloc = alloc,
@@ -1687,7 +1687,7 @@ test "model picker ownership suppresses inline skill completion" {
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = InlineCompletionTestApp{
         .alloc = alloc,
@@ -1715,7 +1715,7 @@ test "dedicated catalog ownership suppresses inline skill completion" {
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = InlineCompletionTestApp{
         .alloc = alloc,

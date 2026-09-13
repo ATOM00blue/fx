@@ -10,7 +10,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, REPO_ROOT } from "../evals/eval-helpers";
+import { X1_BIN, REPO_ROOT, applyLayerX1E2EEnv } from "../evals/eval-helpers";
 
 let sessionCounter = 0;
 
@@ -24,17 +24,20 @@ const AUTH_ENV_KEYS = [
 ] as const;
 const DEFAULT_UNSET_ENV_KEYS = [
   ...AUTH_ENV_KEYS,
-  "FX_E2E_GATEWAY_CHAT_URL",
-  "FX_E2E_GATEWAY_MODELS_URL",
-  "FX_E2E_GATEWAY_CREDITS_URL",
-  "FX_E2E_UPGRADE_BASE_URL",
-  "FX_PERMISSION_MODE",
+  "X1_E2E_GATEWAY_CHAT_URL",
+  "X1_E2E_GATEWAY_MODELS_URL",
+  "X1_E2E_GATEWAY_CREDITS_URL",
+  "X1_E2E_LAYERX1_RESPONSES_URL",
+  "X1_E2E_LAYERX1_MODELS_URL",
+  "X1_E2E_LAYERX1_ACCOUNT_URL",
+  "X1_E2E_UPGRADE_BASE_URL",
+  "X1_PERMISSION_MODE",
 ] as const;
 const MIRRORED_ENV_KEYS = [
-  "FX_GATEWAY_BASE_URL",
-  "FX_GATEWAY_CHAT_URL",
-  "FX_MAX_AGENT_STEPS",
-  "FX_MODEL",
+  "X1_GATEWAY_BASE_URL",
+  "X1_GATEWAY_CHAT_URL",
+  "X1_MAX_AGENT_STEPS",
+  "X1_MODEL",
 ] as const;
 
 export function terminalFixtureShell(): string {
@@ -122,9 +125,66 @@ export function hasEmptyComposer(pane: string): boolean {
   return pane.split("\n").some(isEmptyComposerLine);
 }
 
+export { applyLayerX1E2EEnv, writeLayerX1Auth } from "../evals/eval-helpers";
+
+function toResponsesEvents(events: object[]): object[] {
+  const mapped: object[] = [];
+  let toolIndex = 0;
+  for (const event of events as Array<Record<string, any>>) {
+    const type = typeof event.type === "string" ? event.type : "";
+    if (type.startsWith("response.")) {
+      mapped.push(event);
+      continue;
+    }
+    if (type === "text-delta") {
+      mapped.push({ type: "response.output_text.delta", delta: event.delta ?? "" });
+      continue;
+    }
+    if (type === "tool-call") {
+      const argumentsJson = typeof event.input === "string"
+        ? event.input
+        : JSON.stringify(event.input ?? {});
+      mapped.push({
+        type: "response.output_item.added",
+        output_index: toolIndex,
+        item: {
+          type: "function_call",
+          call_id: event.toolCallId,
+          name: event.toolName,
+          arguments: "",
+        },
+      });
+      mapped.push({
+        type: "response.function_call_arguments.done",
+        output_index: toolIndex,
+        arguments: argumentsJson,
+      });
+      toolIndex += 1;
+      continue;
+    }
+    if (type === "finish") {
+      mapped.push({
+        type: "response.completed",
+        response: {
+          id: "resp_e2e",
+          status: "completed",
+          usage: {
+            input_tokens: event.usage?.inputTokens?.total ?? 3,
+            output_tokens: event.usage?.outputTokens?.total ?? 5,
+          },
+        },
+      });
+      continue;
+    }
+    mapped.push(event);
+  }
+  return mapped;
+}
+
 export function fakeGatewaySse(events: object[]) {
+  const mapped = toResponsesEvents(events);
   return new Response(
-    `${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`,
+    mapped.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
     { headers: { "content-type": "text/event-stream" } },
   );
 }
@@ -162,7 +222,10 @@ export function fakeGatewayPermissionDecision(
 
 export function classifierEvidenceFromRequest(body: string): string {
   const parsed = JSON.parse(body) as any;
-  const instruction = parsed.prompt.at(-1);
+  if (typeof parsed.instructions === "string" && parsed.instructions.length > 0) {
+    return parsed.instructions;
+  }
+  const instruction = parsed.prompt?.at?.(-1);
   if (instruction?.role !== "system" || typeof instruction.content !== "string") {
     throw new Error("classifier instruction missing");
   }
@@ -232,15 +295,17 @@ export function heldFakeGatewayFinalText() {
     }
     stopTimer();
     controller.enqueue(encoder.encode(
-      `data: ${JSON.stringify({ type: "text-delta", id: "answer_1", delta: text })}\n\n` +
-        `data: ${JSON.stringify({
+      toResponsesEvents([
+        { type: "text-delta", id: "answer_1", delta: text },
+        {
           type: "finish",
           finishReason: { unified: "stop", raw: "stop" },
           usage: {
             inputTokens: { total: 3 },
             outputTokens: { total: 5 },
           },
-        })}\n\ndata: [DONE]\n\n`,
+        },
+      ]).map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
     ));
     close();
   };
@@ -288,7 +353,9 @@ export type FakeGatewayModel = {
   tags?: string[];
   context_window?: number;
   max_tokens?: number;
-  pricing?: Record<string, unknown>;
+  max_output?: number;
+  tier?: string;
+  capabilities?: Record<string, unknown>;
   reasoning_options?: Array<{
     type: string;
     values?: string[];
@@ -320,6 +387,47 @@ export type FakeGatewayOptions = {
   ) => Response | Promise<Response>;
 };
 
+function defaultLayerX1Model(): FakeGatewayModel {
+  return {
+    id: FAKE_GATEWAY_MODEL,
+    tier: "language",
+    context_window: 128000,
+    max_output: 8192,
+    capabilities: {
+      tools: true,
+      reasoning: false,
+      vision: false,
+      documents: false,
+    },
+  };
+}
+
+function normalizeLayerX1Models(models: FakeGatewayModel[]): FakeGatewayModel[] {
+  return models.map((model) => {
+    if (model.capabilities) {
+      return {
+        ...model,
+        max_output: model.max_output ?? model.max_tokens,
+      };
+    }
+    const tags = model.tags ?? [];
+    const reasoningValues = model.reasoning_options
+      ?.flatMap((option) => option.values ?? [])
+      .filter((value): value is string => typeof value === "string") ?? [];
+    return {
+      ...model,
+      max_output: model.max_output ?? model.max_tokens,
+      capabilities: {
+        tools: tags.includes("tool-use") || model.type === "language" || tags.length === 0,
+        reasoning: reasoningValues.length > 0,
+        vision: false,
+        documents: false,
+        ...(reasoningValues.length > 0 ? { reasoning_efforts: ["none", ...reasoningValues] } : {}),
+      },
+    };
+  });
+}
+
 function serveFakeGateway(
   nextCompletion: (body: string) => Response | Promise<Response>,
   options: FakeGatewayOptions,
@@ -333,21 +441,25 @@ function serveFakeGateway(
     port: 0,
     idleTimeout: 0,
     async fetch(req) {
-      if (new URL(req.url).pathname === "/coding-agent/v1/models") {
+      const pathname = new URL(req.url).pathname;
+      if (req.method === "GET" && (pathname === "/coding-agent/v1/models" || pathname === "/v1/models")) {
         modelRequests.push({ headers: new Headers(req.headers), url: req.url });
         const models = typeof options.models === "function"
           ? await options.models(req)
           : options.models;
         if (models instanceof Response) return models;
         return Response.json({
-          data: models ?? [{
-            id: FAKE_GATEWAY_MODEL,
-            type: "language",
-            tags: ["tool-use"],
-          }],
+          data: normalizeLayerX1Models(models ?? [defaultLayerX1Model()]),
         });
       }
-      if (req.method === "GET" && new URL(req.url).pathname === "/v1/generation") {
+      if (req.method === "GET" && pathname === "/v1/me") {
+        return Response.json({
+          plan: "pro",
+          balance_usd: 12.5,
+          month: { value_usd: 3.25 },
+        });
+      }
+      if (req.method === "GET" && pathname === "/v1/generation") {
         const generationId = new URL(req.url).searchParams.get("id") ?? "";
         generationRequests.push(generationId);
         if (options.generationResponse) {
@@ -370,7 +482,10 @@ function serveFakeGateway(
   });
   return {
     baseUrl: `http://127.0.0.1:${server.port}`,
-    chatUrl: `http://127.0.0.1:${server.port}/v3/ai/language-model`,
+    chatUrl: `http://127.0.0.1:${server.port}/v1/responses`,
+    responsesUrl: `http://127.0.0.1:${server.port}/v1/responses`,
+    modelsUrl: `http://127.0.0.1:${server.port}/v1/models`,
+    accountUrl: `http://127.0.0.1:${server.port}/v1/me`,
     requests,
     classifierRequests,
     generationRequests,
@@ -434,9 +549,8 @@ export class TmuxSession {
     socketName?: string;
   }): Promise<TmuxSession> {
     const {
-      cmd = FX_BIN,
+      cmd = X1_BIN,
       cwd = REPO_ROOT,
-      env = {},
       width = 120,
       height = 40,
       stderrPath,
@@ -446,6 +560,7 @@ export class TmuxSession {
       isolated = false,
       socketName,
     } = opts ?? {};
+    const env = applyLayerX1E2EEnv(opts?.env ?? {});
 
     if (
       minimumHistoryLines !== undefined &&
@@ -457,9 +572,9 @@ export class TmuxSession {
     }
 
     const sequence = ++sessionCounter;
-    const name = `fx-test-${process.pid}-${sequence}`;
+    const name = `x1-test-${process.pid}-${sequence}`;
     const resolvedSocketName = socketName ?? (isolated
-      ? `fx-e2e-${process.pid}-${sequence}-${Date.now()}`
+      ? `x1-e2e-${process.pid}-${sequence}-${Date.now()}`
       : undefined);
     const startGate = `${name}-start`;
     const exitStatusPath = join(tmpdir(), `${name}.exit-status`);
@@ -490,9 +605,9 @@ export class TmuxSession {
       value === undefined ? [] : [shellQuote(`${key}=${value}`)]
     );
     const defaultArgs = [
-      ["FX_DISABLE_KEYCHAIN", "1"],
-      ["FX_SKIP_ONBOARDING", "1"],
-      ["FX_SOUND", "0"],
+      ["X1_DISABLE_KEYCHAIN", "1"],
+      ["X1_SKIP_ONBOARDING", "1"],
+      ["X1_SOUND", "0"],
     ].flatMap(([key, value]) =>
       Object.prototype.hasOwnProperty.call(env, key) ? [] : [shellQuote(`${key}=${value}`)]
     );
@@ -513,9 +628,9 @@ export class TmuxSession {
     );
     const processEnv = {
       ...process.env,
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_SKIP_ONBOARDING: "1",
-      FX_SOUND: process.env.FX_SOUND ?? "0",
+      X1_DISABLE_KEYCHAIN: "1",
+      X1_SKIP_ONBOARDING: "1",
+      X1_SOUND: process.env.X1_SOUND ?? "0",
     };
     for (const key of DEFAULT_UNSET_ENV_KEYS) delete processEnv[key];
 
@@ -847,7 +962,7 @@ export class TmuxSession {
   }
 
   /**
-   * Complete pane history including the ANSI sequences emitted by fx.
+   * Complete pane history including the ANSI sequences emitted by x1.
    * Keep this separate from the viewport capture so transcript-order tests
    * inspect all committed output rather than only the visible rows.
    */
@@ -869,7 +984,7 @@ export class TmuxSession {
 
   /**
    * Current pane title, which is what a terminal renders as the tab label.
-   * fx sets it through OSC 2, so this reads back what the user would see.
+   * x1 sets it through OSC 2, so this reads back what the user would see.
    */
   async paneTitle(): Promise<string> {
     try {
@@ -887,7 +1002,7 @@ export class TmuxSession {
   }
 
   /**
-   * Resize the tmux window. Delivers a real SIGWINCH to fx, exercising the
+   * Resize the tmux window. Delivers a real SIGWINCH to x1, exercising the
    * resize pipeline end-to-end. Default post-resize sleep covers the 100 ms
    * debounce in src/main.zig.
    */

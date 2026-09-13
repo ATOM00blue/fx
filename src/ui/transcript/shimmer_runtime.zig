@@ -1,10 +1,12 @@
 // Activity rendering is surface-owned.
 
 const std = @import("std");
+const activity_status = @import("../../core/output/activity_status.zig");
 const debug_trace = @import("../../core/shared/debug_trace.zig");
 const display_width = @import("../../core/shared/display_width.zig");
 const render_request = @import("../render_request.zig");
 const ui_render = @import("../render.zig");
+const user_message_card = @import("../assistant/user_message_card.zig");
 const render_engine = @import("../render_engine.zig");
 const vt_emulator = @import("../../core/terminal/engine.zig");
 
@@ -18,9 +20,9 @@ pub const ActivityPaintInput = struct {
     tool_label: ?[]const u8 = null,
     shimmer_pos: i16,
     style: ActivityPaintStyle = .thinking,
-    /// Wall-clock blink state synced to the elapsed counter; null falls back
-    /// to the frame-phase blink.
-    thinking_blink: ?bool = null,
+    /// Wall-clock rotation step synced to the elapsed counter; null falls back
+    /// to the frame-phase rotation.
+    thinking_rotation: ?u2 = null,
 };
 
 pub const ActivityPaintStyle = enum {
@@ -216,10 +218,10 @@ fn paintPlannedActivityRow(
     defer preview.deinit(surface.alloc);
     var buf: [4096]u8 = undefined;
     const text = switch (input.style) {
-        .thinking => writeThinkingBlinkText(
+        .thinking => writeThinkingRotationText(
             &buf,
             preview.bytes,
-            input.thinking_blink orelse markerBlinkVisible(input.shimmer_pos),
+            input.thinking_rotation orelse markerRotationFrame(input.shimmer_pos),
         ),
         .tool_marker => writeToolMarkerBlinkText(&buf, preview.bytes, input.shimmer_pos),
         .neutral => writeStaticStyledText(&buf, preview.bytes, ui_render.dim_style),
@@ -259,17 +261,31 @@ fn markerBlinkVisible(shimmer_pos: i16) bool {
     return @mod(shimmer_pos + render_request.animation_padding, 2 * half) < half;
 }
 
-fn writeThinkingBlinkText(out: []u8, label: []const u8, marker_visible: bool) []const u8 {
+// One quarter-circle step per blink half-period, folding in the padding so
+// the rotation wraps seamlessly across the fixed cycle.
+fn markerRotationFrame(shimmer_pos: i16) u2 {
+    const step = render_request.blink_half_period_frames;
+    return @intCast(@divTrunc(
+        @mod(shimmer_pos + render_request.animation_padding, 4 * step),
+        step,
+    ));
+}
+
+fn writeThinkingRotationText(out: []u8, label: []const u8, rotation: u2) []const u8 {
     const marker = "•";
     if (!std.mem.startsWith(u8, label, marker)) {
         return writeStaticStyledText(out, label, ui_render.dim_style);
     }
     var w: std.Io.Writer = .fixed(out);
-    if (marker_visible) {
-        w.print("{s}{s}{s}", .{ ui_render.permission_auto_style, marker, ui_render.reset_style }) catch return label;
-    } else {
-        w.writeAll(" ") catch return label;
-    }
+    // Shared X1 accent from `ui_render.x1_accent_style` — same token as
+    // picker/chrome. The marker rotates through the quarter-circle glyphs
+    // instead of hiding; no SGR 5. Tool-group running overlays stay
+    // prompt-white in `writeToolMarkerBlinkText`.
+    w.print("{s}{s}{s}", .{
+        ui_render.x1_accent_style,
+        activity_status.thinking_rotation_frames[rotation],
+        ui_render.reset_style,
+    }) catch return label;
     const rest = label[marker.len..];
     // The token suffix recedes into the muted gray; the verb and elapsed
     // counter keep the brighter label gray.
@@ -291,9 +307,9 @@ fn writeThinkingBlinkText(out: []u8, label: []const u8, marker_visible: bool) []
     return w.buffered();
 }
 
-test "thinking blink keeps the counter bright and dims only the token suffix" {
+test "thinking rotation keeps the counter bright and dims only the token suffix" {
     var out: [256]u8 = undefined;
-    const result = writeThinkingBlinkText(&out, "• Thinking (5s) (↑10 ↓20)", true);
+    const result = writeThinkingRotationText(&out, "• Thinking (5s) (↑10 ↓20)", 0);
 
     const label_idx = std.mem.find(u8, result, "Thinking (5s)") orelse return error.TestUnexpectedResult;
     const dim_idx = std.mem.find(u8, result, ui_render.dim_style) orelse return error.TestUnexpectedResult;
@@ -301,8 +317,67 @@ test "thinking blink keeps the counter bright and dims only the token suffix" {
     try std.testing.expect(label_idx < dim_idx);
     try std.testing.expect(dim_idx < tokens_idx);
 
-    const plain = writeThinkingBlinkText(&out, "• Thinking (5s)", true);
+    const plain = writeThinkingRotationText(&out, "• Thinking (5s)", 0);
     try std.testing.expect(std.mem.find(u8, plain, ui_render.dim_style) == null);
+}
+
+test "thinking rotation paints each quarter-circle glyph in the X1 accent without SGR blink" {
+    ui_render.initTheme(false, null);
+    defer ui_render.initTheme(false, null);
+
+    for (activity_status.thinking_rotation_frames, 0..) |glyph, frame| {
+        var out: [256]u8 = undefined;
+        const rotated = writeThinkingRotationText(&out, "• Thinking (5s)", @intCast(frame));
+        try std.testing.expect(std.mem.startsWith(u8, rotated, ui_render.x1_accent_style));
+        try std.testing.expect(std.mem.find(u8, rotated, "\x1b[5m") == null);
+        try std.testing.expect(std.mem.find(u8, rotated, user_message_card.promptMarkerStyle()) == null);
+        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, rotated, ui_render.x1_accent_style));
+        try std.testing.expect(std.mem.find(u8, rotated, ui_render.permission_auto_style) != null);
+        try std.testing.expect(std.mem.indexOf(u8, rotated, glyph).? < std.mem.indexOf(u8, rotated, "Thinking").?);
+
+        var grid = try vt_emulator.Grid.init(std.testing.allocator, 32, 1);
+        defer grid.deinit();
+        try grid.feed(rotated);
+        try std.testing.expectEqual(
+            @as(u21, try std.unicode.utf8Decode(glyph)),
+            grid.cellAt(1, 1).?.codepoint,
+        );
+        try std.testing.expect(grid.cellAt(1, 1).?.style.fg.eql(.{
+            .rgb = .{
+                .r = ui_render.x1_accent_dark_rgb.r,
+                .g = ui_render.x1_accent_dark_rgb.g,
+                .b = ui_render.x1_accent_dark_rgb.b,
+            },
+        }));
+        try std.testing.expect(!grid.cellAt(1, 1).?.style.flags.blink);
+        try std.testing.expectEqual(@as(u21, 'T'), grid.cellAt(1, 3).?.codepoint);
+        try std.testing.expect(grid.cellAt(1, 3).?.style.fg.eql(.{ .indexed = 252 }));
+    }
+}
+
+test "thinking marker follows the shared x1 accent across themes" {
+    ui_render.setTruecolorSupport(true);
+    ui_render.initTheme(false, null);
+    defer {
+        ui_render.setTruecolorSupport(true);
+        ui_render.initTheme(false, null);
+    }
+
+    var dark_out: [256]u8 = undefined;
+    const dark = writeThinkingRotationText(&dark_out, "• Thinking (1s)", 0);
+    try std.testing.expect(std.mem.startsWith(u8, dark, ui_render.x1_accent_truecolor_dark));
+
+    ui_render.initTheme(true, null);
+    var light_out: [256]u8 = undefined;
+    const light = writeThinkingRotationText(&light_out, "• Thinking (1s)", 0);
+    try std.testing.expect(std.mem.startsWith(u8, light, ui_render.x1_accent_truecolor_light));
+    try std.testing.expect(std.mem.find(u8, light, ui_render.x1_accent_truecolor_dark) == null);
+
+    ui_render.setTruecolorSupport(false);
+    ui_render.initTheme(false, null);
+    var fallback_out: [256]u8 = undefined;
+    const fallback = writeThinkingRotationText(&fallback_out, "• Thinking (1s)", 0);
+    try std.testing.expect(std.mem.startsWith(u8, fallback, ui_render.x1_accent_fallback_dark));
 }
 
 test "marker blink is on and off for equal halves of the 40-frame cycle" {
@@ -314,6 +389,17 @@ test "marker blink is on and off for equal halves of the 40-frame cycle" {
     try std.testing.expectEqual(@as(usize, 20), on);
     try std.testing.expect(!markerBlinkVisible(31));
     try std.testing.expect(markerBlinkVisible(-8));
+}
+
+test "marker rotation holds each quarter-circle for one blink half-period" {
+    var counts = [_]usize{0} ** 4;
+    var pos: i16 = -8;
+    while (pos <= 31) : (pos += 1) {
+        counts[markerRotationFrame(pos)] += 1;
+    }
+    try std.testing.expectEqualSlices(usize, &.{ 10, 10, 10, 10 }, &counts);
+    try std.testing.expectEqual(@as(u2, 0), markerRotationFrame(-8));
+    try std.testing.expectEqual(@as(u2, 3), markerRotationFrame(31));
 }
 
 fn writeStaticStyledText(out: []u8, label: []const u8, style: []const u8) []const u8 {
@@ -358,7 +444,7 @@ fn writeToolMarkerBlinkText(out: []u8, label: []const u8, shimmer_pos: i16) []co
     var marker_writer: std.Io.Writer = .fixed(&marker_buf);
     if (markerBlinkVisible(shimmer_pos)) {
         marker_writer.print("{s}{s}{s}", .{
-            ui_render.permission_auto_style,
+            user_message_card.promptMarkerStyle(),
             label[marker_start..marker_end],
             ui_render.reset_style,
         }) catch return label;
@@ -393,6 +479,10 @@ test "tool marker shimmer accepts the minimal final connector" {
 
     const unchanged = writeToolMarkerBlinkText(&out, "├ Read runtime.zig", 0);
     try std.testing.expectEqualStrings("├ Read runtime.zig", unchanged);
+
+    const running = writeToolMarkerBlinkText(&out, "● Running zig build", 0);
+    try std.testing.expect(std.mem.find(u8, running, user_message_card.promptMarkerStyle()) != null);
+    try std.testing.expect(std.mem.find(u8, running, "\x1b[5m") == null);
 }
 
 fn traceSurfaceShimmerPaint(surface: *const frame_surface.FrameSurface, row: u16, label: []const u8) void {
@@ -769,31 +859,44 @@ test "activity surface painter limits tool animation to its marker" {
     try std.testing.expect(first.surface.cellAt(4, 1).?.style.fg.eql(second.surface.cellAt(4, 1).?.style.fg));
 }
 
-test "activity surface painter honors the thinking blink override" {
+test "activity surface painter honors the thinking rotation override" {
+    ui_render.initTheme(false, null);
+    defer ui_render.initTheme(false, null);
+
     const plan = testPlan(
         .{ .transient_row = .{ .row = 4, .gap_above_rows = 0 } },
         .{ .top = 4, .bottom = 4, .owner = .activity },
     );
-    var hidden = try testSurface(plan);
-    defer hidden.surface.deinit();
-    defer hidden.shadow.deinit();
-    var visible = try testSurface(plan);
-    defer visible.surface.deinit();
-    defer visible.shadow.deinit();
+    var first = try testSurface(plan);
+    defer first.surface.deinit();
+    defer first.shadow.deinit();
+    var third = try testSurface(plan);
+    defer third.surface.deinit();
+    defer third.shadow.deinit();
 
-    _ = try paintActivityIntoSurface(&hidden.surface, .{
+    _ = try paintActivityIntoSurface(&first.surface, .{
         .label = "• Thinking (1s)",
         .shimmer_pos = -render_request.animation_padding,
-        .thinking_blink = false,
+        .thinking_rotation = 0,
     });
-    _ = try paintActivityIntoSurface(&visible.surface, .{
+    _ = try paintActivityIntoSurface(&third.surface, .{
         .label = "• Thinking (1s)",
         .shimmer_pos = 4,
-        .thinking_blink = true,
+        .thinking_rotation = 2,
     });
 
-    try std.testing.expectEqual(@as(u21, ' '), hidden.surface.cellAt(4, 1).?.codepoint);
-    try std.testing.expectEqual(@as(u21, '•'), visible.surface.cellAt(4, 1).?.codepoint);
+    try std.testing.expectEqual(@as(u21, '◐'), first.surface.cellAt(4, 1).?.codepoint);
+    try std.testing.expectEqual(@as(u21, '◑'), third.surface.cellAt(4, 1).?.codepoint);
+    for ([_]*const @TypeOf(first.surface){ &first.surface, &third.surface }) |surface| {
+        try std.testing.expect(surface.cellAt(4, 1).?.style.fg.eql(.{
+            .rgb = .{
+                .r = ui_render.x1_accent_dark_rgb.r,
+                .g = ui_render.x1_accent_dark_rgb.g,
+                .b = ui_render.x1_accent_dark_rgb.b,
+            },
+        }));
+        try std.testing.expect(surface.cellAt(4, 3).?.style.fg.eql(.{ .indexed = 252 }));
+    }
 }
 
 test "activity surface painter rejects activity over footer" {

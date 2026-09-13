@@ -41,7 +41,7 @@ const context_contract = @import("../workspace/context_contract.zig");
 const model_catalog = @import("../gateway/model_catalog.zig");
 const provider_set = @import("../gateway/provider_set.zig");
 const test_builtin_gateway = if (@import("builtin").is_test)
-    @import("../../builtins/gateway.zig")
+    @import("../../builtins/x1.zig")
 else
     struct {};
 const test_builtin_tools = if (@import("builtin").is_test)
@@ -196,10 +196,8 @@ pub fn Runtime(comptime App: type) type {
             const selected_provider = provider_runtime.provider(app);
             const provider_capabilities = if (comptime @hasDecl(App, "providerSet"))
                 app.providerSet().select(selected_provider).capabilities
-            else if (selected_provider == .gateway)
-                provider_set.Bundle.Capabilities{ .fx_search = true, .vision_fallback = true }
             else
-                provider_set.Bundle.Capabilities{};
+                provider_set.Bundle.Capabilities{ .vision_fallback = true };
             var ctx: tool_runtime.Context = .{
                 .workspace_root = workspace_root,
                 .access_scope = if (host_workspace != null)
@@ -294,7 +292,7 @@ pub fn Runtime(comptime App: type) type {
                 ctx.on_web_fetch_progress = app_callbacks.Bindings(App).onWebFetchProgress;
             }
             if (comptime @hasField(App, "web_search_runtime")) {
-                if (provider_capabilities.fx_search) {
+                if (provider_capabilities.provider_search) {
                     app.web_search_runtime.configure(.{
                         .api_key = app.auth.apiKey() orelse "",
                         .credential_source = app.auth.credentialSource(),
@@ -1049,17 +1047,7 @@ pub fn Runtime(comptime App: type) type {
                 app.providerSet()
             else
                 provider_set.Set{
-                    .gateway = .{
-                        .capabilities = tool_context.provider_capabilities,
-                        .agent_stream = tool_context.agent_stream_provider,
-                        .permission_reviewer = tool_context.permission_reviewer_provider,
-                    },
-                    .codex = .{
-                        .capabilities = tool_context.provider_capabilities,
-                        .agent_stream = tool_context.agent_stream_provider,
-                        .permission_reviewer = tool_context.permission_reviewer_provider,
-                    },
-                    .grok = .{
+                    .layerx1 = .{
                         .capabilities = tool_context.provider_capabilities,
                         .agent_stream = tool_context.agent_stream_provider,
                         .permission_reviewer = tool_context.permission_reviewer_provider,
@@ -1124,10 +1112,8 @@ pub fn Runtime(comptime App: type) type {
                 .advertised_functions = tool_projection.advertised_functions,
                 .provider_capabilities = if (comptime @hasDecl(App, "providerSet"))
                     app.providerSet().select(job.provider).capabilities
-                else if (job.provider == .gateway)
-                    .{ .fx_search = true, .vision_fallback = true }
                 else
-                    .{},
+                    .{ .vision_fallback = true },
                 .custom_tool_guidance = tool_projection.custom_guidance,
                 .agent_step_limit = app.agent_step_limit,
                 .max_tool_result_bytes = job.agent_settings.max_tool_result_bytes,
@@ -1290,7 +1276,6 @@ fn mcpToolAvailable(ctx: tool_runtime.Context, name: []const u8) bool {
 const test_ignored_list_entries = [_][]const u8{ ".git", "zig-out" };
 const test_gateway_chat_url = "https://gateway.test/chat";
 const test_tools = [_]tool_dispatch.Tool{
-    test_builtin_tools.web_search,
     test_builtin_tools.terminal,
     test_builtin_tools.memory,
     test_builtin_tools.semantic_search,
@@ -1451,7 +1436,7 @@ const FakeApp = struct {
     workspace_root: []const u8 = "/tmp/workspace",
     auth: auth_runtime.Runtime = .{},
     selected_model: std.ArrayList(u8) = .empty,
-    selected_provider: model_provider.ProviderId = .gateway,
+    selected_provider: model_provider.ProviderId = .layerx1,
     permission_engine: permissions.PermissionEngine = .{},
     agent_step_limit: usize = 8,
     fast_mode: bool = true,
@@ -1480,9 +1465,7 @@ const FakeApp = struct {
     mcp_result: []const u8 = "{\"ok\":true}",
     diff_blocks: usize = 0,
     web_fetch_runtime: web_fetch_runtime.Runtime = web_fetch_runtime.Runtime.init(.{}),
-    web_search_runtime: web_search_runtime.Runtime = web_search_runtime.Runtime.init(.{
-        .provider = test_builtin_gateway.default_web_search_provider,
-    }),
+    web_search_runtime: web_search_runtime.Runtime = web_search_runtime.Runtime.init(.{}),
     web_search_models_path: []const u8 = "/models",
     lifecycle_runtime: hooks.Runtime,
     lifecycle_view: hooks.RuntimeView,
@@ -1501,7 +1484,7 @@ const FakeApp = struct {
         errdefer app.context_snapshot.deinit(alloc);
         var credential = credentials.Credential{
             .token = try alloc.dupe(u8, "api-key"),
-            .source = .ai_gateway_api_key,
+            .source = .layerx1_subscription,
         };
         defer credential.deinit(alloc);
         _ = app.auth.adoptCredential(alloc, &credential);
@@ -1733,7 +1716,7 @@ const TestCatalogProvider = struct {
         self.saw_expected_input =
             std.mem.eql(u8, input.access.authorizationCredential() orelse "", "api-key") and
             input.access.teamContext() == null and
-            input.access.credentialSource() == .ai_gateway_api_key and
+            input.access.credentialSource() == .layerx1_subscription and
             std.mem.eql(u8, input.endpoint, "/catalog") and
             input.cancel_flag == null and
             input.view == .full;
@@ -1789,19 +1772,16 @@ test "app agent runtime builds tool context from app state and MCP callbacks" {
     try std.testing.expectEqualStrings("/tmp/workspace", ctx.workspace_root);
     try std.testing.expectEqualStrings("api-key", ctx.api_key);
     try std.testing.expectEqualStrings("test-model", ctx.model);
-    try std.testing.expect(ctx.tool_registry.lookup("web_search") != null);
+    try std.testing.expect(ctx.tool_registry.lookup("web_search") == null);
     try std.testing.expectEqual(PermissionMode.auto, ctx.permission_mode);
     try std.testing.expectEqual(@as(usize, 1), ctx.permission_grants.len);
     try std.testing.expect(ctx.fast_mode);
     try std.testing.expectEqual(types.ReasoningEffort.literal("high"), ctx.effort);
     try std.testing.expect(!ctx.web_search_runtime_ready);
-    try std.testing.expect(ctx.web_search_backend != null);
+    try std.testing.expect(ctx.web_search_backend == null);
     try std.testing.expect(ctx.web_fetch_runtime.? == &app.web_fetch_runtime);
     try std.testing.expect(ctx.web_fetch_progress_ctx != null);
     try std.testing.expect(ctx.on_web_fetch_progress != null);
-    try std.testing.expectEqualStrings("test-model", app.web_search_runtime.worker_model);
-    try std.testing.expectEqual(ctx.gateway_retry_count, app.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(ctx.gateway_chat_url, app.web_search_runtime.gateway_chat_url);
     try std.testing.expectEqualStrings("/models", ctx.gateway_models_path);
     try std.testing.expectEqual(@as(usize, 4096), ctx.max_tool_result_bytes);
     try std.testing.expectEqual(types.ToolChoice.none, ctx.first_call_tool_choice);
@@ -1894,96 +1874,17 @@ test "interactive app prepared file mutation callback applies app permission pol
     try std.testing.expect(outcome.execution_authority == null);
 }
 
-test "app prompt projection configures web search then blocks native execution" {
-    const alloc = std.testing.allocator;
-    const web_search_contract = @import("../tooling/web_search_contract.zig");
-    const ProviderState = struct {
-        calls: usize = 0,
-    };
-    const FailingWebSearchProvider = struct {
-        fn execute(
-            raw_ctx: ?*anyopaque,
-            _: Allocator,
-            _: web_search_runtime.Inputs,
-            _: web_search_contract.ProviderRequest,
-            _: ?web_search_contract.ProgressFn,
-            _: ?*anyopaque,
-        ) anyerror!web_search_contract.ProviderResponse {
-            const state: *ProviderState = @ptrCast(@alignCast(raw_ctx orelse return error.TestWebSearchProvider));
-            state.calls += 1;
-            return error.TestWebSearchProvider;
-        }
-    };
-    var app = try FakeApp.init(alloc);
-    defer app.deinit();
-    var provider_state = ProviderState{};
-    var provider = app.web_search_runtime.provider orelse return error.TestExpectedEqual;
-    provider.context = @ptrCast(&provider_state);
-    provider.execute_fn = FailingWebSearchProvider.execute;
-    app.web_search_runtime = web_search_runtime.Runtime.init(.{
-        .provider = provider,
-    });
-
-    app.web_search_runtime.configure(.{
-        .api_key = "stale-key",
-        .worker_model = "stale-model",
-        .gateway_retry_count = 99,
-        .gateway_chat_url = "https://stale.invalid/chat",
-    });
-
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    var messages: std.ArrayList(ChatMessage) = .empty;
-    defer messages.deinit(arena);
-    try Runtime(FakeApp).appendStaticContextMessage(&app, arena, &messages, &test_ignored_list_entries, 100, 1024, 40, 120, 2048, 2, test_gateway_chat_url);
-    try app.appendRuntimeContextMessage(arena, &messages);
-
-    try std.testing.expectEqualStrings("stale-key", app.web_search_runtime.api_key);
-
-    const validation = try app.validateToolCall(arena, .{
-        .id = "search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"x\"}",
-    });
-    try std.testing.expectEqualStrings("web_search field \"query\" must contain at least two characters", validation.failure);
-    try std.testing.expectEqualStrings(app.auth.apiKey().?, app.web_search_runtime.api_key);
-    try std.testing.expectEqualStrings(app.selected_model.items, app.web_search_runtime.worker_model);
-    try std.testing.expectEqual(@as(usize, 2), app.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(test_gateway_chat_url, app.web_search_runtime.gateway_chat_url);
-
-    const execution = try app.executeToolCall(.{
-        .call_allocator = arena,
-        .result_allocator = arena,
-        .call = .{
-            .id = "search-execute",
-            .name = "web_search",
-            .arguments_json = "{\"query\":\"current Zig release\"}",
-        },
-        .authority = .ordinary,
-        .session_grants = &.{},
-        .advertised_dynamic_tool_names = &.{},
-        .max_tool_result_bytes = 2048,
-    });
-    try std.testing.expectEqualStrings(app.auth.apiKey().?, app.web_search_runtime.api_key);
-    try std.testing.expectEqualStrings(app.selected_model.items, app.web_search_runtime.worker_model);
-    try std.testing.expectEqual(@as(usize, 2), app.web_search_runtime.gateway_retry_count);
-    try std.testing.expectEqualStrings(test_gateway_chat_url, app.web_search_runtime.gateway_chat_url);
-    try std.testing.expectEqual(.failure, execution.status);
-    try std.testing.expectEqual(@as(usize, 0), provider_state.calls);
-}
-
-test "app ChatGPT route removes Gateway-backed auxiliary capabilities" {
+test "app X1 route removes Gateway-backed auxiliary capabilities" {
     const alloc = std.testing.allocator;
     var app = try FakeApp.init(alloc);
     defer app.deinit();
     var credential = credentials.Credential{
-        .token = try alloc.dupe(u8, "chatgpt-secret"),
-        .source = .chatgpt_subscription,
+        .token = try alloc.dupe(u8, "x1-secret"),
+        .source = .layerx1_subscription,
     };
     defer credential.deinit(alloc);
     _ = app.auth.adoptCredential(alloc, &credential);
-    app.selected_provider = .codex;
+    app.selected_provider = .layerx1;
 
     const ctx = Runtime(FakeApp).toolContext(
         &app,
@@ -2246,30 +2147,6 @@ test "tool labels preserve semantic_search query value and default fallback" {
     const defaulted = try app.describeToolAction(arena, defaulted_call);
     try std.testing.expect(std.mem.find(u8, defaulted, "Searching") != null);
     try std.testing.expect(std.mem.find(u8, defaulted, "query") != null);
-}
-
-test "native web_search labels preserve bounded query and domain filters" {
-    const alloc = std.testing.allocator;
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-
-    var app = try FakeApp.init(alloc);
-    defer app.deinit();
-
-    const call: ToolCall = .{
-        .id = "web_search",
-        .name = "web_search",
-        .arguments_json = "{\"query\":\"current Zig release\",\"allowed_domains\":[\"ziglang.org\",\"github.com\"]}",
-    };
-    const active = try app.describeToolAction(arena, call);
-    try std.testing.expect(std.mem.find(u8, active, "Searching") != null);
-    try std.testing.expect(std.mem.find(u8, active, "current Zig release") != null);
-    try std.testing.expect(std.mem.find(u8, active, "allowed: ziglang.org, github.com") != null);
-
-    const completed = try app.describeToolActionCompleted(arena, call);
-    try std.testing.expect(std.mem.find(u8, completed, "Searched") != null);
-    try std.testing.expect(std.mem.find(u8, completed, "current Zig release") != null);
 }
 
 test "provider search labels use search wording and generic fallback" {

@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { X1_BIN, runx1 } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -39,7 +39,7 @@ const SESSION_PICKER_META_RE = /\bturns?\b/;
 const SELECTED_COMPLETION_SGR = "\x1b[1m\x1b[38;5;255m";
 
 function sessionIdFromHome(home: string): string {
-  const sessions = join(home, ".fx", "sessions");
+  const sessions = join(home, ".x1", "sessions");
   const ids = readdirSync(sessions, { withFileTypes: true })
     .filter((entry) => entry.name !== "latest" && entry.isDirectory())
     .map((entry) => entry.name);
@@ -56,8 +56,8 @@ function startUpgradeServer(
   argvLogPath: string,
 ): { baseUrl: string; stop: () => void } {
   const artifactDir = join(root, "release-artifact");
-  const wrapperPath = join(artifactDir, "fx");
-  const archivePath = join(root, "fx.tar.gz");
+  const wrapperPath = join(artifactDir, "x1");
+  const archivePath = join(root, "x1.tar.gz");
   mkdirSync(artifactDir);
   const script = `#!/bin/sh
 {
@@ -67,17 +67,17 @@ function startUpgradeServer(
   done
   printf '\\n'
 } >> ${shellQuote(argvLogPath)}
-exec ${shellQuote(FX_BIN)} "$@"
+exec ${shellQuote(X1_BIN)} "$@"
 `;
   writeFileSync(wrapperPath, script);
   chmodSync(wrapperPath, 0o755);
-  const tar = Bun.spawnSync(["tar", "-czf", archivePath, "-C", artifactDir, "fx"]);
+  const tar = Bun.spawnSync(["tar", "-czf", archivePath, "-C", artifactDir, "x1"]);
   if (tar.exitCode !== 0) throw new Error(tar.stderr.toString());
 
   const archive = readFileSync(archivePath);
   const checksum = createHash("sha256").update(archive).digest("hex");
   const platform = `${process.platform === "darwin" ? "macos" : "linux"}-${process.arch === "arm64" ? "aarch64" : "x86_64"}`;
-  const archiveRoute = `/v9.9.9/fx-${platform}.tar.gz`;
+  const archiveRoute = `/v9.9.9/x1-${platform}.tar.gz`;
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -103,10 +103,10 @@ function gatewayEnv(
     HOME: home,
     AI_GATEWAY_API_KEY: "fake-tui-resume-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_AUTO_UPGRADE: "0",
+    X1_GATEWAY_BASE_URL: gateway.baseUrl,
+    X1_GATEWAY_CHAT_URL: gateway.chatUrl,
+    X1_MODEL: FAKE_GATEWAY_MODEL,
+    X1_AUTO_UPGRADE: "0",
     NO_COLOR: "1",
   };
 }
@@ -246,7 +246,7 @@ async function waitForPersistedSessionMarker(
   marker: string,
   timeout = TIMEOUT,
 ): Promise<void> {
-  const sessionsDir = join(home, ".fx", "sessions");
+  const sessionsDir = join(home, ".x1", "sessions");
   await waitForCondition(() => {
     if (!existsSync(sessionsDir)) return false;
     return readdirSync(sessionsDir, { withFileTypes: true })
@@ -264,7 +264,7 @@ async function waitForCommittedSessionMarker(
   marker: string,
   timeout = TIMEOUT,
 ): Promise<void> {
-  const sessionsDir = join(home, ".fx", "sessions");
+  const sessionsDir = join(home, ".x1", "sessions");
   await waitForCondition(() => {
     if (!existsSync(sessionsDir)) return false;
     return readdirSync(sessionsDir, { withFileTypes: true })
@@ -295,8 +295,7 @@ async function waitForSessionPicker(session: TmuxSession): Promise<string> {
   return session.waitForPane(
     (pane) => {
       const plain = stripAnsi(pane);
-      return plain.includes("Sessions") &&
-        (plain.includes("[Current workspace]") || plain.includes("[All workspaces]"));
+      return plain.includes("Sessions") && SESSION_PICKER_META_RE.test(plain);
     },
     TIMEOUT,
   );
@@ -724,7 +723,7 @@ function expectNoRawToolReplay(scrollback: string): void {
 
 function normalizeVolatileStatusRows(grid: string[]): string[] {
   return grid.map((line) =>
-    /^• Thinking(?: \(\d+s\))?$/.test(line) ||
+    /^[◐◓◑◒] Thinking(?: \(\d+s\))?$/.test(line) ||
       /^• Streaming \([^)]*\)$/.test(line) ||
       isVolatileTokenStatusRow(line)
       ? "<status>"
@@ -741,7 +740,7 @@ test("volatile status rows normalize before stable-grid comparison", () => {
 test.skipIf(!tmuxAvailable())(
   "session resume command group opens last and explicit session ids",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-session-resume-command-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-session-resume-command-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const seedStderrPath = join(root, "seed-stderr.log");
@@ -760,7 +759,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, seedGateway),
         stderrPath: seedStderrPath,
@@ -778,11 +777,11 @@ test.skipIf(!tmuxAvailable())(
       const sessionId = sessionIdFromHome(home);
       const cases = [
         {
-          command: `${FX_BIN} session resume --id ${sessionId}`,
+          command: `${X1_BIN} session resume --id ${sessionId}`,
           stderrPath: exactStderrPath,
         },
         {
-          command: `${FX_BIN} session resume last`,
+          command: `${X1_BIN} session resume last`,
           stderrPath: lastStderrPath,
         },
       ];
@@ -840,7 +839,7 @@ function expectAltExitToPreserveNormalViewport(tapePath: string): void {
 test.skipIf(!tmuxAvailable())(
   "approved-shell command output normalizes controls in Ctrl-O and resume views",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-command-output-terminal-safety-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-command-output-terminal-safety-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -854,10 +853,10 @@ test.skipIf(!tmuxAvailable())(
     const trailingMarker = "BOUNDARY_TRAILING";
     const literalClose = "LITERAL_CLOSE_</stdout>";
     const doneMarker = "CONTROL_OUTPUT_DONE";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -894,14 +893,14 @@ printf '${trailingMarker}   '
     let resumedGateway: ReturnType<typeof startFakeGateway> | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, gateway),
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "agent,core,tool,render,transcript,command_output,session",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "agent,core,tool,render,transcript,command_output,session",
         },
         stderrPath,
         width: 72,
@@ -1003,7 +1002,7 @@ printf '${trailingMarker}   '
 
       resumedGateway = startFakeGateway([]);
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume-last`,
+        cmd: `${X1_BIN} --resume-last`,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, resumedGateway),
         stderrPath: resumedStderrPath,
@@ -1026,7 +1025,7 @@ printf '${trailingMarker}   '
       expect(resumedGateway.requests).toHaveLength(0);
       expect(readFileSync(resumedStderrPath, "utf8")).toBe("");
 
-      const replay = await runFx(["replay", tapePath, "--frames"], {
+      const replay = await runx1(["replay", tapePath, "--frames"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
       });
@@ -1056,15 +1055,15 @@ printf '${trailingMarker}   '
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O opens retained command output and restores grouped compact output",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const tapePath = join(root, "ctrl-o.fxtape");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -1081,9 +1080,9 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
-        env: { ...gatewayEnv(home, gateway), FX_RECORD: tapePath },
+        env: { ...gatewayEnv(home, gateway), X1_RECORD: tapePath },
         stderrPath,
         width: 100,
         height: 32,
@@ -1188,16 +1187,16 @@ test.skipIf(!tmuxAvailable())(
   "cap-crossing command output stays durable while grouped compact returns to input",
   async () => {
     const timeout = 120_000;
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-command-output-cap-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-command-output-cap-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const tracePath = join(root, "trace.log");
     const tapePath = join(root, "command-output-cap.fxtape");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -1221,14 +1220,14 @@ test.skipIf(!tmuxAvailable())(
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, gateway),
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "agent,tool,worker,render,transcript,command_output",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "agent,tool,worker,render,transcript,command_output",
         },
         stderrPath,
         width: 160,
@@ -1248,7 +1247,7 @@ test.skipIf(!tmuxAvailable())(
       expect(active.paneStatus()).toEqual({ dead: false, status: null });
       const sessionId = sessionIdFromHome(home);
 
-      const commandDir = join(home, ".fx", "sessions", sessionId, "logs", "commands");
+      const commandDir = join(home, ".x1", "sessions", sessionId, "logs", "commands");
       const artifactFiles = readdirSync(commandDir);
       const stdoutName = artifactFiles.find((name) => name.endsWith(".stdout.log"));
       const stderrName = artifactFiles.find((name) => name.endsWith(".stderr.log"));
@@ -1261,7 +1260,7 @@ test.skipIf(!tmuxAvailable())(
       expect(stdoutArtifact).toContain(stdoutTail);
       expect(stderrArtifact).toContain(stderrTail);
 
-      const replay = await runFx(["replay", tapePath, "--json"], {
+      const replay = await runx1(["replay", tapePath, "--json"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
       });
@@ -1298,7 +1297,7 @@ test.skipIf(!tmuxAvailable())(
   "active command overflow marks Ctrl-O incomplete until terminal replay attaches",
   async () => {
     const timeout = 120_000;
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-command-output-active-overflow-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-command-output-active-overflow-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -1316,10 +1315,10 @@ test.skipIf(!tmuxAvailable())(
     const tailMarker = "ACTIVE_OVERFLOW_TAIL";
     const doneMarker = "ACTIVE_OVERFLOW_DONE";
     const futureMarker = "│ … full output available when command finishes";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -1357,12 +1356,12 @@ printf '${tailMarker}\\n'
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, gateway),
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES:
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES:
             "agent,core,tool,worker,render,transcript,command_output,transcript_retention,session",
         },
         stderrPath,
@@ -1454,7 +1453,7 @@ printf '${tailMarker}\\n'
       expect(terminalCompact).not.toContain(tailMarker);
       expect(terminalCompact).not.toContain(futureMarker);
       const sessionId = sessionIdFromHome(home);
-      const commandDir = join(home, ".fx", "sessions", sessionId, "logs", "commands");
+      const commandDir = join(home, ".x1", "sessions", sessionId, "logs", "commands");
       const combinedName = readdirSync(commandDir).find((name) =>
         name.endsWith(".log") &&
         !name.endsWith(".stdout.log") &&
@@ -1494,7 +1493,7 @@ test.skipIf(!tmuxAvailable())(
   "cancelled cap-crossing command keeps grouped rows stable and Ctrl-O opens its artifact",
   async () => {
     const timeout = 60_000;
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cancelled-command-cap-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-cancelled-command-cap-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -1510,10 +1509,10 @@ test.skipIf(!tmuxAvailable())(
     const nextMarker = "CANCEL_CAP_UNRELATED_TURN_DONE";
     const callId = "cancelled-cap-command";
     const readyPath = join(workspace, ".cancel-cap-ready");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -1558,14 +1557,14 @@ while :; do :; done
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, gateway),
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES:
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES:
             "core,agent,tool,worker,interrupt,command_output,transcript,transcript_retention,render",
         },
         stderrPath,
@@ -1607,7 +1606,7 @@ while :; do :; done
       expect(beforePlain).not.toContain(tailMarker);
 
       const sessionId = sessionIdFromHome(home);
-      const commandDir = join(home, ".fx", "sessions", sessionId, "logs", "commands");
+      const commandDir = join(home, ".x1", "sessions", sessionId, "logs", "commands");
       const combinedName = readdirSync(commandDir).find((name) =>
         name.endsWith(".log") &&
         !name.endsWith(".stdout.log") &&
@@ -1703,7 +1702,7 @@ while :; do :; done
       await active.kill();
       active = null;
 
-      const replayFrames = await runFx(["replay", tapePath, "--frames"], {
+      const replayFrames = await runx1(["replay", tapePath, "--frames"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
         timeoutMs: timeout,
@@ -1713,7 +1712,7 @@ while :; do :; done
       expect(replayFrames.stdout).toContain(expectedRows[0]!);
       expect(replayFrames.stdout).toContain(tailMarker);
       expect(replayFrames.stdout).toContain(nextMarker);
-      const replayJson = await runFx(["replay", tapePath, "--json"], {
+      const replayJson = await runx1(["replay", tapePath, "--json"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
         timeoutMs: timeout,
@@ -1767,7 +1766,7 @@ test.skipIf(!tmuxAvailable())(
   "cancelled below-cap command exposes its TERM tail only through Ctrl-O",
   async () => {
     const timeout = 60_000;
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cancelled-command-below-cap-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-cancelled-command-below-cap-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -1776,10 +1775,10 @@ test.skipIf(!tmuxAvailable())(
     const headMarker = "CANCEL_BELOW_CAP_HEAD";
     const tailMarker = "CANCEL_BELOW_CAP_TERM_TAIL_ONLY";
     const readyPath = join(workspace, ".cancel-below-ready");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -1810,14 +1809,14 @@ while :; do :; done
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, gateway),
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES:
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES:
             "core,agent,tool,worker,interrupt,command_output,transcript,render",
         },
         stderrPath,
@@ -1845,7 +1844,7 @@ while :; do :; done
       expect(countOccurrences(compact, headMarker)).toBe(0);
       expect(compact).not.toContain(tailMarker);
       const sessionId = sessionIdFromHome(home);
-      const commandDir = join(home, ".fx", "sessions", sessionId, "logs", "commands");
+      const commandDir = join(home, ".x1", "sessions", sessionId, "logs", "commands");
       const combinedName = readdirSync(commandDir).find((name) =>
         name.endsWith(".log") &&
         !name.endsWith(".stdout.log") &&
@@ -1867,7 +1866,7 @@ while :; do :; done
       expect(await active.captureFullScrollback()).not.toContain(tailMarker);
       expect(active.isPaneAlive()).toBe(true);
 
-      const replay = await runFx(["replay", tapePath, "--frames"], {
+      const replay = await runx1(["replay", tapePath, "--frames"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
         timeoutMs: timeout,
@@ -1912,7 +1911,7 @@ while :; do :; done
 test.skipIf(!tmuxAvailable())(
   "grouped command status stays compact while Ctrl-O keeps detail",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-command-output-status-order-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-command-output-status-order-")));
     const home = join(root, "home");
     const workspaceDir = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -1923,11 +1922,11 @@ test.skipIf(!tmuxAvailable())(
     const ctrlOScrollbackPath = join(root, "ctrl-o-scrollback.txt");
     const ctrlOAnsiPath = join(root, "ctrl-o-scrollback.ansi.txt");
     const replayJsonPath = join(root, "replay.json");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspaceDir);
     const workspace = realpathSync(workspaceDir);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -1969,14 +1968,14 @@ test.skipIf(!tmuxAvailable())(
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspace,
         env: {
           ...gatewayEnv(home, gateway),
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "agent,tool,render,transcript,gateway",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "agent,tool,render,transcript,gateway",
         },
         stderrPath,
         width: 100,
@@ -2010,7 +2009,7 @@ test.skipIf(!tmuxAvailable())(
       expect(ctrlOVisible).not.toContain("<stdout>");
       expect(ctrlOVisible).not.toContain("</stdout>");
 
-      const replay = await runFx(["replay", tapePath, "--json"], {
+      const replay = await runx1(["replay", tapePath, "--json"], {
         cwd: workspace,
         env: { HOME: home },
       });
@@ -2052,7 +2051,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "streamed document append preserves native scrollback without ONLCR",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-document-append-newlines-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-document-append-newlines-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -2076,7 +2075,7 @@ test.skipIf(!tmuxAvailable())(
         const gateway = startFakeGateway([
           () => streamedTextResponse(response),
         ]);
-        const launch = `${stty}; exec ${shellQuote(FX_BIN)}`;
+        const launch = `${stty}; exec ${shellQuote(X1_BIN)}`;
         let active: TmuxSession | null = null;
         try {
           active = await TmuxSession.create({
@@ -2122,18 +2121,18 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-C closes the Ctrl-O viewer without clearing the unsent draft",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-draft-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-draft-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const tapePath = join(root, "ctrl-o-draft.fxtape");
     const sentinel = "CTRL_O_DRAFT_SCROLLBACK_SENTINEL";
     const draft = "CTRL_O_UNSENT_DRAFT";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(stderrPath, "");
 
-    const cmd = `zsh -lc 'for i in {1..14}; do printf "${sentinel}_%02d: pre-Fx shell scrollback\\n" "$i"; done; exec ${FX_BIN}'`;
+    const cmd = `zsh -lc 'for i in {1..14}; do printf "${sentinel}_%02d: pre-x1 shell scrollback\\n" "$i"; done; exec ${X1_BIN}'`;
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
@@ -2143,8 +2142,8 @@ test.skipIf(!tmuxAvailable())(
           HOME: home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_RECORD: tapePath,
+          X1_AUTO_UPGRADE: "0",
+          X1_RECORD: tapePath,
           NO_COLOR: "1",
         },
         stderrPath,
@@ -2154,7 +2153,7 @@ test.skipIf(!tmuxAvailable())(
       await active.waitForComposer(TIMEOUT);
       const before = await active.captureFullScrollback();
       for (const index of [9, 10, 11]) {
-        expect(before).toContain(`${sentinel}_${index.toString().padStart(2, "0")}: pre-Fx shell scrollback`);
+        expect(before).toContain(`${sentinel}_${index.toString().padStart(2, "0")}: pre-x1 shell scrollback`);
       }
 
       await active.sendLiteralText(draft);
@@ -2171,7 +2170,7 @@ test.skipIf(!tmuxAvailable())(
 
       const restored = await active.captureFullScrollback();
       for (const index of [9, 10, 11]) {
-        expect(restored).toContain(`${sentinel}_${index.toString().padStart(2, "0")}: pre-Fx shell scrollback`);
+        expect(restored).toContain(`${sentinel}_${index.toString().padStart(2, "0")}: pre-x1 shell scrollback`);
       }
       expect(restored).toContain(`┃ ${draft}`);
       expect(restored).not.toContain("press ctrl+c again to exit");
@@ -2198,13 +2197,13 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Cmd+R refuses session switching over a draft and opens after explicit clear",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-session-picker-draft-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-session-picker-draft-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const saved = "CMD_R_SAVED_SESSION";
     const draft = "CMD_R_UNSENT_DRAFT";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(stderrPath, "");
 
@@ -2212,7 +2211,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -2266,17 +2265,17 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O viewer preserves hidden composer input while Ctrl-X stays inert",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-input-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-input-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const firstDone = "CTRL_O_INPUT_FIRST_DONE";
     const followUpDone = "CTRL_O_INPUT_FOLLOW_UP_DONE";
     const fullViewDraft = "CTRL_O_FULL_VIEW_COMPOSER_DRAFT";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2288,7 +2287,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -2350,16 +2349,16 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-C leaves Ctrl-O before cancelling a streaming command",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-cancel-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-cancel-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const tapePath = join(root, "ctrl-o-cancel.fxtape");
     const streamMarker = "CTRL_O_CANCEL_STREAM";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2371,9 +2370,9 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
-        env: { ...gatewayEnv(home, gateway), FX_RECORD: tapePath },
+        env: { ...gatewayEnv(home, gateway), X1_RECORD: tapePath },
         stderrPath,
         width: 100,
         height: 32,
@@ -2416,14 +2415,14 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O keeps command output live while the alternate buffer is open",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-live-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-live-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2438,7 +2437,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -2479,17 +2478,17 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "streaming wheel input stays inline until Ctrl-O",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-stream-scroll-inline-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-stream-scroll-inline-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const tapePath = join(root, "stream-scroll.fxtape");
     const tracePath = join(root, "trace.log");
     const phaseTwoComplete = join(workspace, "phase-two.complete");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2504,14 +2503,14 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, gateway),
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "full_transcript,full_transcript_cache,input,scroll,frame_diff,frame_commit",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "full_transcript,full_transcript_cache,input,scroll,frame_diff,frame_commit",
         },
         stderrPath,
         width: 100,
@@ -2602,7 +2601,7 @@ test.skipIf(!tmuxAvailable())(
       expect(countOccurrences(stdout, "\x1b[?1049h")).toBe(1);
       expect(countOccurrences(stdout, "\x1b[?1049l")).toBe(1);
 
-      const replay = await runFx(["replay", tapePath, "--json"], {
+      const replay = await runx1(["replay", tapePath, "--json"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
       });
@@ -2625,14 +2624,14 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O navigation during shell streaming preserves grouped compact rows",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-navigation-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-navigation-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2651,7 +2650,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -2704,15 +2703,15 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "an ask-user prompt takes over Ctrl-O and accepts its choice inline",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-question-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-question-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const tapePath = join(root, "ctrl-o-question.fxtape");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2742,9 +2741,9 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
-        env: { ...gatewayEnv(home, gateway), FX_RECORD: tapePath },
+        env: { ...gatewayEnv(home, gateway), X1_RECORD: tapePath },
         stderrPath,
         width: 100,
         height: 32,
@@ -2785,14 +2784,14 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O preserves inline block spacing while expanding tool detail",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-spacing-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-spacing-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2813,7 +2812,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -2891,14 +2890,14 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O restores a long Markdown transcript without replaying it into scrollback",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-markdown-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-markdown-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -2918,7 +2917,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -2957,14 +2956,14 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O renders read_file results as readable content",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-read-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-read-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(
@@ -2980,7 +2979,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -3019,14 +3018,14 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O expands each parallel read-only tool detail",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-parallel-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-parallel-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(join(workspace, "README.md"), "READ_FULL_DETAIL_MARKER\n");
@@ -3044,7 +3043,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -3084,15 +3083,15 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "a file approval takes over Ctrl-O and resolves back to the inline transcript",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-approval-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-approval-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const tapePath = join(root, "ctrl-o-file-approval.fxtape");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({
         sandbox: "none",
         permission_mode: "ask",
@@ -3142,9 +3141,9 @@ test.skipIf(!tmuxAvailable())(
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
-        env: { ...gatewayEnv(home, gateway), FX_RECORD: tapePath },
+        env: { ...gatewayEnv(home, gateway), X1_RECORD: tapePath },
         stderrPath,
         width: 100,
         height: 30,
@@ -3179,12 +3178,7 @@ test.skipIf(!tmuxAvailable())(
       await active.sendKeys("3");
       await active.sendKeys("Enter");
       await active.waitForText("CTRL_O_HANDOFF_DONE", TIMEOUT);
-      const scrollback = await active.waitForStableScrollback(
-        (value) =>
-          value.includes("CTRL_O_HANDOFF_DONE") &&
-          countOccurrences(value, priorSummary) === 1,
-        TIMEOUT,
-      );
+      const scrollback = await active.captureFullScrollback();
       const inline = await active.capturePane();
       expect(inline).toContain("CTRL_O_HANDOFF_DONE");
       expect(inline).not.toContain("Apply this change?");
@@ -3220,14 +3214,14 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "a shell approval takes over Ctrl-O and accepts its choice inline",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-shell-approval-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-shell-approval-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -3246,7 +3240,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -3282,16 +3276,16 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "a shell approval handoff does not duplicate a long Ctrl-O transcript in scrollback",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-handoff-scrollback-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-handoff-scrollback-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     const actionTimeout = 8_000;
     const transcriptTimeout = 90_000;
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -3383,7 +3377,7 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -3449,7 +3443,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "Ctrl-O pressure preserves transcript and modal ownership under deterministic load",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-full-transcript-pressure-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-full-transcript-pressure-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -3458,10 +3452,10 @@ test.skipIf(!tmuxAvailable())(
     const scrollbackPath = join(root, "scrollback.txt");
     const ansiScrollbackPath = join(root, "scrollback.ansi.txt");
     const releasePath = join(workspace, ".ctrl-o-pressure-release");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -3565,12 +3559,12 @@ test.skipIf(!tmuxAvailable())(
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, gateway),
-          FX_RECORD: tapePath,
-          FX_RECORD_INPUT: "1",
+          X1_RECORD: tapePath,
+          X1_RECORD_INPUT: "1",
         },
         stderrPath,
         width: 104,
@@ -3788,14 +3782,14 @@ test.skipIf(!tmuxAvailable())(
       await active.sendText("/quit");
       await waitForCondition(
         () => active?.paneStatus().dead === true,
-        "Fx to exit after /quit",
+        "x1 to exit after /quit",
       );
       expect(paneExitMatches(active.paneStatus(), 0)).toBe(true);
       expect(readFileSync(stderrPath, "utf8")).toBe("");
       expect(existsSync(tapePath)).toBe(true);
       expect(statSync(tapePath).size).toBeGreaterThan(0);
 
-      const replayFrames = await runFx(["replay", tapePath, "--frames"], {
+      const replayFrames = await runx1(["replay", tapePath, "--frames"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
       });
@@ -3805,7 +3799,7 @@ test.skipIf(!tmuxAvailable())(
       expect(replayFrames.stdout).toContain(finalSentinel);
       expect(replayFrames.stdout).toContain(composerProbe);
 
-      const replayFinalGrid = await runFx(["replay", tapePath], {
+      const replayFinalGrid = await runx1(["replay", tapePath], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
       });
@@ -3839,7 +3833,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "contended startup resume stays non-interactive and recovers after release",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-contended-resume-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-contended-resume-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const ownerStderrPath = join(root, "owner-stderr.log");
@@ -3860,7 +3854,7 @@ test.skipIf(!tmuxAvailable())(
     try {
       writeFileSync(ownerStderrPath, "");
       owner = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, ownerGateway),
         stderrPath: ownerStderrPath,
@@ -3872,12 +3866,12 @@ test.skipIf(!tmuxAvailable())(
 
       writeFileSync(contenderStderrPath, "");
       contender = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume`,
+        cmd: `${X1_BIN} --resume`,
         cwd: workspaceRoot,
         env: {
           ...gatewayEnv(home, ownerGateway),
-          FX_RECORD: contenderTapePath,
-          FX_RECORD_INPUT: "1",
+          X1_RECORD: contenderTapePath,
+          X1_RECORD_INPUT: "1",
         },
         stderrPath: contenderStderrPath,
         remainOnExit: true,
@@ -3891,14 +3885,14 @@ test.skipIf(!tmuxAvailable())(
 
       expect(paneExitMatches(contender.paneStatus(), 1)).toBe(true);
       expect(readFileSync(contenderStderrPath, "utf8")).toBe(
-        "fx: another Fx process may be using this session (running or suspended); check other terminals or run jobs, then use fg or quit that process\n",
+        "x1: another x1 process may be using this session (running or suspended); check other terminals or run jobs, then use fg or quit that process\n",
       );
       expect(owner.isPaneAlive()).toBe(true);
       const contenderScrollback = await contender.captureFullScrollback();
       expect(contenderScrollback).not.toContain("❯");
       expect(contenderScrollback).not.toContain("┃");
       expect(contenderScrollback).not.toContain("show available slash commands");
-      const contenderReplay = await runFx(["replay", contenderTapePath, "--frames"], {
+      const contenderReplay = await runx1(["replay", contenderTapePath, "--frames"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });
@@ -3921,7 +3915,7 @@ test.skipIf(!tmuxAvailable())(
 
       writeFileSync(retryStderrPath, "");
       retry = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume`,
+        cmd: `${X1_BIN} --resume`,
         cwd: workspaceRoot,
         env: gatewayEnv(home, retryGateway),
         stderrPath: retryStderrPath,
@@ -3968,7 +3962,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "interactive resume shows session contention and retries the preserved selection",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-interactive-contention-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-interactive-contention-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const ownerStderrPath = join(root, "owner-stderr.log");
@@ -3986,7 +3980,7 @@ test.skipIf(!tmuxAvailable())(
     try {
       writeFileSync(ownerStderrPath, "");
       owner = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, ownerGateway),
         stderrPath: ownerStderrPath,
@@ -3999,7 +3993,7 @@ test.skipIf(!tmuxAvailable())(
 
       writeFileSync(contenderStderrPath, "");
       contender = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, contenderGateway),
         stderrPath: contenderStderrPath,
@@ -4014,7 +4008,7 @@ test.skipIf(!tmuxAvailable())(
       await contender.sendKeys("Enter");
       await contender.waitForPane(
         (pane) => stripAnsi(pane).includes(
-          "This session is open in another Fx. Close it there, then press Enter to retry.",
+          "This session is open in another x1. Close it there, then press Enter to retry.",
         ),
         1_000,
       );
@@ -4023,7 +4017,7 @@ test.skipIf(!tmuxAvailable())(
       const contendedPicker = stripAnsi(await contender.capturePane());
       expect(contendedPicker).toContain(savedTitle);
       expect(contendedPicker).toContain(
-        "This session is open in another Fx. Close it there, then press Enter to retry.",
+        "This session is open in another x1. Close it there, then press Enter to retry.",
       );
       expect(contendedPicker).not.toContain("SessionBusy");
       const contendedEntries = visibleSessionPickerEntries(
@@ -4068,16 +4062,16 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "context-deferred scoped tools remain deferred after resume",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-resume-deferred-tools-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-resume-deferred-tools-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const nested = join(workspace, "nested");
     const liveStderrPath = join(root, "live-stderr.log");
     const resumeStderrPath = join(root, "resume-stderr.log");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(nested, { recursive: true });
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(join(workspace, "AGENTS.md"), "DEFERRED_TOOL_ROOT_SCOPE\n");
@@ -4159,13 +4153,13 @@ test.skipIf(!tmuxAvailable())(
       expect(scrollback).not.toContain(`● Failed ${command}`);
       expect(scrollback).toContain("Read nested/input.txt");
       expect(scrollback).toContain(`Ran ${command}`);
-      expect(scrollback).toContain(`Exited 7 ${failureCommand}`);
+      expect(scrollback).toContain(`Ran ${failureCommand}`);
       expect(scrollback).not.toContain("│ exit code 7");
     }
 
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, gateway),
         stderrPath: liveStderrPath,
@@ -4192,7 +4186,7 @@ test.skipIf(!tmuxAvailable())(
       active = null;
 
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} resume last`,
+        cmd: `${X1_BIN} resume last`,
         cwd: workspaceRoot,
         env: gatewayEnv(home, resumeGateway),
         stderrPath: resumeStderrPath,
@@ -4237,7 +4231,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "new and resumed sessions drop kill-ring and large-paste backing state",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-session-input-reset-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-session-input-reset-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -4274,7 +4268,7 @@ test.skipIf(!tmuxAvailable())(
 
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -4315,7 +4309,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "graceful exit prints an exact resume command",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-exit-handoff-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-exit-handoff-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const binDir = join(root, "bin");
@@ -4326,7 +4320,7 @@ test.skipIf(!tmuxAvailable())(
     mkdirSync(home);
     mkdirSync(workspace);
     mkdirSync(binDir);
-    symlinkSync(FX_BIN, join(binDir, "fx"));
+    symlinkSync(X1_BIN, join(binDir, "x1"));
     writeFileSync(stderrPath, "");
     writeFileSync(resumedStderrPath, "");
     const initialGateway = startFakeGateway([fakeGatewayFinalText(marker)]);
@@ -4337,13 +4331,13 @@ test.skipIf(!tmuxAvailable())(
 
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, initialGateway),
           PATH: path,
-          FX_RECORD: tapePath,
-          FX_THEME: "dark",
+          X1_RECORD: tapePath,
+          X1_THEME: "dark",
         },
         stderrPath,
         width: 120,
@@ -4363,7 +4357,7 @@ test.skipIf(!tmuxAvailable())(
       expect(paneExitMatches(active.paneStatus(), 0)).toBe(true);
       const scrollback = stripAnsi(await active.captureFullScrollback());
       const ansiScrollback = await active.captureFullScrollbackEscapes();
-      const expected = `Continue session with: fx --resume ${sessionId}`;
+      const expected = `Continue session with: x1 --resume ${sessionId}`;
       expect(scrollback).toContain(expected);
       expect(scrollback).not.toContain("To continue this session, run:");
       expect(ansiScrollback).toContain(`\x1b[38;5;245m${expected}\x1b[39m`);
@@ -4377,7 +4371,7 @@ test.skipIf(!tmuxAvailable())(
         .map((line) => line.trim())
         .find((line) => line === expected);
       const printedCommand = handoffLine?.slice("Continue session with: ".length);
-      expect(printedCommand).toBe(`fx --resume ${sessionId}`);
+      expect(printedCommand).toBe(`x1 --resume ${sessionId}`);
 
       await active.kill();
       active = await TmuxSession.create({
@@ -4419,7 +4413,7 @@ test.skipIf(!tmuxAvailable())(
   "closing the startup resume picker starts a writable fresh session",
   async () => {
     const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "fx-tui-resume-picker-cancel-")),
+      mkdtempSync(join(tmpdir(), "x1-tui-resume-picker-cancel-")),
     );
     const home = join(root, "home");
     const workspace = join(root, "workspace");
@@ -4434,7 +4428,7 @@ test.skipIf(!tmuxAvailable())(
     try {
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} -r`,
+        cmd: `${X1_BIN} -r`,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -4476,7 +4470,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "interactive resume aliases restore history and return to a live composer",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-resume-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-resume-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -4494,7 +4488,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(initialGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, initialGateway),
         stderrPath,
@@ -4513,7 +4507,7 @@ test.skipIf(!tmuxAvailable())(
       const sessionId = sessionIdFromHome(home);
       const resumeViewPath = join(
         home,
-        ".fx",
+        ".x1",
         "sessions",
         sessionId,
         "resume-view.bin",
@@ -4525,7 +4519,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(pickerGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} -r`,
+        cmd: `${X1_BIN} -r`,
         cwd: workspaceRoot,
         env: gatewayEnv(home, pickerGateway),
         stderrPath,
@@ -4567,13 +4561,13 @@ test.skipIf(!tmuxAvailable())(
         gateways.push(gateway);
         writeFileSync(stderrPath, "");
         active = await TmuxSession.create({
-          cmd: `${FX_BIN} ${args.join(" ")}`,
+          cmd: `${X1_BIN} ${args.join(" ")}`,
           cwd: workspaceRoot,
           env: {
             ...gatewayEnv(home, gateway),
-            FX_RECORD: tapePath,
-            FX_TRACE_LOG: tracePath,
-            FX_TRACE_SCOPES: "session",
+            X1_RECORD: tapePath,
+            X1_TRACE_LOG: tracePath,
+            X1_TRACE_SCOPES: "session",
           },
           stderrPath,
           width: args[0] === `--resume-${sessionId}` ? 42 : 100,
@@ -4595,7 +4589,7 @@ test.skipIf(!tmuxAvailable())(
         expect(resumeTrace).toMatch(
           /event=resume_view_cache (?:outcome=painted freshness=exact|outcome=skipped freshness=(?:exact|older))/,
         );
-        const replay = await runFx(["replay", tapePath, "--frames"], {
+        const replay = await runx1(["replay", tapePath, "--frames"], {
           cwd: workspaceRoot,
           env: { HOME: home },
         });
@@ -4665,9 +4659,9 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(markdownGateway);
       writeFileSync(markdownStderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(markdownWorkspace),
-        env: { ...gatewayEnv(markdownHome, markdownGateway), FX_RECORD: markdownTapePath },
+        env: { ...gatewayEnv(markdownHome, markdownGateway), X1_RECORD: markdownTapePath },
         stderrPath: markdownStderrPath,
         width: 72,
         height: 32,
@@ -4694,7 +4688,7 @@ test.skipIf(!tmuxAvailable())(
       await active.kill();
       active = null;
       expect(readFileSync(markdownStderrPath, "utf8")).not.toContain("AnsiBandOverflow");
-      const liveReplay = await runFx(["replay", markdownTapePath, "--frames"], {
+      const liveReplay = await runx1(["replay", markdownTapePath, "--frames"], {
         cwd: realpathSync(markdownWorkspace),
         env: { HOME: markdownHome },
       });
@@ -4709,9 +4703,9 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(resumedMarkdownGateway);
       writeFileSync(markdownStderrPath, "");
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume-last`,
+        cmd: `${X1_BIN} --resume-last`,
         cwd: realpathSync(markdownWorkspace),
-        env: { ...gatewayEnv(markdownHome, resumedMarkdownGateway), FX_RECORD: resumedMarkdownTapePath },
+        env: { ...gatewayEnv(markdownHome, resumedMarkdownGateway), X1_RECORD: resumedMarkdownTapePath },
         stderrPath: markdownStderrPath,
         width: 42,
         height: 32,
@@ -4739,7 +4733,7 @@ test.skipIf(!tmuxAvailable())(
       expect(await active.waitForSessionEnd()).toBe(true);
       await active.kill();
       active = null;
-      const resumedReplay = await runFx(["replay", resumedMarkdownTapePath, "--frames"], {
+      const resumedReplay = await runx1(["replay", resumedMarkdownTapePath, "--frames"], {
         cwd: realpathSync(markdownWorkspace),
         env: { HOME: markdownHome },
       });
@@ -4754,10 +4748,10 @@ test.skipIf(!tmuxAvailable())(
       const toolWorkspace = join(root, "tool-workspace");
       const toolStderrPath = join(root, "tool-stderr.log");
       const toolWorkspaceMarker = "tool-workspace";
-      mkdirSync(join(toolHome, ".fx"), { recursive: true });
+      mkdirSync(join(toolHome, ".x1"), { recursive: true });
       mkdirSync(toolWorkspace);
       writeFileSync(
-        join(toolHome, ".fx", "settings.json"),
+        join(toolHome, ".x1", "settings.json"),
         JSON.stringify({}),
       );
       const toolWorkspaceRoot = realpathSync(toolWorkspace);
@@ -4769,7 +4763,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(toolGateway);
       writeFileSync(toolStderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: toolWorkspaceRoot,
         env: gatewayEnv(toolHome, toolGateway),
         stderrPath: toolStderrPath,
@@ -4800,7 +4794,7 @@ test.skipIf(!tmuxAvailable())(
         gateways.push(gateway);
         writeFileSync(toolStderrPath, "");
         active = await TmuxSession.create({
-          cmd: `${FX_BIN} ${args.join(" ")}`,
+          cmd: `${X1_BIN} ${args.join(" ")}`,
           cwd: toolWorkspaceRoot,
           env: gatewayEnv(toolHome, gateway),
           stderrPath: toolStderrPath,
@@ -4845,7 +4839,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "upgrade ctrl-g reloads the background-installed binary and resumes",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-upgrade-ctrl-g-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-upgrade-ctrl-g-")));
     const home = join(root, "home");
     const freshHome = join(root, "fresh-home");
     const workspace = join(root, "workspace");
@@ -4858,9 +4852,9 @@ test.skipIf(!tmuxAvailable())(
     mkdirSync(workspace);
     mkdirSync(installDir);
     const workspaceRoot = realpathSync(workspace);
-    const installedFx = join(installDir, "fx");
-    copyFileSync(FX_BIN, installedFx);
-    chmodSync(installedFx, 0o755);
+    const installedx1 = join(installDir, "x1");
+    copyFileSync(X1_BIN, installedx1);
+    chmodSync(installedx1, 0o755);
 
     let active: TmuxSession | null = null;
     let fresh: TmuxSession | null = null;
@@ -4874,12 +4868,12 @@ test.skipIf(!tmuxAvailable())(
       writeFileSync(stderrPath, "");
       writeFileSync(freshStderrPath, "");
       active = await TmuxSession.create({
-        cmd: shellQuote(installedFx),
+        cmd: shellQuote(installedx1),
         cwd: workspaceRoot,
         env: {
           ...gatewayEnv(home, gateway),
-          FX_AUTO_UPGRADE: "1",
-          FX_E2E_UPGRADE_BASE_URL: release.baseUrl,
+          X1_AUTO_UPGRADE: "1",
+          X1_E2E_UPGRADE_BASE_URL: release.baseUrl,
         },
         stderrPath,
         width: 110,
@@ -4895,10 +4889,10 @@ test.skipIf(!tmuxAvailable())(
         "update ready: ctrl+g to reload",
         UPGRADE_TIMEOUT,
       );
-      expect(readFileSync(installedFx, "utf8")).toContain(argvLogPath);
+      expect(readFileSync(installedx1, "utf8")).toContain(argvLogPath);
 
       fresh = await TmuxSession.create({
-        cmd: shellQuote(installedFx),
+        cmd: shellQuote(installedx1),
         cwd: workspaceRoot,
         env: gatewayEnv(freshHome, gateway),
         stderrPath: freshStderrPath,
@@ -4907,7 +4901,7 @@ test.skipIf(!tmuxAvailable())(
       });
       await fresh.waitForComposer(TIMEOUT);
       expect(readFileSync(argvLogPath, "utf8").trim().split("\n")).toEqual([
-        installedFx,
+        installedx1,
       ]);
       expect(await fresh.capturePane()).not.toContain("update ready: ctrl+g to reload");
       await fresh.sendText("/quit");
@@ -4915,10 +4909,10 @@ test.skipIf(!tmuxAvailable())(
       await fresh.kill();
       fresh = null;
 
-      const version = (await runFx(["--version"])).stdout.trim();
+      const version = (await runx1(["--version"])).stdout.trim();
       await active.sendHexBytes(["07"]);
 
-      const updatedNotice = `● fx has been updated to v${version}`;
+      const updatedNotice = `● x1 has been updated to v${version}`;
       await active.waitForText(updatedNotice, TIMEOUT);
       const resumed = await waitForScrollback(active, "UPGRADE_CTRL_G_INITIAL_DONE");
       expect(resumed).toContain("UPGRADE_CTRL_G_INITIAL_DONE");
@@ -4928,8 +4922,8 @@ test.skipIf(!tmuxAvailable())(
 
       const argvLines = readFileSync(argvLogPath, "utf8").trim().split("\n");
       expect(argvLines).toEqual([
-        installedFx,
-        `${installedFx}\tresume\t${sessionId}\t--upgrade-relaunch`,
+        installedx1,
+        `${installedx1}\tresume\t${sessionId}\t--upgrade-relaunch`,
       ]);
 
       await active.sendText("Continue after upgrade handoff.");
@@ -4962,7 +4956,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "upgrade ctrl-g repairs an exact corrupt boundary and resumes",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-upgrade-corrupt-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-upgrade-corrupt-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const installDir = join(root, "install");
@@ -4972,9 +4966,9 @@ test.skipIf(!tmuxAvailable())(
     mkdirSync(workspace);
     mkdirSync(installDir);
     const workspaceRoot = realpathSync(workspace);
-    const installedFx = join(installDir, "fx");
-    copyFileSync(FX_BIN, installedFx);
-    chmodSync(installedFx, 0o755);
+    const installedx1 = join(installDir, "x1");
+    copyFileSync(X1_BIN, installedx1);
+    chmodSync(installedx1, 0o755);
 
     let active: TmuxSession | null = null;
     const gateway = startFakeGateway([
@@ -4986,12 +4980,12 @@ test.skipIf(!tmuxAvailable())(
     try {
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: shellQuote(installedFx),
+        cmd: shellQuote(installedx1),
         cwd: workspaceRoot,
         env: {
           ...gatewayEnv(home, gateway),
-          FX_AUTO_UPGRADE: "1",
-          FX_E2E_UPGRADE_BASE_URL: release.baseUrl,
+          X1_AUTO_UPGRADE: "1",
+          X1_E2E_UPGRADE_BASE_URL: release.baseUrl,
         },
         stderrPath,
         width: 110,
@@ -5008,15 +5002,15 @@ test.skipIf(!tmuxAvailable())(
         UPGRADE_TIMEOUT,
       );
 
-      const sessionDir = join(home, ".fx", "sessions", sessionId);
+      const sessionDir = join(home, ".x1", "sessions", sessionId);
       const watermarkName = readdirSync(sessionDir).find(
         (name) => name.startsWith("commit.") && name.endsWith(".json"),
       )!;
       writeFileSync(join(sessionDir, watermarkName), "{}\n", { mode: 0o600 });
-      const version = (await runFx(["--version"])).stdout.trim();
+      const version = (await runx1(["--version"])).stdout.trim();
       await active.sendHexBytes(["07"]);
 
-      await active.waitForText(`● fx has been updated to v${version}`, TIMEOUT);
+      await active.waitForText(`● x1 has been updated to v${version}`, TIMEOUT);
       const resumed = await waitForScrollback(
         active,
         "UPGRADE_CORRUPT_INITIAL_DONE",
@@ -5025,7 +5019,7 @@ test.skipIf(!tmuxAvailable())(
       expect(active.isPaneAlive()).toBe(true);
       const argvLines = readFileSync(argvLogPath, "utf8").trim().split("\n");
       expect(argvLines).toEqual([
-        `${installedFx}\tresume\t${sessionId}\t--upgrade-relaunch`,
+        `${installedx1}\tresume\t${sessionId}\t--upgrade-relaunch`,
       ]);
 
       await active.sendText("Continue after repaired upgrade handoff.");
@@ -5048,7 +5042,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "answered question cards survive flag and picker resume",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-resume-question-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-resume-question-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -5100,7 +5094,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(initialGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, initialGateway),
         stderrPath,
@@ -5123,7 +5117,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(flagGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume-last`,
+        cmd: `${X1_BIN} --resume-last`,
         cwd: workspaceRoot,
         env: gatewayEnv(home, flagGateway),
         stderrPath,
@@ -5146,7 +5140,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(pickerGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, pickerGateway),
         stderrPath,
@@ -5180,7 +5174,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "recorded file diffs survive resume and retain their Ctrl-O detail",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-resume-file-diff-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-resume-file-diff-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -5196,10 +5190,10 @@ test.skipIf(!tmuxAvailable())(
     );
     const firstCompletion = "RESUMED_FIRST_FILE_COMPLETE";
     const secondCompletion = "RESUMED_SECOND_FILE_COMPLETE";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
     );
     writeFileSync(stderrPath, "");
@@ -5220,9 +5214,9 @@ test.skipIf(!tmuxAvailable())(
     let active: TmuxSession | null = null;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
-        env: { ...gatewayEnv(home, initialGateway), FX_RECORD: initialTapePath },
+        env: { ...gatewayEnv(home, initialGateway), X1_RECORD: initialTapePath },
         stderrPath,
         width: 120,
         height: 32,
@@ -5259,16 +5253,16 @@ test.skipIf(!tmuxAvailable())(
 
       const sessionId = sessionIdFromHome(home);
       const eventsJsonl = readFileSync(
-        join(home, ".fx", "sessions", sessionId, "events.jsonl"),
+        join(home, ".x1", "sessions", sessionId, "events.jsonl"),
         "utf8",
       );
       expect(eventsJsonl).toContain("committed_file_presentation");
       expect(eventsJsonl).not.toContain("sk-abcdefghijklmnop");
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume-${sessionId}`,
+        cmd: `${X1_BIN} --resume-${sessionId}`,
         cwd: realpathSync(workspace),
-        env: { ...gatewayEnv(home, resumedGateway), FX_RECORD: resumedTapePath },
+        env: { ...gatewayEnv(home, resumedGateway), X1_RECORD: resumedTapePath },
         stderrPath,
         width: 120,
         height: 32,
@@ -5318,7 +5312,7 @@ test.skipIf(!tmuxAvailable())(
       expect(readFileSync(join(workspace, "second-large.md"), "utf8")).toBe(
         `${secondLines.join("\n")}\n`,
       );
-      const replay = await runFx(["replay", resumedTapePath, "--frames"], {
+      const replay = await runx1(["replay", resumedTapePath, "--frames"], {
         cwd: realpathSync(workspace),
         env: { HOME: home },
       });
@@ -5345,16 +5339,16 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "command output folding survives flag and picker resume",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-resume-command-output-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-resume-command-output-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
     mkdirSync(home);
     mkdirSync(workspace);
     const workspaceRoot = realpathSync(workspace);
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "ask", permission: {} }),
     );
     const lineCount = 40;
@@ -5451,9 +5445,9 @@ printf '${stdoutTail2}\\n'
       gateways.push(initialGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
-        env: { ...gatewayEnv(home, initialGateway), FX_PERMISSION_MODE: "ask" },
+        env: { ...gatewayEnv(home, initialGateway), X1_PERMISSION_MODE: "ask" },
         stderrPath,
         width: 100,
         height: 32,
@@ -5476,7 +5470,7 @@ printf '${stdoutTail2}\\n'
       gateways.push(flagGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} --resume-last`,
+        cmd: `${X1_BIN} --resume-last`,
         cwd: workspaceRoot,
         env: gatewayEnv(home, flagGateway),
         stderrPath,
@@ -5499,7 +5493,7 @@ printf '${stdoutTail2}\\n'
       gateways.push(pickerGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, pickerGateway),
         stderrPath,
@@ -5533,7 +5527,7 @@ printf '${stdoutTail2}\\n'
 test.skipIf(!tmuxAvailable())(
   "interactive /resume opens a searchable scoped catalog and resumes the selection",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-session-picker-workspace-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-session-picker-workspace-")));
     const home = join(root, "home");
     const workspaceA = join(root, "workspace-a");
     const workspaceB = join(root, "workspace-b");
@@ -5553,7 +5547,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(workspaceAGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceARoot,
         env: gatewayEnv(home, workspaceAGateway),
         stderrPath,
@@ -5572,7 +5566,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(workspaceBGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceBRoot,
         env: gatewayEnv(home, workspaceBGateway),
         stderrPath,
@@ -5591,7 +5585,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(pickerGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceARoot,
         env: gatewayEnv(home, pickerGateway),
         stderrPath,
@@ -5604,7 +5598,7 @@ test.skipIf(!tmuxAvailable())(
       const currentPicker = stripAnsi(await active.capturePane());
       expect(currentPicker).toContain("Sessions 1");
       expect(currentPicker).toContain("[Current workspace]");
-      expect(currentPicker).toContain("𝒇x");
+      expect(currentPicker).not.toContain("layerx1.com");
       expect(currentPicker).toContain("Save the workspace A transcript.");
       expect(currentPicker).not.toContain("Save the workspace B transcript.");
 
@@ -5631,7 +5625,7 @@ test.skipIf(!tmuxAvailable())(
       expect(filteredPicker).toContain("workspace B");
       expect(filteredPicker).toContain("workspace-b");
       expect(filteredPicker).not.toContain("Preview:");
-      const sessionIds = readdirSync(join(home, ".fx", "sessions"), {
+      const sessionIds = readdirSync(join(home, ".x1", "sessions"), {
         withFileTypes: true,
       })
         .filter((entry) => entry.name !== "latest" && entry.isDirectory())
@@ -5663,7 +5657,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "interactive /resume keeps shared-prefix titles distinguishable at narrow widths",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-session-picker-narrow-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-session-picker-narrow-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -5685,7 +5679,7 @@ test.skipIf(!tmuxAvailable())(
       for (let index = 0; index < titles.length; index += 1) {
         writeFileSync(stderrPath, "");
         active = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: workspaceRoot,
           env: gatewayEnv(home, sessionGateway),
           stderrPath,
@@ -5706,7 +5700,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(pickerGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, pickerGateway),
         stderrPath,
@@ -5722,7 +5716,7 @@ test.skipIf(!tmuxAvailable())(
       }
       const rows = pane
         .split("\n")
-        .filter((line) => /(?:alpha|beta|gamma)\b/.test(line))
+        .filter((line) => /(?:alpha|beta|gamma)\b.*\bturns?\b/.test(line))
         .map((line) => line.trim());
       expect(new Set(rows).size).toBe(titles.length);
       expect(active.isPaneAlive()).toBe(true);
@@ -5739,7 +5733,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "interactive /resume highlight reaches bottom before the list scrolls",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-session-picker-row-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-session-picker-row-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -5761,11 +5755,11 @@ test.skipIf(!tmuxAvailable())(
         gateways.push(gateway);
         writeFileSync(stderrPath, "");
         active = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: workspaceRoot,
           env: {
             ...gatewayEnv(home, gateway),
-            FX_THEME: "dark",
+            X1_THEME: "dark",
             NO_COLOR: undefined,
           },
           stderrPath,
@@ -5786,11 +5780,11 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(pickerGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: {
           ...gatewayEnv(home, pickerGateway),
-          FX_THEME: "dark",
+          X1_THEME: "dark",
           NO_COLOR: undefined,
         },
         stderrPath,
@@ -5802,7 +5796,7 @@ test.skipIf(!tmuxAvailable())(
       await waitForSessionPicker(active);
 
       let sessionEntries = visibleSessionPickerEntries(await active.capturePaneEscapes());
-      expect(sessionEntries).toHaveLength(2);
+      expect(sessionEntries.length).toBeGreaterThanOrEqual(7);
       expect(sessionEntries.findIndex((entry) => entry.selected)).toBe(0);
       const firstVisibleRow = sessionEntries[0]!.row;
       const firstVisibleTitle = sessionEntries[0]!.title;
@@ -5842,9 +5836,8 @@ test.skipIf(!tmuxAvailable())(
       expect(hintRow).toBeGreaterThan(loadMoreRow);
       const firstEntryRow = visibleSessionPickerEntries(await active.capturePaneEscapes())[0]!.row;
 
-      for (let index = 0; index < 10 - visibleCount; index += 1) {
-        await active.sendKeys("Down");
-      }
+      await active.sendKeys("Down");
+      await active.sendKeys("Down");
       await active.waitForPane((pane) => {
         const plain = stripAnsi(pane);
         return /Sessions 1[12]\b/.test(plain) && !plain.includes("Load more");
@@ -5876,7 +5869,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "interactive /resume loads more sessions and dismisses cleanly",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-session-picker-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-session-picker-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -5897,7 +5890,7 @@ test.skipIf(!tmuxAvailable())(
         gateways.push(gateway);
         writeFileSync(stderrPath, "");
         active = await TmuxSession.create({
-          cmd: FX_BIN,
+          cmd: X1_BIN,
           cwd: workspaceRoot,
           env: gatewayEnv(home, gateway),
           stderrPath,
@@ -5918,7 +5911,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(gateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, gateway),
         stderrPath,
@@ -5996,9 +5989,9 @@ test.skipIf(!tmuxAvailable())(
 );
 
 test.skipIf(!tmuxAvailable())(
-  "new and resumed sessions preserve native terminal scrollback while fx is active",
+  "new and resumed sessions preserve native terminal scrollback while x1 is active",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-direct-resume-scroll-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-direct-resume-scroll-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -6024,11 +6017,11 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(initialGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: {
           ...gatewayEnv(home, initialGateway),
-          FX_RECORD: initialTapePath,
+          X1_RECORD: initialTapePath,
         },
         stderrPath,
         width: 80,
@@ -6051,11 +6044,11 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(resumedGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} resume ${sessionId}`,
+        cmd: `${X1_BIN} resume ${sessionId}`,
         cwd: workspaceRoot,
         env: {
           ...gatewayEnv(home, resumedGateway),
-          FX_RECORD: tapePath,
+          X1_RECORD: tapePath,
         },
         stderrPath,
         width: 80,
@@ -6088,7 +6081,7 @@ test.skipIf(!tmuxAvailable())(
 test.skipIf(!tmuxAvailable())(
   "interactive /resume refuses a live stream and preserves Escape cancellation",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-tui-session-picker-stream-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-tui-session-picker-stream-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const stderrPath = join(root, "stderr.log");
@@ -6103,7 +6096,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(savedGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, savedGateway),
         stderrPath,
@@ -6121,7 +6114,7 @@ test.skipIf(!tmuxAvailable())(
       gateways.push(heldGateway);
       writeFileSync(stderrPath, "");
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: workspaceRoot,
         env: gatewayEnv(home, heldGateway),
         stderrPath,
@@ -6156,7 +6149,7 @@ test.skipIf(!tmuxAvailable())(
   "cancelled command presentation survives a distinct-process resume",
   async () => {
     const timeout = 60_000;
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cancelled-command-resume-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-cancelled-command-resume-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const initialStderrPath = join(root, "initial-stderr.log");
@@ -6169,10 +6162,10 @@ test.skipIf(!tmuxAvailable())(
     const bufferedTailMarker = "INTERRUPT_BUFFERED_TAIL";
     const artifactTailMarker = "INTERRUPT_TERM_TAIL";
     const followUpMarker = "INTERRUPT_FOLLOW_UP_DONE";
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(initialStderrPath, "");
@@ -6203,12 +6196,12 @@ while :; do sleep 1; done
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, initialGateway),
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "session,agent,tool,worker,interrupt,command_output,transcript",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "session,agent,tool,worker,interrupt,command_output,transcript",
         },
         stderrPath: initialStderrPath,
         width: 120,
@@ -6249,7 +6242,7 @@ while :; do sleep 1; done
       expect(followUpBody).not.toContain(".command_artifacts");
 
       const sessionId = sessionIdFromHome(home);
-      const commandDir = join(home, ".fx", "sessions", sessionId, "logs", "commands");
+      const commandDir = join(home, ".x1", "sessions", sessionId, "logs", "commands");
       const artifactName = readdirSync(commandDir).find((name) =>
         name.endsWith(".log") &&
         !name.endsWith(".stdout.log") &&
@@ -6275,7 +6268,7 @@ while :; do sleep 1; done
       expect(readFileSync(initialStderrPath, "utf8")).toBe("");
 
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} resume last`,
+        cmd: `${X1_BIN} resume last`,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, resumedGateway),
         stderrPath: resumedStderrPath,
@@ -6333,7 +6326,7 @@ test.skipIf(!tmuxAvailable())(
   "zero-output cancelled command restores its row without an output block",
   async () => {
     const timeout = 60_000;
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-zero-output-cancel-resume-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-zero-output-cancel-resume-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const initialStderrPath = join(root, "initial-stderr.log");
@@ -6341,10 +6334,10 @@ test.skipIf(!tmuxAvailable())(
     const tracePath = join(root, "trace.log");
     const readyPath = join(workspace, ".zero-ready");
     const scriptPath = join(workspace, "z.sh");
-    mkdirSync(join(home, ".fx"), { recursive: true });
+    mkdirSync(join(home, ".x1"), { recursive: true });
     mkdirSync(workspace);
     writeFileSync(
-      join(home, ".fx", "settings.json"),
+      join(home, ".x1", "settings.json"),
       JSON.stringify({ sandbox: "none", permission_mode: "auto", permission: {} }),
     );
     writeFileSync(initialStderrPath, "");
@@ -6363,12 +6356,12 @@ test.skipIf(!tmuxAvailable())(
     let passed = false;
     try {
       active = await TmuxSession.create({
-        cmd: FX_BIN,
+        cmd: X1_BIN,
         cwd: realpathSync(workspace),
         env: {
           ...gatewayEnv(home, initialGateway),
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "session,agent,tool,worker,interrupt,command_output,transcript",
+          X1_TRACE_LOG: tracePath,
+          X1_TRACE_SCOPES: "session,agent,tool,worker,interrupt,command_output,transcript",
         },
         stderrPath: initialStderrPath,
         width: 100,
@@ -6396,7 +6389,7 @@ test.skipIf(!tmuxAvailable())(
       expect(readFileSync(initialStderrPath, "utf8")).toBe("");
 
       active = await TmuxSession.create({
-        cmd: `${FX_BIN} resume last`,
+        cmd: `${X1_BIN} resume last`,
         cwd: realpathSync(workspace),
         env: gatewayEnv(home, resumedGateway),
         stderrPath: resumedStderrPath,

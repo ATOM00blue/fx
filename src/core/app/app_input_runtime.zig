@@ -3541,7 +3541,7 @@ fn currentExecutablePathForRouting(
     _: ?*anyopaque,
     executable_buf: []u8,
 ) upgrade_helpers.ExecutablePathError![]const u8 {
-    const executable_path = "/tmp/fx-routing-upgraded";
+    const executable_path = "/tmp/x1-routing-upgraded";
     if (executable_path.len > executable_buf.len) return error.PathTooLong;
     @memcpy(executable_buf[0..executable_path.len], executable_path);
     return executable_buf[0..executable_path.len];
@@ -3807,12 +3807,12 @@ test "app_input_runtime routes auth picker navigation before composer history" {
     const alloc = std.testing.allocator;
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initMany(&.{ .ai_gateway_api_key, .fx_login });
+    app.auth.source_inventory = auth_runtime.SourceSet.initMany(&.{ .layerx1_subscription, .layerx1_subscription });
     app.auth.openPicker(alloc);
 
     try Runtime(RoutingFakeApp).routeModifiedHistory(&app, .down, 1);
 
-    try std.testing.expect((auth_runtime.Choice{ .action = .switch_provider }).eql(app.auth.pickerView().selected_choice.?));
+    try std.testing.expect((auth_runtime.Choice{ .action = .layerx1_login }).eql(app.auth.pickerView().selected_choice.?));
     try std.testing.expectEqual(@as(?usize, null), app.input_runtime.composer_history.activeIndex());
 }
 
@@ -3820,12 +3820,12 @@ test "app_input_runtime Tab cycles the active auth picker" {
     const alloc = std.testing.allocator;
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initMany(&.{ .ai_gateway_api_key, .fx_login });
+    app.auth.source_inventory = auth_runtime.SourceSet.initMany(&.{ .layerx1_subscription, .layerx1_subscription });
     app.auth.openPicker(alloc);
 
     try Runtime(RoutingFakeApp).handleByte(&app, '\t', 4096, 100);
 
-    try std.testing.expect((auth_runtime.Choice{ .action = .switch_provider }).eql(app.auth.pickerView().selected_choice.?));
+    try std.testing.expect((auth_runtime.Choice{ .action = .layerx1_login }).eql(app.auth.pickerView().selected_choice.?));
 }
 
 test "app_input_runtime Tab leaves a dismissed slash query unchanged" {
@@ -3903,42 +3903,24 @@ test "workspace menu whole replacement preserves the prior draft when staging fa
     );
 }
 
-test "app_input_runtime auth picker enter closes before selecting a switched source" {
-    const alloc = std.testing.allocator;
-    var app = try RoutingFakeApp.init(alloc);
-    defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initMany(&.{ .ai_gateway_api_key, .fx_login });
-    app.auth.openPicker(alloc);
-    app.auth.openSwitchCredentialPicker(alloc);
-    _ = app.auth.movePicker(1);
-
-    try Runtime(RoutingFakeApp).handleByte(&app, '\r', 4096, 100);
-
-    try std.testing.expect(!app.auth.pickerView().active);
-    try std.testing.expectEqual(types.CredentialSource.fx_login, app.selected_credential_source.?);
-}
-
 test "app_input_runtime connections picker delegates typed acquisition actions" {
     const alloc = std.testing.allocator;
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initMany(&.{ .ai_gateway_api_key, .fx_login });
+    app.auth.source_inventory = auth_runtime.SourceSet.initMany(&.{ .layerx1_subscription, .layerx1_subscription });
     app.auth.openPicker(alloc);
-
-    try Runtime(RoutingFakeApp).handleByte(&app, '\r', 4096, 100);
-    try std.testing.expectEqual(auth_runtime.PickerStage.connections, app.auth.pickerView().stage);
 
     try Runtime(RoutingFakeApp).handleByte(&app, '\r', 4096, 100);
 
     try std.testing.expect(!app.auth.pickerView().active);
-    try std.testing.expectEqual(auth_runtime.AcquisitionAction.login, app.selected_auth_action.?);
+    try std.testing.expectEqual(auth_runtime.AcquisitionAction.layerx1_login, app.selected_auth_action.?);
 }
 
 test "app_input_runtime Escape closes auth picker without arming composer clear" {
     const alloc = std.testing.allocator;
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initOne(.ai_gateway_api_key);
+    app.auth.source_inventory = auth_runtime.SourceSet.initOne(.layerx1_subscription);
     app.auth.openPicker(alloc);
 
     try Runtime(RoutingFakeApp).resolveEscape(&app, false, 1);
@@ -3958,54 +3940,6 @@ test "app_input_runtime onboarding Escape skips setup for the session" {
     try std.testing.expect(!app.auth.pickerView().active);
     try std.testing.expect(app.auth.view().onboarding_skipped);
     try std.testing.expect(!app.input_runtime.gestures.escapeClearArmed());
-}
-
-test "app_input_runtime auth stage Escape pops before closing the picker" {
-    const alloc = std.testing.allocator;
-    var app = try RoutingFakeApp.init(alloc);
-    defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initOne(.stored_key);
-    app.auth.openPicker(alloc);
-
-    _ = app.auth.movePicker(-1);
-    try std.testing.expect((auth_runtime.Choice{ .action = .switch_credential }).eql(
-        app.auth.pickerView().selected_choice.?,
-    ));
-
-    try Runtime(RoutingFakeApp).handleByte(&app, '\r', 4096, 100);
-    try std.testing.expectEqual(auth_runtime.PickerStage.switch_credential, app.auth.pickerView().stage);
-    try std.testing.expect(app.auth.pickerView().active);
-
-    try Runtime(RoutingFakeApp).resolveEscape(&app, false, 1);
-    try std.testing.expectEqual(auth_runtime.PickerStage.root, app.auth.pickerView().stage);
-    try std.testing.expect(app.auth.pickerView().active);
-    try std.testing.expect((auth_runtime.Choice{ .action = .switch_credential }).eql(
-        app.auth.pickerView().selected_choice.?,
-    ));
-
-    try Runtime(RoutingFakeApp).resolveEscape(&app, false, 2);
-    try std.testing.expect(!app.auth.pickerView().active);
-    try std.testing.expectEqual(@as(usize, 0), app.transcript.items.len);
-}
-
-test "app_input_runtime navigation bypasses disabled change team action" {
-    const alloc = std.testing.allocator;
-    var app = try RoutingFakeApp.init(alloc);
-    defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initOne(.stored_key);
-    app.auth.openPicker(alloc);
-
-    for (0..5) |_| _ = app.auth.movePicker(1);
-    try std.testing.expect((auth_runtime.Choice{ .action = .switch_credential }).eql(
-        app.auth.pickerView().selected_choice.?,
-    ));
-
-    try Runtime(RoutingFakeApp).handleByte(&app, '\r', 4096, 100);
-
-    try std.testing.expect(app.auth.pickerView().active);
-    try std.testing.expectEqual(auth_runtime.PickerStage.switch_credential, app.auth.pickerView().stage);
-    try std.testing.expect(app.selected_auth_action == null);
-    try std.testing.expectEqual(@as(usize, 0), app.transcript.items.len);
 }
 
 test "app_input_runtime Escape dismisses visible slash completions without arming composer clear" {
@@ -4088,7 +4022,7 @@ test "app_input_runtime Escape dismisses an idle inline skill completion" {
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.textReplacementState().replace(alloc, "explain $man");
@@ -4126,7 +4060,7 @@ test "app_input_runtime active operation Escape keeps precedence over inline ski
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.stream.active = true;
@@ -4144,7 +4078,7 @@ test "app_input_runtime composer editing dismisses auth picker before inserting"
     const alloc = std.testing.allocator;
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
-    app.auth.source_inventory = auth_runtime.SourceSet.initOne(.ai_gateway_api_key);
+    app.auth.source_inventory = auth_runtime.SourceSet.initOne(.layerx1_subscription);
     app.auth.openPicker(alloc);
 
     try Runtime(RoutingFakeApp).handleByte(&app, 'x', 4096, 100);
@@ -4158,7 +4092,7 @@ test "app_input_runtime skills menu navigation clamps before prompt history" {
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_fx },
+        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_x1 },
         .{ .name = "workspace", .description = "", .path = "/tmp/workspace/SKILL.md", .source = .workspace_shared },
     };
     app.skills.items = @constCast(&skills);
@@ -4178,7 +4112,7 @@ test "app_input_runtime skills menu navigation remains interactive while streami
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_fx },
+        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_x1 },
         .{ .name = "workspace", .description = "", .path = "/tmp/workspace/SKILL.md", .source = .workspace_shared },
     };
     app.skills.items = @constCast(&skills);
@@ -4195,10 +4129,10 @@ test "app_input_runtime command skills navigation uses the inline composer windo
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = "", .path = "/tmp/one/SKILL.md", .source = .global_fx },
-        .{ .name = "two", .description = "", .path = "/tmp/two/SKILL.md", .source = .global_fx },
-        .{ .name = "three", .description = "", .path = "/tmp/three/SKILL.md", .source = .global_fx },
-        .{ .name = "four", .description = "", .path = "/tmp/four/SKILL.md", .source = .global_fx },
+        .{ .name = "one", .description = "", .path = "/tmp/one/SKILL.md", .source = .global_x1 },
+        .{ .name = "two", .description = "", .path = "/tmp/two/SKILL.md", .source = .global_x1 },
+        .{ .name = "three", .description = "", .path = "/tmp/three/SKILL.md", .source = .global_x1 },
+        .{ .name = "four", .description = "", .path = "/tmp/four/SKILL.md", .source = .global_x1 },
     };
     app.shell.layout = .{
         .rows = 16,
@@ -4227,7 +4161,7 @@ test "app_input_runtime Escape closes an idle skills menu before empty-composer 
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -4239,27 +4173,28 @@ test "app_input_runtime Escape closes an idle skills menu before empty-composer 
     try std.testing.expect(!app.worker.cancel_requested);
 }
 
-test "api key entry bypasses composer paste and zeroes on cancellation" {
+test "sign-in code entry bypasses composer paste and zeroes on cancellation" {
     const alloc = std.testing.allocator;
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
-    const sentinel = "FX_API_KEY_HISTORY_SENTINEL";
-    app.auth.openApiKeyPicker(alloc);
+    const sentinel = "X1_SIGNIN_CODE_HISTORY_SENTINEL";
+    try std.testing.expect(try app.auth.openSignInPicker(alloc));
+    try std.testing.expect(app.auth.toggleSignInCodeEntry());
 
     try feedRoutingBytes(&app, "\x1b[200~");
     try feedRoutingBytes(&app, sentinel);
     try feedRoutingBytes(&app, "\x1b[201~");
 
-    try std.testing.expect(app.auth.apiKeyEntryActive());
-    try std.testing.expectEqual(sentinel.len, app.auth.pickerView().api_key_mask_count);
+    try std.testing.expect(app.auth.signInCodeEntryActive());
+    try std.testing.expectEqual(sentinel.len, app.auth.pickerView().sign_in_code_mask_count);
     try std.testing.expectEqual(paste_framing.Owner.none, app.input_runtime.paste.owner);
     try std.testing.expectEqual(@as(usize, 0), app.input_runtime.edit_state.input.items.len);
     try std.testing.expectEqual(@as(usize, 0), app.input_runtime.paste.buffer.items.len);
     try std.testing.expectEqual(@as(usize, 0), app.input_runtime.composer_history.count());
 
     try Runtime(RoutingFakeApp).resolveEscape(&app, false, 1);
-    try std.testing.expect(!app.auth.apiKeyEntryActive());
-    try std.testing.expectEqual(@as(usize, 0), app.auth.pickerView().api_key_mask_count);
+    try std.testing.expect(!app.auth.signInCodeEntryActive());
+    try std.testing.expectEqual(@as(usize, 0), app.auth.pickerView().sign_in_code_mask_count);
     try std.testing.expectEqual(@as(usize, 0), app.input_runtime.edit_state.input.items.len);
 }
 
@@ -4271,7 +4206,7 @@ test "app_input_runtime command skills menu reuses composer input as its query" 
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -4291,7 +4226,7 @@ test "app_input_runtime command skills search owns dollar and model-shaped text"
         .name = "model-helper",
         .description = "",
         .path = "/tmp/model-helper/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -4313,7 +4248,7 @@ test "app_input_runtime command skills query follows history and ctrl-c clear" {
         .name = "older",
         .description = "",
         .path = "/tmp/older/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.composer_history.installTextEntries(alloc, &.{"older"});
@@ -4337,7 +4272,7 @@ test "app_input_runtime Escape closes a command skills menu and clears its tempo
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.textReplacementState().replace(alloc, "man");
@@ -4358,7 +4293,7 @@ test "app_input_runtime Space edits and filters a command skills query" {
         .name = "managed",
         .description = "managed description",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -4408,7 +4343,7 @@ test "app_input_runtime Tab cycles skills menu sources before autocomplete" {
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_fx },
+        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_x1 },
         .{ .name = "codex", .description = "", .path = "/tmp/codex/SKILL.md", .source = .global_codex },
     };
     app.skills.items = @constCast(&skills);
@@ -4418,7 +4353,7 @@ test "app_input_runtime Tab cycles skills menu sources before autocomplete" {
     try Runtime(RoutingFakeApp).handleByte(&app, '\t', 4096, 100);
 
     try std.testing.expect(app.skills.menu.active);
-    try std.testing.expectEqual(skill_runtime.SkillMenuSourceFilter.fx, app.skills.menu.source_filter);
+    try std.testing.expectEqual(skill_runtime.SkillMenuSourceFilter.x1, app.skills.menu.source_filter);
     try std.testing.expectEqualStrings("/sk", app.input_runtime.edit_state.input.items);
 }
 
@@ -4427,7 +4362,7 @@ test "app_input_runtime Tab cycles skills menu sources while streaming" {
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_fx },
+        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_x1 },
         .{ .name = "codex", .description = "", .path = "/tmp/codex/SKILL.md", .source = .global_codex },
     };
     app.skills.items = @constCast(&skills);
@@ -4436,7 +4371,7 @@ test "app_input_runtime Tab cycles skills menu sources while streaming" {
 
     try Runtime(RoutingFakeApp).handleByte(&app, '\t', 4096, 100);
 
-    try std.testing.expectEqual(skill_runtime.SkillMenuSourceFilter.fx, app.skills.menu.source_filter);
+    try std.testing.expectEqual(skill_runtime.SkillMenuSourceFilter.x1, app.skills.menu.source_filter);
 }
 
 test "app_input_runtime Tab advances settings categories before autocomplete" {
@@ -4561,7 +4496,7 @@ test "app_input_runtime Shift+Tab reverses skills source without changing permis
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_fx },
+        .{ .name = "managed", .description = "", .path = "/tmp/managed/SKILL.md", .source = .global_x1 },
         .{ .name = "claw", .description = "", .path = "/tmp/claw/SKILL.md", .source = .global_claw },
     };
     app.skills.items = @constCast(&skills);
@@ -4630,7 +4565,7 @@ test "app_input_runtime Enter binds a selected skill token" {
         .name = "review",
         .description = "",
         .path = "/tmp/review/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -4662,7 +4597,7 @@ test "app_input_runtime Enter reports a skill binding rejected by the input limi
         .name = "review",
         .description = "",
         .path = "/tmp/review/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.textReplacementState().replace(alloc, "$r suffix");
@@ -4688,7 +4623,7 @@ test "app_input_runtime redraws a closed skill picker when the input limit notic
         .name = "review",
         .description = "",
         .path = "/tmp/review/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.textReplacementState().replace(alloc, "$r suffix");
@@ -4719,7 +4654,7 @@ test "app_input_runtime keeps the skill picker open when binding allocation fail
         .name = "review",
         .description = "",
         .path = "/tmp/review/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -4745,7 +4680,7 @@ test "app_input_runtime Enter replaces the full command skills query" {
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.textReplacementState().replace(alloc, "man");
@@ -4767,7 +4702,7 @@ test "app_input_runtime command skills query tracks bracketed paste" {
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -4788,7 +4723,7 @@ test "app_input_runtime dollar opens skills menu and Escape preserves raw text" 
         .name = "scale",
         .description = "",
         .path = "/tmp/scale/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
 
@@ -4815,7 +4750,7 @@ test "app_input_runtime non-leading dollar stays in the composer" {
         .name = "scale",
         .description = "",
         .path = "/tmp/scale/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     const inputs = [_][]const u8{ " $", "hello $" };
 
@@ -4837,7 +4772,7 @@ test "app_input_runtime Tab and Right Arrow accept visible inline skill completi
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
 
     for ([_]enum { tab, right }{ .tab, .right }) |key| {
@@ -4904,7 +4839,7 @@ test "app_input_runtime Right Arrow collapses selection before inline completion
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
@@ -4932,7 +4867,7 @@ test "app_input_runtime ctrl-l preserves an active inline picker" {
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
@@ -4996,7 +4931,7 @@ test "app_input_runtime inline skill acceptance preserves input on limit rejecti
         .name = "managed-menu",
         .description = "",
         .path = "/tmp/managed-menu/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try feedRoutingBytes(&app, "explain $man");
@@ -5020,7 +4955,7 @@ test "app_input_runtime no-match dollar text keeps spaces and submits raw" {
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
 
@@ -5048,7 +4983,7 @@ test "app_input_runtime space after matched dollar token inserts and closes menu
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
 
@@ -5074,7 +5009,7 @@ test "app_input_runtime matched dollar token still binds on enter" {
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
 
@@ -5102,7 +5037,7 @@ test "app_input_runtime enter on tab-filtered empty dollar menu submits raw" {
     try feedRoutingBytes(&app, "$man");
     try std.testing.expect(app.skills.selectedMenuSkill() != null);
 
-    // .all -> .fx: the codex-sourced skill vanishes, nothing is selectable.
+    // .all -> .x1: the codex-sourced skill vanishes, nothing is selectable.
     try feedRoutingBytes(&app, "\t");
     try std.testing.expect(app.skills.menu.active);
     try std.testing.expect(app.skills.selectedMenuSkill() == null);
@@ -5121,7 +5056,7 @@ test "app_input_runtime enter submits after delete-forward removes the dollar an
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
 
@@ -5149,7 +5084,7 @@ test "app_input_runtime zero-match dollar query recovers matches on backspace" {
         .name = "managed",
         .description = "",
         .path = "/tmp/managed/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
 
@@ -5823,9 +5758,9 @@ test "app_input_runtime staged model picker Enter ignores hidden slash skill mat
         .name = "model-helper",
         .description = "model helper",
         .path = "/tmp/model-helper/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
-    const completions = [_][]const u8{"xai/grok-build-1"};
+    const completions = [_][]const u8{"lx1-reasoning"};
 
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
@@ -5839,8 +5774,8 @@ test "app_input_runtime staged model picker Enter ignores hidden slash skill mat
     try Runtime(RoutingFakeApp).handleByte(&app, '\r', 4096, 100);
 
     try std.testing.expectEqual(@as(usize, 1), app.preference_commit_count);
-    try std.testing.expectEqualStrings("xai/grok-build-1", app.selected_model.items);
-    try std.testing.expectEqualStrings("xai/grok-build-1", app.last_preference_model.items);
+    try std.testing.expectEqualStrings("lx1-reasoning", app.selected_model.items);
+    try std.testing.expectEqualStrings("lx1-reasoning", app.last_preference_model.items);
     try std.testing.expectEqualStrings("", app.input_runtime.edit_state.input.items);
     try std.testing.expectEqual(@as(usize, 0), app.input_runtime.entities.skill_tokens.items.len);
     try std.testing.expectEqual(@as(usize, 0), app.submitted_prompt_count);
@@ -5996,9 +5931,9 @@ test "app_input_runtime stream model-shaped keys stay model-owned" {
         .name = "model-helper",
         .description = "model helper",
         .path = "/tmp/model-helper/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
-    const completions = [_][]const u8{"xai/grok-build-1"};
+    const completions = [_][]const u8{"lx1-reasoning"};
     const cases = [_]struct {
         input: []const u8,
         byte: u8,
@@ -6038,7 +5973,7 @@ test "app_input_runtime Enter submits a dismissed slash skill query as text" {
         .name = "custom-skill",
         .description = "custom skill",
         .path = "/tmp/custom-skill/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
 
     var app = try RoutingFakeApp.init(alloc);
@@ -6064,7 +5999,7 @@ test "app_input_runtime Enter binds a slash skill after multiline whitespace" {
         .name = "custom-skill",
         .description = "custom skill",
         .path = "/tmp/custom-skill/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
 
     var app = try RoutingFakeApp.init(alloc);
@@ -6087,7 +6022,7 @@ test "app_input_runtime retired slash alias no longer shadows a matching skill" 
         .name = "input-helper",
         .description = "input helper",
         .path = "/tmp/input-helper/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
 
     var app = try RoutingFakeApp.init(alloc);
@@ -7712,12 +7647,10 @@ fn openRoutingModelMenu(app: *RoutingFakeApp, model_ids: []const []const u8) !vo
 }
 
 fn openRoutingAuthPicker(app: *RoutingFakeApp) !void {
-    app.auth.source_inventory.insert(.vercel_oidc_token);
-    app.auth.source_inventory.insert(.ai_gateway_api_key);
+    app.auth.source_inventory.insert(.layerx1_subscription);
     app.auth.openPicker(app.alloc);
-    try std.testing.expect(app.auth.movePicker(1));
-    try std.testing.expectEqual(@as(usize, 4), app.auth.pickerView().choiceCount());
-    try std.testing.expectEqual(@as(usize, 1), app.auth.pickerView().selectedIndex());
+    try std.testing.expectEqual(@as(usize, 1), app.auth.pickerView().choiceCount());
+    try std.testing.expectEqual(@as(usize, 0), app.auth.pickerView().selectedIndex());
 }
 
 const RoutingDecisionKind = enum { question, approval };
@@ -7887,9 +7820,9 @@ test "app_input_runtime ctrl+j and ctrl+k navigate visible composer pickers" {
         bytes: []const u8,
         expected_index: usize,
     }{
-        .{ .bytes = "\x0a", .expected_index = 3 },
+        .{ .bytes = "\x0a", .expected_index = 0 },
         .{ .bytes = "\x0b", .expected_index = 0 },
-        .{ .bytes = "\x1b[106;5u", .expected_index = 3 },
+        .{ .bytes = "\x1b[106;5u", .expected_index = 0 },
         .{ .bytes = "\x1b[107;5u", .expected_index = 0 },
     };
 
@@ -7933,7 +7866,7 @@ test "app_input_runtime ctrl+j and ctrl+k preserve editor fallback behind full t
         try feedRoutingBytes(&app, case.bytes);
 
         try std.testing.expectEqualStrings(case.expected_input, app.input_runtime.edit_state.input.items);
-        try std.testing.expectEqual(@as(usize, 1), app.auth.pickerView().selectedIndex());
+        try std.testing.expectEqual(@as(usize, 0), app.auth.pickerView().selectedIndex());
         try std.testing.expect(!app.auth.pickerView().active);
         try std.testing.expect(app.terminal.fullTranscriptScreenActive());
     }
@@ -7964,7 +7897,7 @@ test "app_input_runtime modal-only controls do not reach the composer" {
             try feedRoutingBytes(&app, case.bytes);
 
             try std.testing.expectEqualStrings("ab", app.input_runtime.edit_state.input.items);
-            try std.testing.expectEqual(@as(usize, 1), app.auth.pickerView().selectedIndex());
+            try std.testing.expectEqual(@as(usize, 0), app.auth.pickerView().selectedIndex());
             try std.testing.expect(app.auth.pickerView().active);
             try std.testing.expect(app.question_prompt.isActive() or app.approval_prompt.isActive());
             try std.testing.expectEqual(@as(usize, 0), app.worker.submitted_question_count);
@@ -8254,7 +8187,7 @@ test "app_input_runtime backslash enter is consumed by an active command skills 
         .name = "review",
         .description = "",
         .path = "/tmp/review/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     app.skills.openMenu();
@@ -10768,7 +10701,7 @@ test "route recovery question submit does not write agent question transcript" {
         .{ .label = "Try again later", .description = null },
     };
     const entries = [_]types.QuestionBatchEntry{
-        .{ .question = "Route failed after 3 attempts. What should fx do?", .options = &opts },
+        .{ .question = "Route failed after 3 attempts. What should x1 do?", .options = &opts },
     };
     try app.question_prompt.syncFrom(alloc, &entries);
     try std.testing.expectEqual(
@@ -10784,7 +10717,7 @@ test "route recovery question submit does not write agent question transcript" {
         app.worker.submitted_question_answers[0][0..app.worker.submitted_question_answer_lens[0]],
     );
     try std.testing.expect(!app.question_prompt.isActive());
-    try std.testing.expectEqual(@as(usize, 0), countOccurrences(app.transcript.items, "Route failed after 3 attempts. What should fx do?"));
+    try std.testing.expectEqual(@as(usize, 0), countOccurrences(app.transcript.items, "Route failed after 3 attempts. What should x1 do?"));
 }
 
 test "route recovery question cancel stays local" {
@@ -10798,7 +10731,7 @@ test "route recovery question cancel stays local" {
         .{ .label = "Try again later", .description = null },
     };
     const entries = [_]types.QuestionBatchEntry{
-        .{ .question = "Route failed. What should fx do?", .options = &opts },
+        .{ .question = "Route failed. What should x1 do?", .options = &opts },
     };
     try app.question_prompt.syncFrom(alloc, &entries);
 
@@ -10809,7 +10742,7 @@ test "route recovery question cancel stays local" {
     try std.testing.expect(!app.worker.cancel_requested);
     try std.testing.expect(!app.question_prompt.isActive());
     try std.testing.expect(!app.stream.active);
-    try std.testing.expectEqual(@as(usize, 0), countOccurrences(app.transcript.items, "Route failed. What should fx do?"));
+    try std.testing.expectEqual(@as(usize, 0), countOccurrences(app.transcript.items, "Route failed. What should x1 do?"));
 }
 
 test "app_input_runtime submits multi-question answers in entry order" {
@@ -13081,7 +13014,7 @@ test "app_input_runtime submits nonexistent relative and absolute image paths as
     const absolute_path = try std.fs.path.join(alloc, &.{ root, "missing.png" });
     defer alloc.free(absolute_path);
 
-    for ([_][]const u8{ "fx-missing-image.png", absolute_path }) |missing_path| {
+    for ([_][]const u8{ "x1-missing-image.png", absolute_path }) |missing_path| {
         var app = FakeSubmitApp{ .alloc = alloc };
         defer app.deinit();
         try app.input_runtime.edit_state.input.appendSlice(alloc, missing_path);
@@ -13551,7 +13484,7 @@ test "app_input_runtime small paste opens skills menu for matching dollar token"
         .name = "scale",
         .description = "",
         .path = "/tmp/scale/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     try app.input_runtime.paste.buffer.appendSlice(alloc, "use $sca now");
@@ -13571,13 +13504,13 @@ test "app_input_runtime multi dollar paste preserves spaces and opens first matc
     var app = try RoutingFakeApp.init(alloc);
     defer app.deinit();
     const skills = [_]skill_runtime.Skill{.{
-        .name = "fx-test-strategy",
+        .name = "x1-test-strategy",
         .description = "",
-        .path = "/tmp/fx-test-strategy/SKILL.md",
-        .source = .global_fx,
+        .path = "/tmp/x1-test-strategy/SKILL.md",
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
-    const pasted = "Need $fx-test and $notaskill in pasted text";
+    const pasted = "Need $x1-test and $notaskill in pasted text";
     try app.input_runtime.paste.buffer.appendSlice(alloc, pasted);
 
     try Runtime(RoutingFakeApp).finalizePastedBlock(&app, 4096);
@@ -13585,9 +13518,9 @@ test "app_input_runtime multi dollar paste preserves spaces and opens first matc
     try std.testing.expectEqualStrings(pasted, app.input_runtime.edit_state.input.items);
     try std.testing.expect(app.skills.menu.active);
     try std.testing.expectEqual(skill_runtime.SkillMenuOrigin.paste, app.skills.menu.origin);
-    try std.testing.expectEqualStrings("fx-test", app.skills.menu.query());
+    try std.testing.expectEqualStrings("x1-test", app.skills.menu.query());
     try std.testing.expectEqual(@as(usize, "Need ".len), app.skills.menu.target.?.start);
-    try std.testing.expectEqual(@as(usize, "Need $fx-test".len), app.skills.menu.target.?.end);
+    try std.testing.expectEqual(@as(usize, "Need $x1-test".len), app.skills.menu.target.?.end);
 
     try Runtime(RoutingFakeApp).resolveEscape(&app, false, 1);
     try std.testing.expect(!app.skills.menu.active);
@@ -13602,7 +13535,7 @@ test "app_input_runtime no-match dollar paste remains raw without opening skills
         .name = "scale",
         .description = "",
         .path = "/tmp/scale/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
     app.skills.items = @constCast(&skills);
     const pasted = "Need $notaskill in pasted text";

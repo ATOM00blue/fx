@@ -2410,7 +2410,7 @@ test "readable profile usage does not attach publishers or flush recovery" {
     try std.testing.expectEqual(checkpoint_calls, checkpoint.calls);
     try std.testing.expectError(
         error.FileNotFound,
-        tmp.dir.access(io_mod.getIo(), ".fx/usage.jsonl", .{}),
+        tmp.dir.access(io_mod.getIo(), ".x1/usage.jsonl", .{}),
     );
 }
 

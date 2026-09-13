@@ -2,10 +2,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxAgent, supportsJspi } from "../node.js";
+import { createX1Agent, supportsJspi } from "../node.js";
 
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultWasm = resolve(scriptDir, "../../zig-out/bin/fx-core.wasm");
+const defaultWasm = resolve(scriptDir, "../../zig-out/bin/x1-core.wasm");
 const wasmPath = resolve(process.argv[2] || defaultWasm);
 
 if (!supportsJspi()) {
@@ -13,7 +13,7 @@ if (!supportsJspi()) {
   process.exit(2);
 }
 
-const trace = process.env.FX_WASM_TRACE === "1";
+const trace = process.env.X1_WASM_TRACE === "1";
 const checkpoint = (message) => { if (trace) console.error(`[core-smoke] ${message}`); };
 
 const encoded = new TextEncoder();
@@ -24,7 +24,6 @@ const catalogModels = [
 let fetchCalls = 0;
 let requestedModel;
 let requestedSessionId;
-let requestedSessionAffinity;
 const persistedConfig = new Map([
   ["model", "sdk/catalog-alpha"],
   ["mode", "code"],
@@ -42,19 +41,21 @@ const mockFetch = async (url, init) => {
   if (init.method !== "POST") throw new Error(`unexpected method ${init.method}`);
   const requestBody = JSON.parse(new TextDecoder().decode(init.body));
   const headers = new Headers(init.headers);
-  requestedModel = headers.get("ai-language-model-id");
+  requestedModel = requestBody.model;
   requestedSessionId = headers.get("x-session-id");
-  requestedSessionAffinity = headers.get("x-session-affinity");
-  if (!Array.isArray(requestBody.prompt) && !Array.isArray(requestBody.messages)) {
-    throw new Error("gateway request did not contain prompt messages");
+  if (headers.get("x-session-affinity")) {
+    throw new Error("LayerX1 request used retired x-session-affinity header");
+  }
+  if (!Array.isArray(requestBody.input)) {
+    throw new Error("LayerX1 request did not contain Responses input");
   }
   return new Response(new ReadableStream({
     async start(controller) {
-      controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"hello"}\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"hello"}\n'));
       await new Promise((resolve) => setTimeout(resolve, 10));
-      controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":" world"}\n'));
-      controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":3},"outputTokens":{"total":2}}}\n'));
-      controller.enqueue(encoded.encode("data: [DONE]\n"));
+      controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":" world"}\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
       controller.close();
     },
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -78,7 +79,7 @@ const sessionStore = {
     const current = sessionRecords.get(id);
     if (current?.revision !== expectedRevision) {
       const error = new Error("session revision conflict");
-      error.code = "FX_SESSION_REVISION_CONFLICT";
+      error.code = "X1_SESSION_REVISION_CONFLICT";
       throw error;
     }
     const revision = String(sessionRevision++);
@@ -99,9 +100,9 @@ const sessionStore = {
 const events = [];
 let initializeTimeout;
 const agent = await Promise.race([
-  createFxAgent({ backend: "wasm", wasm: await readFile(wasmPath), fetch: mockFetch, env: { AI_GATEWAY_API_KEY: "sdk-test-key" }, configStore, sessionStore, onEvent(event) { events.push(event); }, traceWasi: trace }),
+  createX1Agent({ backend: "wasm", wasm: await readFile(wasmPath), fetch: mockFetch, env: { X1_API_KEY: "sdk-test-key" }, configStore, sessionStore, onEvent(event) { events.push(event); }, traceWasi: trace }),
   new Promise((_, reject) => {
-    initializeTimeout = setTimeout(() => reject(new Error("timed out waiting for fx-core initialize")), 5000);
+    initializeTimeout = setTimeout(() => reject(new Error("timed out waiting for x1-core initialize")), 5000);
   }),
 ]).finally(() => clearTimeout(initializeTimeout));
 
@@ -159,7 +160,6 @@ if (stopReason !== "end_turn") throw new Error(`unexpected stop reason: ${stopRe
 if (fetchCalls !== 1) throw new Error(`expected one gateway fetch, got ${fetchCalls}`);
 if (requestedModel !== "sdk/browser-test-model") throw new Error(`gateway request used unexpected model: ${requestedModel}`);
 if (requestedSessionId !== session.id) throw new Error(`gateway request used unexpected session id: ${requestedSessionId}`);
-if (requestedSessionAffinity !== session.id) throw new Error(`gateway request used unexpected session affinity: ${requestedSessionAffinity}`);
 
 await session.close();
 let closedSessionRejected = false;

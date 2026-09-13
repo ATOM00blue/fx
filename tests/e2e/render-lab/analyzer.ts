@@ -68,7 +68,7 @@ export function analyzeRun(manifest: RenderLabManifest) {
       input_rows.push(footers.find((footer) => footer.multiline)!.input);
     }
     const logoRows = findLogoRows(frame.grid);
-    const expectsChrome = expectsFxChrome(frame, manifest, logoRows, input_rows);
+    const expectsChrome = expectsx1Chrome(frame, manifest, logoRows, input_rows);
     const viewerFooterPresent = hasTranscriptViewerFooter(frame.grid);
 
     if (frame.evidence && !frame.evidence.stable) {
@@ -85,7 +85,7 @@ export function analyzeRun(manifest: RenderLabManifest) {
     assertTuiObservabilityFrame(failures, frame, manifest);
 
     if (countLogoBlocks(frame.grid, logoRows) > 1) {
-      push(failures, "single-active-logo", frame, "more than one active Fx logo block is visible");
+      push(failures, "single-active-logo", frame, "more than one active x1 logo block is visible");
     }
 
     if (footers.length > 1) {
@@ -93,7 +93,7 @@ export function analyzeRun(manifest: RenderLabManifest) {
     }
 
     if (expectsChrome && footers.length === 0 && !viewerFooterPresent) {
-      push(failures, "footer-missing", frame, "Fx-owned frame has no complete footer block");
+      push(failures, "footer-missing", frame, "x1-owned frame has no complete footer block");
     }
 
     if (input_rows.length > 1) {
@@ -101,7 +101,7 @@ export function analyzeRun(manifest: RenderLabManifest) {
     }
 
     if (expectsChrome && input_rows.length === 0 && !viewerFooterPresent) {
-      push(failures, "input-missing", frame, "Fx-owned frame has no footer input row");
+      push(failures, "input-missing", frame, "x1-owned frame has no footer input row");
     }
 
     assertActivitySpacing(failures, frame, footers[0]);
@@ -160,7 +160,7 @@ export function analyzeRun(manifest: RenderLabManifest) {
       }
     }
 
-    const fxBand = findFxBand(frame.grid, logoRows, footers[0]);
+    const fxBand = findx1Band(frame.grid, logoRows, footers[0]);
     if (fxBand) {
       for (const marker of manifest.markers.shell) {
         const badRows = frame.grid
@@ -169,9 +169,9 @@ export function analyzeRun(manifest: RenderLabManifest) {
         if (badRows.length > 0) {
           push(
             failures,
-            "shell-marker-in-fx-band",
+            "shell-marker-in-x1-band",
             frame,
-            `shell marker ${marker} appears inside the Fx-owned viewport band`,
+            `shell marker ${marker} appears inside the x1-owned viewport band`,
           );
         }
       }
@@ -366,7 +366,7 @@ export function findLogoRows(grid: string[]): number[] {
   const rows: number[] = [];
   for (let i = 0; i < grid.length; i += 1) {
     const row = grid[i] ?? "";
-    if (row.includes("Run /help for commands") || hasLogoGlyphs(row)) {
+    if (isWelcomeBannerRow(row) || hasLogoGlyphs(row)) {
       rows.push(i);
     }
   }
@@ -1002,7 +1002,7 @@ function assertMarkerCount(
 }
 
 function isThinkingRow(line: string): boolean {
-  return /^(?:• )?thinking(?:\s+\(\d+s\))?(?:\s+\(↑\d+(?:\.\d+)?k?\s+↓\d+(?:\.\d+)?k?\))?$/i.test(
+  return /^(?:[•▲◐◓◑◒] )?thinking(?:\s+\(\d+s\))?(?:\s+\(↑\d+(?:\.\d+)?k?\s+↓\d+(?:\.\d+)?k?\))?$/i.test(
     semanticText(line).trim(),
   );
 }
@@ -1011,7 +1011,7 @@ function isTranscriptContentRow(line: string): boolean {
   const text = semanticText(line).trim();
   if (text.length === 0) return false;
   if (isDividerRow(text)) return false;
-  if (text.includes("Run /help for commands") || hasLogoGlyphs(text)) return false;
+  if (isWelcomeBannerRow(text) || hasLogoGlyphs(text)) return false;
   return true;
 }
 
@@ -1024,7 +1024,7 @@ function semanticText(line: string): string {
   return line;
 }
 
-function findFxBand(grid: string[], logoRows: number[], footer: Footer | undefined): { start: number; end: number } | null {
+function findx1Band(grid: string[], logoRows: number[], footer: Footer | undefined): { start: number; end: number } | null {
   if (logoRows.length === 0 || !footer) return null;
   const start = Math.min(...logoRows);
   const end = footer.hint;
@@ -1032,7 +1032,7 @@ function findFxBand(grid: string[], logoRows: number[], footer: Footer | undefin
   return { start, end };
 }
 
-function expectsFxChrome(
+function expectsx1Chrome(
   frame: RenderLabFrame,
   manifest: RenderLabManifest,
   logoRows: number[],
@@ -1045,7 +1045,7 @@ function expectsFxChrome(
     frame.event.includes("help-visible") ||
     frame.event.includes("slash-menu-expanded") ||
     frame.event.includes("final-third-launch-state") ||
-    frame.event.includes("fx-quit-requested") ||
+    frame.event.includes("x1-quit-requested") ||
     frame.event.includes("post-quit-shell-prompt")
   ) {
     return false;
@@ -1062,8 +1062,17 @@ function countLogoBlocks(grid: string[], logoRows: number[]): number {
     if (row > previous + 1) blocks += 1;
     previous = row;
   }
-  if (blocks === 0 && grid.some((row) => row.includes("Run /help for commands"))) return 1;
+  if (blocks === 0 && grid.some((row) => isWelcomeBannerRow(row))) return 1;
   return blocks;
+}
+
+function isWelcomeBannerRow(row: string): boolean {
+  const text = semanticText(row);
+  if (text.includes("layerx1.com") || text.includes("Run /help for commands")) return true;
+  const trimmed = text.trim();
+  if (/^[┌└]─+[┐┘]$/.test(trimmed)) return true;
+  if (trimmed.includes("│") && (/\bX1\b/.test(trimmed) || /v\d+\.\d+/.test(trimmed))) return true;
+  return false;
 }
 
 function hasLogoGlyphs(row: string): boolean {

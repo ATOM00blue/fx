@@ -2,10 +2,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createFxTerminal, supportsJspi } from "../node.js";
+import { createX1Terminal, supportsJspi } from "../node.js";
 
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultWasm = resolve(scriptDir, "../../zig-out/bin/fx-term.wasm");
+const defaultWasm = resolve(scriptDir, "../../zig-out/bin/x1-term.wasm");
 const wasmPath = resolve(process.argv[2] || defaultWasm);
 
 if (!supportsJspi()) {
@@ -20,9 +20,9 @@ const mockFetch = async () => {
   fetchCalls += 1;
   return new Response(new ReadableStream({
     start(controller) {
-      controller.enqueue(encoded.encode('data: {"type":"text-delta","id":"answer","delta":"ZXQJ"}\n\n'));
-      controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop","raw":"stop"},"usage":{"inputTokens":{"total":1},"outputTokens":{"total":1}}}\n\n'));
-      controller.enqueue(encoded.encode("data: [DONE]\n\n"));
+      controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"ZXQJ"}\n\n'));
+      controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+      controller.enqueue(encoded.encode(""));
       controller.close();
     },
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -40,7 +40,7 @@ const sessionStore = {
     const current = records.get(id);
     if (current?.revision !== expectedRevision) {
       const error = new Error("session revision conflict");
-      error.code = "FX_SESSION_REVISION_CONFLICT";
+      error.code = "X1_SESSION_REVISION_CONFLICT";
       throw error;
     }
     const revision = String(nextRevision++);
@@ -90,18 +90,18 @@ async function waitFor(predicate, label, diagnostics = () => "") {
 
 async function start(args = []) {
   const capture = createTerminalCapture();
-  const runtime = await createFxTerminal({
+  const runtime = await createX1Terminal({
   backend: "wasm",
     wasm,
     args,
     terminal: capture.terminal,
-    env: { AI_GATEWAY_API_KEY: "term-session-test-key", FX_THEME: "dark" },
+    env: { X1_API_KEY: "term-session-test-key", X1_THEME: "dark" },
     fetch: mockFetch,
     sessionStore,
   });
   await waitFor(
-    () => capture.text().includes(args.length ? "Session resumed" : "Run /help for commands"),
-    "fx-term startup",
+    () => capture.text().includes(args.length ? "Session resumed" : "layerx1.com"),
+    "x1-term startup",
     () => `output=${JSON.stringify(capture.text().slice(-1000))}`,
   );
   return { capture, runtime };

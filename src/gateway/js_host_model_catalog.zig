@@ -1,10 +1,11 @@
 const std = @import("std");
 const model_catalog = @import("../core/gateway/model_catalog.zig");
-const builtin_gateway = @import("../builtins/gateway.zig");
+const builtin_x1 = @import("../builtins/x1.zig");
+const layerx1_models = @import("layerx1_models.zig");
 
 const Allocator = std.mem.Allocator;
 
-extern "fx" fn fx_http_request(
+extern "x1" fn x1_http_request(
     method_ptr: [*]const u8,
     method_len: usize,
     url_ptr: [*]const u8,
@@ -29,11 +30,7 @@ fn fetch(
         if (flag.load(.seq_cst)) return .{ .failure = .{ .category = .cancellation } };
     }
 
-    const url = try std.fmt.allocPrint(alloc, "{s}{s}", .{
-        builtin_gateway.default_model_catalog_base_url,
-        input.endpoint,
-    });
-    defer alloc.free(url);
+    const url = builtin_x1.models_path;
 
     const Header = struct { name: []const u8, value: []const u8 };
     var headers: std.ArrayList(Header) = .empty;
@@ -46,8 +43,8 @@ fn fetch(
     if (authorization) |value| {
         try headers.append(alloc, .{ .name = "authorization", .value = value });
     }
-    if (input.access.teamContext()) |team| {
-        try headers.append(alloc, .{ .name = "x-vercel-ai-gateway-team", .value = team });
+    if (input.access.accountId()) |account_id| {
+        try headers.append(alloc, .{ .name = "x-account-id", .value = account_id });
     }
 
     var headers_json: std.Io.Writer.Allocating = .init(alloc);
@@ -59,7 +56,7 @@ fn fetch(
     defer alloc.free(response);
     var status: u16 = 0;
     const method = "GET";
-    const response_len = fx_http_request(
+    const response_len = x1_http_request(
         method.ptr,
         method.len,
         url.ptr,
@@ -78,10 +75,9 @@ fn fetch(
         return .{ .failure = model_catalog.failureForHttpStatus(@enumFromInt(status)) };
     }
 
-    const catalog = builtin_gateway.parseModelCatalogForView(
+    const catalog = layerx1_models.parseCatalog(
         alloc,
         response[0..@intCast(response_len)],
-        input.view,
     ) catch |err| return .{ .failure = .{
         .category = if (err == error.OutOfMemory) .resource_exhausted else .malformed_response,
         .http_status = .ok,

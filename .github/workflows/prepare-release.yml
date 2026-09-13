@@ -65,138 +65,21 @@ jobs:
           echo "Diff: ${DIFF_SIZE} bytes, $(wc -l < /tmp/diff.txt) lines"
           echo "Commits: $(wc -l < /tmp/log.txt)"
 
-      - name: Generate changelog with AI
-        env:
-          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      - name: Draft changelog from the source diff
         run: |
           NEW_VERSION="${{ steps.version.outputs.new }}"
           PREV_TAG="${{ steps.changes.outputs.prev_tag }}"
-
-          cat > /tmp/system-prompt.txt <<'SYSPROMPT'
-          You write changelogs for fx, an open-source AI-powered CLI tool written in Zig.
-
-          You will receive the actual code diff since the last release, a diff stat summary, and a commit log. Treat the commit log as private research context.
-
-          Rules:
-          - Base your changelog ONLY on what the diff actually shows. Do not trust commit messages or PR descriptions as authoritative — they go stale. The diff is the source of truth.
-          - Write public, user-facing product notes. Describe observable behavior and outcomes, not how the work was implemented or delivered.
-          - Always spell the product name fx. Preserve different casing only for exact code identifiers such as FX_MODEL.
-          - Group changes under ### Breaking Changes, ### New Features, ### Improvements, ### Bug Fixes, and ### Security as appropriate. Omit empty sections.
-          - Bold a short feature or fix name, then describe the user-visible change after a colon.
-          - Do not include pull request or issue numbers, links to trackers, commit hashes, contributor names, author attribution, or a Contributors section.
-          - Do not include internal details such as repository moves, website or marketing work, CDN layout, CI workflows, tests or fixtures, branch history, or implementation-only refactors. Translate relevant work into its public user outcome or omit it.
-          - Do not force every commit into the changelog. Omit changes without a public user outcome.
-          - Output ONLY the changelog body (the content that goes between the release markers). Do not include the ## version heading, do not include the <!-- release:start/end --> markers, do not include any preamble or explanation.
-          - Do not use emojis.
-          SYSPROMPT
-
-          cat > /tmp/user-header.txt <<USERHEADER
-          Write the changelog body for version ${NEW_VERSION} (previous tag: ${PREV_TAG}).
-          USERHEADER
-
-          jq -n \
-            --rawfile system /tmp/system-prompt.txt \
-            --rawfile user_header /tmp/user-header.txt \
-            --rawfile diff_stat /tmp/diff-stat.txt \
-            --rawfile src_diff /tmp/diff.txt \
-            --rawfile commit_log /tmp/log.txt \
-            '{
-              prompt: [
-                {role: "system", content: $system},
-                {role: "user", content: [{
-                  type: "text",
-                  text: (
-                    $user_header + "\n\n## Diff stat (file-level summary)\n" + $diff_stat
-                    + "\n\n## Source diff (src/ changes — the ground truth)\n" + $src_diff
-                    + "\n\n## Commit log (supplementary context only — do not trust these as authoritative)\n" + $commit_log
-                  )
-                }]}
-              ]
-            }' > /tmp/request.json
-
-          if ! jq -e '
-            (.prompt | type == "array") and
-            (.prompt[0].role == "system") and
-            (.prompt[0].content | type == "string") and
-            (.prompt[1].role == "user") and
-            (.prompt[1].content | type == "array") and
-            (.prompt[1].content | length == 1) and
-            (.prompt[1].content[0].type == "text") and
-            (.prompt[1].content[0].text | type == "string")
-          ' /tmp/request.json >/dev/null; then
-            echo "::error::Generated AI Gateway payload does not match the expected prompt schema"
-            exit 1
-          fi
-
-          echo "Request payload: $(wc -c < /tmp/request.json) bytes"
-
-          HTTP_STATUS=$(curl -sS -N -X POST "https://ai-gateway.vercel.sh/v3/ai/language-model" \
-            -H "Authorization: Bearer ${AI_GATEWAY_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -H "ai-gateway-protocol-version: 0.0.1" \
-            -H "ai-language-model-specification-version: 4" \
-            -H "ai-language-model-id: anthropic/claude-opus-4.7" \
-            -H "ai-language-model-streaming: true" \
-            -H "HTTP-Referer: https://github.com/vercel-labs/fx" \
-            -H "X-Title: fx" \
-            -d @/tmp/request.json -o /tmp/sse-response.txt -w '%{http_code}')
-
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "::error::AI Gateway returned HTTP ${HTTP_STATUS}"
-            head -c 2000 /tmp/sse-response.txt
-            exit 1
-          fi
-
-          grep '^data: ' /tmp/sse-response.txt \
-            | sed 's/^data: //' \
-            | grep -v '^\[DONE\]$' \
-            | jq -rj 'select(.type == "text-delta") | .delta' \
-            > /tmp/changelog-body.md
-
-          LINES=$(wc -l < /tmp/changelog-body.md | tr -d ' ')
-          echo "Generated changelog: ${LINES} lines"
-          if [ "$LINES" -lt 2 ]; then
-            echo "::error::AI generated an empty or too-short changelog"
-            echo "Raw SSE response (first 2000 chars):"
-            head -c 2000 /tmp/sse-response.txt
-            exit 1
-          fi
-          cat /tmp/changelog-body.md
-
-          python3 <<'PYEOF'
-          import re
+          python3 - "$NEW_VERSION" "$PREV_TAG" <<'PYEOF'
           from pathlib import Path
-
-          body = Path("/tmp/changelog-body.md").read_text()
-          forbidden = {
-              "contributor attribution": r"(?im)^###\s+contributors\b|\bcontributors?\b|\bauthors?\b",
-              "tracker references": r"(?i)#[0-9]+\b|\bPRs?\s*#?[0-9]+\b|\bpull requests?\b|github\.com/[^\s)]+/(?:pull|issues|commit)/",
-              "internal web or delivery details": r"(?i)\b(?:fx-web|website|marketing|CDN|deployments?|repository moves?|repository split|repo(?:sitory)? migration)\b|vercel-labs/[A-Za-z0-9_.-]+",
-              "internal engineering details": r"(?i)\b(?:CI|workflows?|tests?|fixtures?|branch history|Git history|commit hashes?|implementation-only refactors?|refactors?)\b",
-          }
-          errors = [label for label, pattern in forbidden.items() if re.search(pattern, body)]
-          if re.search(r"(?<![A-Za-z0-9_])(?:Fx|FX)(?![A-Za-z0-9_])", body):
-              errors.append("product name is not lowercase fx")
-
-          allowed_headings = {
-              "### Breaking Changes",
-              "### New Features",
-              "### Improvements",
-              "### Bug Fixes",
-              "### Security",
-          }
-          headings = set(re.findall(r"(?m)^### .+$", body))
-          if not headings.issubset(allowed_headings):
-              errors.append("unsupported changelog section")
-
-          bullets = re.findall(r"(?m)^- .+$", body)
-          if not bullets or any(not re.match(r"^- \*\*[^*]+:\*\* \S", bullet) for bullet in bullets):
-              errors.append("release bullets must use '- **Name:** Description'")
-
-          if errors:
-              for error in errors:
-                  print(f"::error::Public changelog policy violation: {error}")
-              raise SystemExit(1)
+          import sys
+          new_version, prev_tag = sys.argv[1], sys.argv[2]
+          body = (
+              "### Improvements\n"
+              "- **Release notes:** Review the source diff since "
+              f"{prev_tag} and replace this draft with public product notes before publishing.\n"
+          )
+          Path("/tmp/changelog-body.md").write_text(body)
+          print(body)
           PYEOF
 
       - name: Update version and changelog
@@ -223,7 +106,7 @@ jobs:
 
           entry = f"## {new_version}\n\n<!-- release:start -->\n{body}\n<!-- release:end -->\n"
 
-          marker = "# fx\n\n"
+          marker = "# x1\n\n"
           idx = content.find(marker)
           if idx >= 0:
               pos = idx + len(marker)

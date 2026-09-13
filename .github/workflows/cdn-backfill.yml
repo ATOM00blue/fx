@@ -21,7 +21,7 @@ permissions:
 
 env:
   CDN_BASE: cli
-  PLATFORMS: linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64
+  PLATFORMS: linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64 windows-x86_64
 
 jobs:
   backfill:
@@ -99,8 +99,8 @@ jobs:
             gh release download "$VERSION" \
               --repo "$GITHUB_REPOSITORY" \
               --dir "$TMPDIR" \
-              --pattern "fx-*.tar.gz" \
-              --pattern "fx-*.tar.gz.sha256" 2>/dev/null || {
+              --pattern "x1-*.tar.gz" \
+              --pattern "x1-*.tar.gz.sha256" 2>/dev/null || {
               echo "  no assets found, skipping"
               SKIPPED=$((SKIPPED + 1))
               rm -rf "$TMPDIR"
@@ -108,7 +108,7 @@ jobs:
             }
 
             for PLATFORM in $PLATFORMS; do
-              TARBALL="fx-${PLATFORM}.tar.gz"
+              TARBALL="x1-${PLATFORM}.tar.gz"
               CHECKSUM="${TARBALL}.sha256"
 
               if [ -f "$TMPDIR/$TARBALL" ]; then

@@ -2875,6 +2875,10 @@ const dark_to_light_theme_tokens = [_]ThemeToken{
     .{ .from = "\x1b[38;5;252m", .to = "\x1b[38;5;238m" },
     .{ .from = "\x1b[38;5;250m", .to = "\x1b[38;5;241m" },
     .{ .from = "\x1b[38;5;245m", .to = "\x1b[38;5;247m" },
+    // X1 accent: truecolor #2EB8E6 ↔ #177FA6 and 256-color 74 ↔ 31.
+    // Lengths match so retained welcome geometry stays stable across themes.
+    .{ .from = "\x1b[38;2;46;184;230m", .to = "\x1b[38;2;23;127;166m" },
+    .{ .from = "\x1b[38;5;74m", .to = "\x1b[38;5;31m" },
 };
 
 const light_to_dark_theme_tokens = [_]ThemeToken{
@@ -2884,6 +2888,8 @@ const light_to_dark_theme_tokens = [_]ThemeToken{
     .{ .from = "\x1b[38;5;238m", .to = "\x1b[38;5;252m" },
     .{ .from = "\x1b[38;5;241m", .to = "\x1b[38;5;250m" },
     .{ .from = "\x1b[38;5;247m", .to = "\x1b[38;5;245m" },
+    .{ .from = "\x1b[38;2;23;127;166m", .to = "\x1b[38;2;46;184;230m" },
+    .{ .from = "\x1b[38;5;31m", .to = "\x1b[38;5;74m" },
 };
 
 fn themeOwnsRawEntry(class: RawEntryClass) bool {

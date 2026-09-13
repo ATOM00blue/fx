@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import xtermHeadless from "@xterm/headless";
-import { createFxTerminal, supportsJspi, xtermAdapter } from "../node.js";
+import { createX1Terminal, supportsJspi, xtermAdapter } from "../node.js";
 
 const { Terminal } = xtermHeadless;
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/fx-term.wasm"));
+const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/x1-term.wasm"));
 if (!supportsJspi()) process.exit(2);
 const wasm = await readFile(wasmPath);
 const histories = new Map();
@@ -24,9 +24,9 @@ const promptHistoryStore = {
 const encoded = new TextEncoder();
 const fetch = async () => new Response(new ReadableStream({
   start(controller) {
-    controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"ok"}\n'));
-    controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop"}}\n'));
-    controller.enqueue(encoded.encode("data: [DONE]\n"));
+    controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"ok"}\n'));
+    controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+    controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
     controller.close();
   },
 }), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -55,16 +55,16 @@ async function waitForExit(runtime, label) {
 async function start() {
   const terminal = new Terminal({ cols: 80, rows: 24, allowProposedApi: true, scrollback: 1000 });
   const events = [];
-  const runtime = await createFxTerminal({
+  const runtime = await createX1Terminal({
   backend: "wasm",
     wasm,
     terminal: xtermAdapter(terminal),
-    env: { AI_GATEWAY_API_KEY: "term-history-key" },
+    env: { X1_API_KEY: "term-history-key" },
     fetch,
     promptHistoryStore,
     onEvent(event) { events.push(event); },
   });
-  await waitFor(terminal, () => grid(terminal).includes("Run /help for commands"), "startup");
+  await waitFor(terminal, () => grid(terminal).includes("layerx1.com"), "startup");
   return { terminal, runtime, events };
 }
 

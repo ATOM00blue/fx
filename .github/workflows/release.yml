@@ -51,9 +51,9 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            target: x86_64-linux
+            target: x86_64-linux-gnu
           - name: linux-aarch64
-            target: aarch64-linux
+            target: aarch64-linux-gnu
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -67,19 +67,19 @@ jobs:
 
       - name: Package
         run: |
-          package_dir="$RUNNER_TEMP/fx-package-${{ matrix.name }}"
+          package_dir="$RUNNER_TEMP/x1-package-${{ matrix.name }}"
           mkdir -p "$package_dir"
-          cp zig-out/bin/fx LICENSE THIRD_PARTY_NOTICES.md "$package_dir/"
-          tar -czf fx-${{ matrix.name }}.tar.gz -C "$package_dir" fx LICENSE THIRD_PARTY_NOTICES.md
-          sha256sum fx-${{ matrix.name }}.tar.gz > fx-${{ matrix.name }}.tar.gz.sha256
+          cp zig-out/bin/x1 LICENSE THIRD_PARTY_NOTICES.md "$package_dir/"
+          tar -czf x1-${{ matrix.name }}.tar.gz -C "$package_dir" x1 LICENSE THIRD_PARTY_NOTICES.md
+          sha256sum x1-${{ matrix.name }}.tar.gz > x1-${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: fx-${{ matrix.name }}
+          name: x1-${{ matrix.name }}
           path: |
-            fx-${{ matrix.name }}.tar.gz
-            fx-${{ matrix.name }}.tar.gz.sha256
+            x1-${{ matrix.name }}.tar.gz
+            x1-${{ matrix.name }}.tar.gz.sha256
 
   build-macos-x86_64:
     needs: check-version
@@ -105,23 +105,57 @@ jobs:
           APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-        run: scripts/sign-and-notarize-macos.sh zig-out/bin/fx
+        run: scripts/sign-and-notarize-macos.sh zig-out/bin/x1
 
       - name: Package
         run: |
-          package_dir="$RUNNER_TEMP/fx-package-macos-x86_64"
+          package_dir="$RUNNER_TEMP/x1-package-macos-x86_64"
           mkdir -p "$package_dir"
-          cp zig-out/bin/fx LICENSE THIRD_PARTY_NOTICES.md "$package_dir/"
-          tar -czf fx-macos-x86_64.tar.gz -C "$package_dir" fx LICENSE THIRD_PARTY_NOTICES.md
-          shasum -a 256 fx-macos-x86_64.tar.gz > fx-macos-x86_64.tar.gz.sha256
+          cp zig-out/bin/x1 LICENSE THIRD_PARTY_NOTICES.md "$package_dir/"
+          tar -czf x1-macos-x86_64.tar.gz -C "$package_dir" x1 LICENSE THIRD_PARTY_NOTICES.md
+          shasum -a 256 x1-macos-x86_64.tar.gz > x1-macos-x86_64.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: fx-macos-x86_64
+          name: x1-macos-x86_64
           path: |
-            fx-macos-x86_64.tar.gz
-            fx-macos-x86_64.tar.gz.sha256
+            x1-macos-x86_64.tar.gz
+            x1-macos-x86_64.tar.gz.sha256
+
+  build-windows-x86_64:
+    needs: check-version
+    if: needs.check-version.outputs.needed == 'true'
+    name: Build windows-x86_64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: "0.16.0"
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-windows-gnu
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP "x1-package-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item zig-out/bin/x1.exe, LICENSE, THIRD_PARTY_NOTICES.md -Destination $packageDir
+          tar -czf x1-windows-x86_64.tar.gz -C $packageDir x1.exe LICENSE THIRD_PARTY_NOTICES.md
+          $hash = (Get-FileHash x1-windows-x86_64.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  x1-windows-x86_64.tar.gz" | Set-Content -NoNewline x1-windows-x86_64.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: x1-windows-x86_64
+          path: |
+            x1-windows-x86_64.tar.gz
+            x1-windows-x86_64.tar.gz.sha256
 
   build-macos-arm64:
     needs: check-version
@@ -134,7 +168,7 @@ jobs:
       package_release: true
 
   release:
-    needs: [check-version, build-linux, build-macos-x86_64, build-macos-arm64]
+    needs: [check-version, build-linux, build-macos-x86_64, build-macos-arm64, build-windows-x86_64]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -145,7 +179,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: fx-*
+          pattern: x1-*
           merge-multiple: true
 
       - name: Create git tag
@@ -173,8 +207,8 @@ jobs:
           tag_name: ${{ needs.check-version.outputs.version }}
           body_path: /tmp/release-notes.md
           files: |
-            fx-*.tar.gz
-            fx-*.tar.gz.sha256
+            x1-*.tar.gz
+            x1-*.tar.gz.sha256
 
       - name: Publish to CDN
         env:
@@ -185,7 +219,7 @@ jobs:
           [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           CDN_BASE="cli"
 
-          for FILE in fx-*.tar.gz fx-*.tar.gz.sha256; do
+          for FILE in x1-*.tar.gz x1-*.tar.gz.sha256; do
             [ -f "$FILE" ] || continue
             CONTENT_TYPE="application/octet-stream"
             [[ "$FILE" == *.sha256 ]] && CONTENT_TYPE="text/plain"

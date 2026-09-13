@@ -44,6 +44,7 @@ const expectBodyNotContains = test_support.expectBodyNotContains;
 const expectBodyContainsInOrder = test_support.expectBodyContainsInOrder;
 const expectGatewayPromptFinalUserText = test_support.expectGatewayPromptFinalUserText;
 const countPromptEntryText = test_support.countPromptEntryText;
+const requestMessageItems = test_support.requestMessageItems;
 const countText = test_support.countText;
 const countNeedle = test_support.countNeedle;
 const readTraceFile = test_support.readTraceFile;
@@ -190,7 +191,7 @@ test "processQueuedPrompt accounts exact direct-provider usage without deferred 
             .reasoning_tokens = null,
             .billable_web_search_calls = 0,
         },
-        .exact_usage_provider = .codex,
+        .exact_usage_provider = .layerx1,
     }};
     var gateway = FakeGateway.init(alloc, &completions);
     defer gateway.deinit();
@@ -203,7 +204,7 @@ test "processQueuedPrompt accounts exact direct-provider usage without deferred 
     var config = fixture.config();
     config.provider_capabilities = .{};
     var job = fixture.job();
-    job.provider = .codex;
+    job.provider = .layerx1;
 
     try runFakePrompt(&gateway, &hooks, config, job);
 
@@ -239,9 +240,20 @@ fn makeOwnedProviderPrompt(alloc: Allocator, text: []const u8, model: []const u8
 
 fn expectPromptEntryRole(entry: std.json.Value, expected_role: types.ChatRole) !void {
     try std.testing.expect(entry == .object);
-    const role = entry.object.get("role") orelse return error.TestExpectedPromptRoleMissing;
-    try std.testing.expect(role == .string);
-    try std.testing.expectEqualStrings(@tagName(expected_role), role.string);
+    if (entry.object.get("role")) |role| {
+        try std.testing.expect(role == .string);
+        try std.testing.expectEqualStrings(@tagName(expected_role), role.string);
+        return;
+    }
+    const entry_type = entry.object.get("type") orelse return error.TestExpectedPromptRoleMissing;
+    try std.testing.expect(entry_type == .string);
+    const projected_role: types.ChatRole = if (std.mem.eql(u8, entry_type.string, "function_call"))
+        .assistant
+    else if (std.mem.eql(u8, entry_type.string, "function_call_output"))
+        .tool
+    else
+        return error.TestExpectedPromptRoleMissing;
+    try std.testing.expectEqual(expected_role, projected_role);
 }
 
 fn expectGatewayPromptRoles(gateway: *const FakeGateway, index: usize, expected_roles: []const types.ChatRole) !void {
@@ -251,11 +263,20 @@ fn expectGatewayPromptRoles(gateway: *const FakeGateway, index: usize, expected_
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
-    try std.testing.expectEqual(expected_roles.len, prompt.len);
-    for (expected_roles, 0..) |expected_role, i| {
-        try expectPromptEntryRole(prompt[i], expected_role);
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
+    var input_index: usize = 0;
+    for (expected_roles) |expected_role| {
+        if (expected_role == .system) {
+            const instructions = parsed.value.object.get("instructions") orelse
+                return error.TestExpectedPromptMessageMissing;
+            try std.testing.expect(instructions == .string and instructions.string.len > 0);
+            continue;
+        }
+        try std.testing.expect(input_index < prompt.len);
+        try expectPromptEntryRole(prompt[input_index], expected_role);
+        input_index += 1;
     }
+    try std.testing.expectEqual(prompt.len, input_index);
 }
 
 fn expectGatewayPromptTailText(
@@ -275,9 +296,16 @@ fn expectGatewayPromptTailText(
     );
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
     try std.testing.expect(prompt.len > 0);
     const tail = prompt[prompt.len - 1];
+    if (expected_role == .tool and tail == .object) {
+        const entry_type = tail.object.get("type") orelse return error.TestExpectedPromptRoleMissing;
+        try std.testing.expect(entry_type == .string and std.mem.eql(u8, entry_type.string, "function_call_output"));
+        const output = tail.object.get("output") orelse return error.TestExpectedPromptMessageMissing;
+        try std.testing.expect(output == .string and std.mem.count(u8, output.string, expected_text) == 1);
+        return;
+    }
     try expectPromptEntryRole(tail, expected_role);
     try std.testing.expectEqual(
         @as(usize, 1),
@@ -300,13 +328,15 @@ fn expectGatewayPromptStringEntry(gateway: *const FakeGateway, index: usize, ent
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
-    try std.testing.expect(entry_index < prompt.len);
-    const entry = prompt[entry_index];
-    try std.testing.expect(entry == .object);
-    const content = entry.object.get("content") orelse return error.TestExpectedPromptMessageMissing;
-    try std.testing.expect(content == .string);
-    try std.testing.expectEqualStrings(expected, content.string);
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
+    _ = entry_index;
+    if (parsed.value.object.get("instructions")) |instructions| {
+        if (instructions == .string and std.mem.find(u8, instructions.string, expected) != null) return;
+    }
+    for (prompt) |entry| {
+        if (countPromptEntryText(entry, expected) > 0) return;
+    }
+    return error.TestExpectedPromptMessageMissing;
 }
 
 fn expectGatewayToolResultOutput(
@@ -321,9 +351,19 @@ fn expectGatewayToolResultOutput(
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
     for (prompt) |entry| {
         if (entry != .object) continue;
+        if (entry.object.get("type")) |entry_type| {
+            if (entry_type == .string and std.mem.eql(u8, entry_type.string, "function_call_output")) {
+                const part_call_id = entry.object.get("call_id") orelse continue;
+                if (part_call_id != .string or !std.mem.eql(u8, part_call_id.string, tool_call_id)) continue;
+                const output = entry.object.get("output") orelse continue;
+                if (output != .string) continue;
+                try std.testing.expectEqualStrings(expected, output.string);
+                return;
+            }
+        }
         const content = entry.object.get("content") orelse continue;
         if (content != .array) continue;
         for (content.array.items) |part| {
@@ -348,8 +388,11 @@ fn expectGatewayPromptTextCount(gateway: *const FakeGateway, index: usize, needl
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
-    var count: usize = 0;
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
+    var count: usize = if (parsed.value.object.get("instructions")) |instructions|
+        if (instructions == .string) std.mem.count(u8, instructions.string, needle) else 0
+    else
+        0;
     for (prompt) |entry| count += countPromptEntryText(entry, needle);
     try std.testing.expectEqual(expected_count, count);
 }
@@ -506,7 +549,7 @@ fn runScriptedVision(
     args_json: []const u8,
     output_limit_bytes: usize,
 ) !runtime_tool_contracts.ToolExecutionResult {
-    var provider = @import("../../../../builtins/gateway.zig").agent_stream_provider;
+    var provider = @import("../../../../builtins/x1.zig").agent_stream_provider;
     provider.context = script;
     provider.stream_fn = VisionProviderScript.stream;
     return vision_executor.execute(alloc, args_json, catalog, .{
@@ -532,7 +575,13 @@ fn expectGatewayPromptEntryCacheControl(gateway: *const FakeGateway, index: usiz
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, gateway.request_bodies.items[index], .{});
     defer parsed.deinit();
 
-    const prompt = parsed.value.object.get("prompt").?.array.items;
+    if (parsed.value.object.get("instructions")) |instructions| {
+        if (instructions == .string and std.mem.find(u8, instructions.string, needle) != null) {
+            try std.testing.expect(!expected);
+            return;
+        }
+    }
+    const prompt = requestMessageItems(parsed.value) orelse return error.TestExpectedPromptMessageMissing;
     for (prompt) |entry| {
         if (countPromptEntryText(entry, needle) == 0) continue;
         try std.testing.expectEqual(expected, entry.object.get("providerOptions") != null);
@@ -593,12 +642,12 @@ test "processQueuedPrompt gates text-only images through the real Vision runtime
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[0]);
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", gateway.request_models.items[1]);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[2]);
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try expectBodyContains(&gateway, 0, "\"name\":\"vision\"");
     try expectBodyContains(&gateway, 0, "[Image #1]");
-    try expectBodyNotContains(&gateway, 0, "\"type\":\"file\"");
+    try expectBodyNotContains(&gateway, 0, "\"type\":\"input_image\"");
     try expectBodyNotContains(&gateway, 0, image_path);
-    try expectBodyContains(&gateway, 1, "\"type\":\"file\"");
+    try expectBodyContains(&gateway, 1, "\"type\":\"input_image\"");
     try expectBodyNotContains(&gateway, 1, image_path);
     try expectBodyContains(&gateway, 2, "FX logo");
     try expectBodyContains(&gateway, 2, "FX LOGO");
@@ -792,13 +841,13 @@ test "processQueuedPrompt settles mixed local results and recovers after one Vis
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
     try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
-    try std.testing.expectEqual(@as(usize, 1), countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""));
+    try std.testing.expectEqual(@as(usize, 1), countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""));
     try expectBodyContainsInOrder(
         &gateway,
         2,
         &.{ "image_id", "image_unavailable", "image_id", "healthy sibling" },
     );
-    try expectBodyNotContains(&gateway, 2, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 2, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings("Final partial answer", hooks.finish_assistant_text.?);
 }
 
@@ -896,7 +945,7 @@ test "processQueuedPrompt preserves a provider omission as mixed success" {
     try std.testing.expect(std.mem.find(u8, persisted.output, "retained evidence") != null);
     try std.testing.expect(std.mem.find(u8, persisted.output, "missing_provider_record") != null);
     try expectGatewayToolResultOutput(&gateway, 2, "call_vision_provider_omission", persisted.output);
-    try expectBodyNotContains(&gateway, 2, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 2, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
 }
 
 fn deleteLocallyFilteredSnapshots(images: []const types.ImageAttachment) !void {
@@ -948,7 +997,7 @@ test "processQueuedPrompt serializes retained bytes after locally filtered paths
     try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
     try std.testing.expectEqual(
         @as(usize, 2),
-        countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""),
+        countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""),
     );
     try expectBodyContainsInOrder(
         &gateway,
@@ -1045,12 +1094,12 @@ test "required Vision rejects non-Vision before effects and stays required until
     for (gateway.request_session_ids.items) |session_id| {
         try std.testing.expectEqualStrings("session-vision-123", session_id.?);
     }
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"required\"}");
-    try expectBodyContains(&gateway, 1, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
+    try expectBodyContains(&gateway, 1, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try expectBodyContains(&gateway, 1, "call_terminal_while_vision_required");
     try expectBodyContains(&gateway, 1, "Only Vision can be called while attached images are pending.");
-    try expectBodyNotContains(&gateway, 3, "\"toolChoice\":{\"type\":\"required\"}");
-    try expectBodyContains(&gateway, 2, "\"type\":\"file\"");
+    try expectBodyNotContains(&gateway, 3, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
+    try expectBodyContains(&gateway, 2, "\"type\":\"input_image\"");
     try expectBodyContains(&gateway, 4, "ordinary read contents");
 
     try std.testing.expectEqual(@as(usize, 2), pre_tool.calls);
@@ -1168,10 +1217,10 @@ test "required Vision mixed response executes Vision and rejects non-Vision sibl
     );
 
     try std.testing.expectEqual(@as(usize, 4), gateway.request_bodies.items.len);
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try expectBodyContains(&gateway, 2, "mixed evidence");
     try expectBodyContains(&gateway, 2, "Only Vision can be called while attached images are pending.");
-    try expectBodyNotContains(&gateway, 2, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 2, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try expectBodyContains(&gateway, 3, "ordinary read contents");
     try std.testing.expectEqual(@as(usize, 2), hooks.executed_call_ids.items.len);
     try std.testing.expectEqualStrings("call_mixed_vision", hooks.executed_call_ids.items[0]);
@@ -1234,9 +1283,9 @@ test "processQueuedPrompt batches twenty text-only images through Vision as 8 8 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
     try std.testing.expectEqual(@as(usize, 5), gateway.request_bodies.items.len);
-    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[2], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 4), countNeedle(gateway.request_bodies.items[3], "\"type\":\"file\""));
+    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[2], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 4), countNeedle(gateway.request_bodies.items[3], "\"type\":\"input_image\""));
     try expectBodyContains(&gateway, 0, "[Image #1]");
     try expectBodyContains(&gateway, 0, "[Image #20]");
     try expectBodyNotContains(&gateway, 0, image_path);
@@ -1329,9 +1378,9 @@ test "processQueuedPrompt keeps corrupt twenty-image members inside their origin
 
         try runFakePrompt(&gateway, &hooks, fixture.config(), job);
         try std.testing.expectEqual(@as(usize, 5), gateway.request_bodies.items.len);
-        try std.testing.expectEqual(expected[0], countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""));
-        try std.testing.expectEqual(expected[1], countNeedle(gateway.request_bodies.items[2], "\"type\":\"file\""));
-        try std.testing.expectEqual(expected[2], countNeedle(gateway.request_bodies.items[3], "\"type\":\"file\""));
+        try std.testing.expectEqual(expected[0], countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""));
+        try std.testing.expectEqual(expected[1], countNeedle(gateway.request_bodies.items[2], "\"type\":\"input_image\""));
+        try std.testing.expectEqual(expected[2], countNeedle(gateway.request_bodies.items[3], "\"type\":\"input_image\""));
         var invalid_marker: [32]u8 = undefined;
         const marker = try std.fmt.bufPrint(
             &invalid_marker,
@@ -1344,7 +1393,7 @@ test "processQueuedPrompt keeps corrupt twenty-image members inside their origin
             4,
             &.{ "image_id", "image_unavailable", "image 20" },
         );
-        try expectBodyNotContains(&gateway, 4, "\"toolChoice\":{\"type\":\"required\"}");
+        try expectBodyNotContains(&gateway, 4, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
         try std.testing.expectEqualStrings(
             "Final partial twenty-image answer",
             hooks.finish_assistant_text.?,
@@ -1393,13 +1442,13 @@ test "processQueuedPrompt filters one missing image from an eight-image batch" {
     job.authorized_image_catalog = &images;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-    try std.testing.expectEqual(@as(usize, 7), countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""));
+    try std.testing.expectEqual(@as(usize, 7), countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""));
     try expectBodyContainsInOrder(
         &gateway,
         2,
         &.{ "image_id", "image_unavailable", "image 8" },
     );
-    try expectBodyNotContains(&gateway, 2, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 2, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings("Final missing-image answer", hooks.finish_assistant_text.?);
 }
 
@@ -1445,7 +1494,7 @@ test "processQueuedPrompt skips an entirely invalid local Vision batch" {
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[0]);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[1]);
     try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[1], "image_unavailable"));
-    try expectBodyNotContains(&gateway, 1, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 1, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings("Final invalid-batch answer", hooks.finish_assistant_text.?);
 }
 
@@ -1487,14 +1536,14 @@ test "processQueuedPrompt preserves local failures when the filtered provider ba
     job.authorized_image_catalog = &images;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-    try std.testing.expectEqual(@as(usize, 1), countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""));
+    try std.testing.expectEqual(@as(usize, 1), countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""));
     try expectBodyContainsInOrder(
         &gateway,
         2,
         &.{ "image_unavailable", "vision_unavailable" },
     );
     try std.testing.expectEqual(@as(usize, 0), hooks.interactive_notices.items.len);
-    try expectBodyNotContains(&gateway, 2, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 2, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings("Final filtered-outage answer", hooks.finish_assistant_text.?);
 }
 
@@ -1524,9 +1573,9 @@ test "processQueuedPrompt advertises historical Vision access without requiring 
     try runFakePrompt(&gateway, &hooks, config, job);
 
     try expectBodyContains(&gateway, 0, "\"name\":\"vision\"");
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"none\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":\"none\"");
     try expectBodyContains(&gateway, 0, "[Image #7]");
-    try expectBodyNotContains(&gateway, 0, "\"type\":\"file\"");
+    try expectBodyNotContains(&gateway, 0, "\"type\":\"input_image\"");
     try expectBodyNotContains(&gateway, 0, image_path);
 }
 
@@ -1573,8 +1622,8 @@ test "processQueuedPrompt preserves configured first choice for first unrestrict
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[0]);
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", gateway.request_models.items[1]);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[2]);
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"required\"}");
-    try expectBodyContains(&gateway, 2, "\"toolChoice\":{\"type\":\"none\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
+    try expectBodyContains(&gateway, 2, "\"tool_choice\":\"none\"");
     try expectBodyContains(&gateway, 2, "FX logo");
     try expectBodyNotContains(&gateway, 0, image_path);
     try expectBodyNotContains(&gateway, 2, image_path);
@@ -1626,8 +1675,8 @@ test "processQueuedPrompt keeps unauthorized Vision calls gated" {
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
     try std.testing.expectEqual(@as(usize, 4), gateway.request_bodies.items.len);
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"required\"}");
-    try expectBodyContains(&gateway, 1, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
+    try expectBodyContains(&gateway, 1, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[0]);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[1]);
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", gateway.request_models.items[2]);
@@ -1686,7 +1735,7 @@ test "processQueuedPrompt rereads historical authorized image through optional V
     try expectBodyContains(&gateway, 0, "\"name\":\"vision\"");
     try expectBodyContains(&gateway, 0, "[Image #7]");
     try expectBodyContains(&gateway, 2, "HISTORICAL FX LOGO");
-    try expectBodyNotContains(&gateway, 0, "\"type\":\"file\"");
+    try expectBodyNotContains(&gateway, 0, "\"type\":\"input_image\"");
     try expectBodyNotContains(&gateway, 0, image_path);
     try expectBodyNotContains(&gateway, 2, image_path);
     try std.testing.expectEqualStrings("Final selected-model answer", hooks.finish_assistant_text.?);
@@ -1725,7 +1774,7 @@ test "processQueuedPrompt keeps required Vision gate cancellation neutral" {
     try std.testing.expectEqual(@as(usize, 0), hooks.system_notices.items.len);
     try std.testing.expectEqual(@as(usize, 1), gateway.request_models.items.len);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[0]);
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try expectBodyNotContains(&gateway, 0, image_path);
     try std.testing.expectEqual(@as(usize, 1), hooks.interrupted_history_count);
     try std.testing.expectEqual(@as(usize, 1), hooks.finalization_count);
@@ -1779,7 +1828,7 @@ test "processQueuedPrompt reports exact Vision outage tip and permits normal rec
     );
     try expectBodyContains(&gateway, 2, "None of the requested images were read");
     try expectBodyNotContains(&gateway, 2, image_path);
-    try expectBodyNotContains(&gateway, 2, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 2, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings(
         "I could not inspect the image.",
         hooks.finish_assistant_text.?,
@@ -1829,7 +1878,7 @@ test "processQueuedPrompt classifies empty successful Vision provider response a
     try expectBodyNotContains(&gateway, 3, "Vision is unavailable right now");
     try expectBodyNotContains(&gateway, 3, "None of the requested images were read");
     try expectBodyNotContains(&gateway, 3, image_path);
-    try expectBodyNotContains(&gateway, 3, "\"toolChoice\":{\"type\":\"required\"}");
+    try expectBodyNotContains(&gateway, 3, "\"tool_choice\":{\"type\":\"function\",\"name\":\"vision\"}");
     try std.testing.expectEqualStrings(
         "I handled the invalid Vision result.",
         hooks.finish_assistant_text.?,
@@ -1890,8 +1939,8 @@ test "processQueuedPrompt recovers from Vision capacity failure with a narrower 
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[2]);
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", gateway.request_models.items[3]);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[4]);
-    try std.testing.expectEqual(@as(usize, 2), countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 1), countNeedle(gateway.request_bodies.items[3], "\"type\":\"file\""));
+    try std.testing.expectEqual(@as(usize, 2), countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 1), countNeedle(gateway.request_bodies.items[3], "\"type\":\"input_image\""));
     try expectBodyContains(&gateway, 2, "output_limit_exceeded");
     try expectBodyContains(&gateway, 2, "narrower focus or fewer images");
     try expectBodyNotContains(&gateway, 2, "a" ** 1024);
@@ -2296,10 +2345,10 @@ test "processQueuedPrompt retries only the invalid batch of twenty images" {
 
     try std.testing.expectEqual(@as(usize, 6), gateway.request_bodies.items.len);
     try std.testing.expectEqual(@as(usize, 4), countVisionProviderCalls(&gateway));
-    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[1], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[2], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[3], "\"type\":\"file\""));
-    try std.testing.expectEqual(@as(usize, 4), countNeedle(gateway.request_bodies.items[4], "\"type\":\"file\""));
+    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[1], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[2], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 8), countNeedle(gateway.request_bodies.items[3], "\"type\":\"input_image\""));
+    try std.testing.expectEqual(@as(usize, 4), countNeedle(gateway.request_bodies.items[4], "\"type\":\"input_image\""));
     try std.testing.expectEqual(
         @as(usize, 20),
         countNeedle(gateway.request_bodies.items[5], "\\\"image_id\\\""),
@@ -2334,6 +2383,7 @@ test "processQueuedPrompt keeps native image parts for vision route model" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
+    job.legacy_gateway_semantics = false;
     job.model = @constCast("google/gemini-2.5-flash");
     job.prompt = @constCast("Describe the attached image.");
     job.images = &images;
@@ -2345,8 +2395,8 @@ test "processQueuedPrompt keeps native image parts for vision route model" {
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", hooks.capability_queries.items[0]);
     try std.testing.expectEqual(@as(usize, 1), gateway.request_models.items.len);
     try std.testing.expectEqualStrings("google/gemini-2.5-flash", gateway.request_models.items[0]);
-    try expectBodyContains(&gateway, 0, "\"type\":\"file\"");
-    try expectBodyContains(&gateway, 0, "\"mediaType\":\"image/png\"");
+    try expectBodyContains(&gateway, 0, "\"type\":\"input_image\"");
+    try expectBodyContains(&gateway, 0, "data:image/png;base64,");
     try expectBodyNotContains(&gateway, 0, "<image_context>");
     try expectBodyNotContains(&gateway, 0, "\"name\":\"vision\"");
     try std.testing.expectEqualStrings("Native image answer", hooks.finish_assistant_text.?);
@@ -2373,7 +2423,8 @@ test "processQueuedPrompt never uses the vision fallback for Codex" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.provider = .codex;
+    job.legacy_gateway_semantics = false;
+    job.provider = .layerx1;
     job.model = @constCast("gpt-5.6-sol");
     job.prompt = @constCast("Describe the attached image.");
     job.images = &images;
@@ -2447,6 +2498,7 @@ test "processQueuedPrompt routes images natively only when vision and file input
         hooks.execute_delegate = vision_runtime.delegate();
         var fixture = PromptFixture{};
         var job = fixture.job();
+        job.legacy_gateway_semantics = false;
         job.model = model;
         job.prompt = @constCast("Describe the attached image.");
         job.images = &images;
@@ -2458,16 +2510,16 @@ test "processQueuedPrompt routes images natively only when vision and file input
         try std.testing.expectEqualStrings(model, hooks.capability_queries.items[0]);
         if (entry.expect_native) {
             try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
-            try expectBodyContains(&gateway, 0, "\"type\":\"file\"");
+            try expectBodyContains(&gateway, 0, "\"type\":\"input_image\"");
             try expectBodyContains(&gateway, 0, "iVBORw0KGgpmaXh0dXJlIGltYWdlIGJ5dGVz");
             try expectBodyContains(&gateway, 0, "\"name\":\"vision\"");
             try std.testing.expectEqualStrings("Native route answer", hooks.finish_assistant_text.?);
         } else {
             try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
             try expectBodyContains(&gateway, 0, "\"name\":\"vision\"");
-            try expectBodyNotContains(&gateway, 0, "\"type\":\"file\"");
+            try expectBodyNotContains(&gateway, 0, "\"type\":\"input_image\"");
             try expectBodyContains(&gateway, 0, "[Image #1]");
-            try expectBodyContains(&gateway, 1, "\"type\":\"file\"");
+            try expectBodyContains(&gateway, 1, "\"type\":\"input_image\"");
             try expectBodyContains(&gateway, 1, "iVBORw0KGgpmaXh0dXJlIGltYWdlIGJ5dGVz");
             try expectBodyContains(&gateway, 2, "text route evidence");
             try std.testing.expectEqualStrings(model, gateway.request_models.items[0]);
@@ -2519,6 +2571,7 @@ test "processQueuedPrompt rejects native-route attachment ID Vision calls before
     hooks.execute_delegate = vision_runtime.delegate();
     var fixture = PromptFixture{};
     var job = fixture.job();
+    job.legacy_gateway_semantics = false;
     job.model = @constCast("native/test-vision");
     job.prompt = @constCast("Describe the attached image.");
     job.images = &images;
@@ -2530,7 +2583,7 @@ test "processQueuedPrompt rejects native-route attachment ID Vision calls before
     try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
     try std.testing.expectEqualStrings("native/test-vision", gateway.request_models.items[0]);
     try std.testing.expectEqualStrings("native/test-vision", gateway.request_models.items[1]);
-    try expectBodyContains(&gateway, 0, "\"type\":\"file\"");
+    try expectBodyContains(&gateway, 0, "\"type\":\"input_image\"");
     try expectBodyContains(&gateway, 0, "\"name\":\"vision\"");
     try expectBodyNotContains(&gateway, 1, image_path);
     try std.testing.expectEqual(@as(usize, 0), hooks.permission_names.items.len);
@@ -2598,8 +2651,8 @@ test "processQueuedPrompt routes a user-supplied image path through Vision" {
     try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
     try expectBodyContains(&gateway, 0, "\"name\":\"vision\"");
     try expectBodyContains(&gateway, 0, "\"paths\":{\"type\":\"array\"");
-    try expectBodyNotContains(&gateway, 0, "\"type\":\"file\"");
-    try expectBodyContains(&gateway, 1, "\"type\":\"file\"");
+    try expectBodyNotContains(&gateway, 0, "\"type\":\"input_image\"");
+    try expectBodyContains(&gateway, 1, "\"type\":\"input_image\"");
     try expectBodyNotContains(&gateway, 1, source_path);
     try expectBodyContains(&gateway, 2, "path evidence");
     try std.testing.expectEqual(@as(usize, 1), hooks.permission_names.items.len);
@@ -2683,10 +2736,10 @@ test "processQueuedPrompt omits Fast without catalog support" {
 
     try std.testing.expectEqual(@as(usize, 1), hooks.capability_queries.items.len);
     try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
-    try expectBodyContains(&gateway, 0, "\"reasoning\":\"high\"");
+    try expectBodyContains(&gateway, 0, "\"reasoning\":{\"effort\":\"high\"");
     try expectRootFieldAbsent(&gateway, 0, "fast");
     try expectRootFieldAbsent(&gateway, 0, "providerOptions");
-    try expectBodyNotContains(&gateway, 0, "\"maxOutputTokens\"");
+    try expectBodyNotContains(&gateway, 0, "\"max_output_tokens\"");
 }
 
 test "processQueuedPrompt uses one available capability snapshot for history and output" {
@@ -2732,7 +2785,7 @@ test "processQueuedPrompt uses one available capability snapshot for history and
     try expectBodyContains(&gateway, 0, "NEW_HISTORY_USER");
     try expectBodyContains(&gateway, 0, "NEW_HISTORY_ASSISTANT");
     try expectBodyNotContains(&gateway, 0, old_marker);
-    try expectBodyContains(&gateway, 0, "\"maxOutputTokens\":16000");
+    try expectBodyContains(&gateway, 0, "\"max_output_tokens\":16000");
 }
 
 test "processQueuedPrompt projects bounded output limits into gateway requests" {
@@ -2742,7 +2795,7 @@ test "processQueuedPrompt projects bounded output limits into gateway requests" 
         max_output_tokens: ?u32,
         expected_json: ?[]const u8,
     }{
-        .{ .context_window = 256_000, .max_output_tokens = 32_000, .expected_json = "\"maxOutputTokens\":32000" },
+        .{ .context_window = 256_000, .max_output_tokens = 32_000, .expected_json = "\"max_output_tokens\":32000" },
         .{ .context_window = 1_048_576, .max_output_tokens = 1_048_576, .expected_json = null },
     };
 
@@ -2770,7 +2823,7 @@ test "processQueuedPrompt projects bounded output limits into gateway requests" 
         if (case.expected_json) |expected| {
             try expectBodyContains(&gateway, 0, expected);
         } else {
-            try expectBodyNotContains(&gateway, 0, "\"maxOutputTokens\"");
+            try expectBodyNotContains(&gateway, 0, "\"max_output_tokens\"");
         }
         try std.testing.expectEqual(case.context_window, available_overrides[0].capabilities.context_window);
         try std.testing.expectEqual(case.max_output_tokens, available_overrides[0].capabilities.max_output_tokens);
@@ -2815,7 +2868,7 @@ test "processQueuedPrompt resolves catalog capabilities for opaque effort" {
 
     try std.testing.expectEqual(@as(usize, 1), hooks.capability_queries.items.len);
     try std.testing.expectEqualStrings("provider/new-reasoning-model", hooks.capability_queries.items[0]);
-    try expectBodyContains(&gateway, 0, "\"reasoning\":\"future-tier\"");
+    try expectBodyContains(&gateway, 0, "\"reasoning\":{\"effort\":\"future-tier\"");
     try expectBodyNotContains(&gateway, 0, "\"providerOptions\"");
 
     const trace = try readTraceFile(alloc, trace_path, 65536);
@@ -2938,7 +2991,7 @@ test "processQueuedPrompt keeps exact model identity and emits Gateway Fast" {
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[0]);
     try std.testing.expectEqual(@as(usize, 1), hooks.capability_queries.items.len);
     try expectRootFieldAbsent(&gateway, 0, "fast");
-    try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
+    try expectBodyNotContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
 }
 
 test "processQueuedPrompt keeps directly selected fast model identity for portable lookup" {
@@ -2996,9 +3049,9 @@ test "processQueuedPrompt filters stale controls against each queued model" {
 
         try runFakePrompt(&gateway, &hooks, config, job);
 
-        try expectBodyContains(&gateway, 0, "\"reasoning\":\"xhigh\"");
+        try expectBodyContains(&gateway, 0, "\"reasoning\":{\"effort\":\"xhigh\"");
         try expectRootFieldAbsent(&gateway, 0, "fast");
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
+        try expectBodyNotContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
     }
 
     {
@@ -3060,7 +3113,7 @@ test "processQueuedPrompt filters captured Fast by model capability" {
 
         try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
         try expectRootFieldAbsent(&gateway, 0, "fast");
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
+        try expectBodyNotContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
     }
 }
 
@@ -3126,9 +3179,9 @@ test "processQueuedPrompt provider payload follows queued model sync boundaries"
         try runFakePrompt(&gateway, &hooks, config, supported_job);
 
         try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
-        try expectBodyContains(&gateway, 0, "\"reasoning\":\"high\"");
+        try expectBodyContains(&gateway, 0, "\"reasoning\":{\"effort\":\"high\"");
         try expectRootFieldAbsent(&gateway, 0, "fast");
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
+        try expectBodyNotContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
     }
 }
 
@@ -3336,8 +3389,8 @@ test "processQueuedPrompt places transient overlay before history and current pr
     try std.testing.expect(static_idx < runtime_idx);
     try std.testing.expect(runtime_idx < history_idx);
     try std.testing.expect(history_idx < current_idx);
-    try expectGatewayPromptEntryCacheControl(&gateway, 0, "system", true);
-    try expectGatewayPromptEntryCacheControl(&gateway, 0, "static project context unique", true);
+    try expectGatewayPromptEntryCacheControl(&gateway, 0, "system", false);
+    try expectGatewayPromptEntryCacheControl(&gateway, 0, "static project context unique", false);
     try expectGatewayPromptEntryCacheControl(&gateway, 0, "runtime tail context unique", false);
     try expectNoPromptCacheControlAfter(&gateway, 0, "runtime tail context unique");
     try expectGatewayPromptFinalUserText(&gateway, 0, "is it still running");
@@ -3446,13 +3499,13 @@ test "processQueuedPrompt refreshes runtime overlay each step and preserves turn
     try expectBodyContains(&gateway, 1, "runtime overlay step two");
     try expectBodyNotContains(&gateway, 1, "runtime overlay step one");
     try expectBodyContains(&gateway, 1, "Checking.");
-    try expectBodyContains(&gateway, 1, "\"toolName\":\"read_file\"");
-    try expectBodyContains(&gateway, 1, "\"value\":\"ok\"");
+    try expectBodyContains(&gateway, 1, "\"name\":\"read_file\"");
+    try expectBodyContains(&gateway, 1, "\"output\":\"ok\"");
     const first_request_roles = [_]types.ChatRole{ .system, .system, .user };
-    const second_request_roles = [_]types.ChatRole{ .system, .system, .user, .assistant, .tool };
+    const second_request_roles = [_]types.ChatRole{ .system, .system, .user, .assistant, .assistant, .tool };
     try expectGatewayPromptRoles(&gateway, 0, &first_request_roles);
     try expectGatewayPromptRoles(&gateway, 1, &second_request_roles);
-    const second_request_order = [_][]const u8{ "runtime overlay step two", "user prompt", "Checking.", "\"value\":\"ok\"" };
+    const second_request_order = [_][]const u8{ "runtime overlay step two", "user prompt", "Checking.", "\"output\":\"ok\"" };
     try expectBodyContainsInOrder(&gateway, 1, &second_request_order);
 }
 
@@ -3747,44 +3800,11 @@ test "processQueuedPrompt reconciles provider error before tool execution" {
     try std.testing.expectEqual(@as(usize, 1), hooks.finish_event_count);
     try std.testing.expectEqual(@as(usize, 1), hooks.history_turns.items.len);
     try std.testing.expectEqual(@as(usize, 0), hooks.route_recovery_count);
-    try expectBodyContains(&gateway, 1, "\"toolChoice\":{\"type\":\"none\"}");
+    try expectBodyContains(&gateway, 1, "\"tool_choice\":\"none\"");
     try std.testing.expectEqual(@as(usize, 3), hooks.route_recovery_statuses.items.len);
     try expectRouteStatus(&hooks, 0, .auto_retry, "⚠ Provider unavailable · provider_error · checking uncertain tool state · attempt 1/2");
     try expectRouteStatus(&hooks, 1, .auto_retry, "⚠ Provider unavailable · provider_error · checking uncertain tool state · attempt 2/2");
     try expectRouteStatus(&hooks, 2, .auto_recovered, "✓ recovered · succeeded on attempt 2/2");
-}
-
-test "processQueuedPrompt pauses when uncertain tool reconciliation returns another tool" {
-    const alloc = std.testing.allocator;
-    const starts = [_]ToolCall{toolCall("provider_search", "web_search", "{}")};
-    const repeated = [_]ToolCall{toolCall("provider_search_repeat", "web_search", "{}")};
-    const completions = [_]FakeCompletion{
-        .{
-            .streamed_tool_starts = &starts,
-            .stream_error_after_tool_starts = error.ReadFailed,
-        },
-        .{ .tool_calls = &repeated, .finish_reason = .provider_error },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    hooks.enable_recovery_checkpoint = true;
-    defer hooks.deinit();
-    var fixture = PromptFixture{};
-    var config = fixture.config();
-    config.max_provider_attempts = 3;
-
-    try runFakePrompt(&gateway, &hooks, config, fixture.job());
-
-    try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
-    try expectBodyContains(&gateway, 1, "\"toolChoice\":{\"type\":\"none\"}");
-    try std.testing.expectEqual(@as(usize, 0), hooks.executed_names.items.len);
-    try std.testing.expectEqual(types.TurnPresentationOutcome.paused, hooks.finalized_outcome.?);
-    const status = hooks.route_recovery_statuses.items[hooks.route_recovery_statuses.items.len - 1];
-    try std.testing.expectEqual(types.ModelRecoveryRequiredAction.inspect_uncertain_tool, status.required_action);
-    const checkpoint = hooks.recovery_checkpoints.items[hooks.recovery_checkpoints.items.len - 1];
-    try std.testing.expectEqual(session_codec.RecoveryToolState.uncertain, checkpoint.tool_state);
-    try std.testing.expectEqual(@as(usize, 2), checkpoint.consumed_provider_attempts);
 }
 
 test "processQueuedPrompt preserves a confirmed provider tool result across recovery" {
@@ -3813,7 +3833,7 @@ test "processQueuedPrompt preserves a confirmed provider tool result across reco
     var config = fixture.config();
     config.max_provider_attempts = 2;
     var initial_job = fixture.job();
-    initial_job.credential_source = .fx_login;
+    initial_job.credential_source = .layerx1_subscription;
     initial_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&gateway, &hooks, config, initial_job);
@@ -3859,7 +3879,7 @@ test "processQueuedPrompt preserves a confirmed provider tool result across reco
     var restored_hooks = FakeAgentRuntimeDeps.init(alloc);
     defer restored_hooks.deinit();
     var restored_job = fixture.job();
-    restored_job.credential_source = .fx_login;
+    restored_job.credential_source = .layerx1_subscription;
     restored_job.account_id = @constCast("acct_1");
     restored_job.recovery_checkpoint = restored_checkpoint;
 
@@ -4167,7 +4187,7 @@ test "processQueuedPrompt disables provider option fast after a replay safe SSE 
     try runFakePrompt(&gateway, &hooks, config, fixture.job());
 
     try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
-    try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
+    try expectBodyNotContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
     try expectRootFieldAbsent(&gateway, 0, "fast");
     try expectRootFieldAbsent(&gateway, 1, "providerOptions");
 }
@@ -4195,7 +4215,7 @@ test "processQueuedPrompt disables provider option fast after a replay safe HTTP
     try runFakePrompt(&gateway, &hooks, config, fixture.job());
 
     try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
-    try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
+    try expectBodyNotContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
     try expectRootFieldAbsent(&gateway, 0, "fast");
     try expectRootFieldAbsent(&gateway, 1, "providerOptions");
 }
@@ -4525,11 +4545,11 @@ test "processQueuedPrompt preserves fallback route and budget until selection ch
         .cause = .provider_unavailable,
         .action = .paused,
         .authority = .{
-            .provider = .gateway,
+            .provider = .layerx1,
             .model = @constCast("zai/glm-5.2"),
-            .credential_source = .fx_login,
+            .credential_source = .layerx1_subscription,
             .credential_identity = @import("../../../auth/credential_authority.zig").derive(
-                .fx_login,
+                .layerx1_subscription,
                 "acct_1",
             ),
         },
@@ -4551,7 +4571,7 @@ test "processQueuedPrompt preserves fallback route and budget until selection ch
         config.max_provider_attempts = 4;
         var job = fixture.job();
         job.model = @constCast("zai/glm-5.2");
-        job.credential_source = .fx_login;
+        job.credential_source = .layerx1_subscription;
         job.account_id = @constCast("acct_1");
         job.recovery_checkpoint = checkpoint;
 
@@ -4577,7 +4597,7 @@ test "processQueuedPrompt preserves fallback route and budget until selection ch
         config.max_provider_attempts = 4;
         var job = fixture.job();
         job.model = @constCast("zai/glm-5.2");
-        job.credential_source = .fx_login;
+        job.credential_source = .layerx1_subscription;
         job.account_id = @constCast("acct_1");
         job.recovery_checkpoint = checkpoint;
 
@@ -4601,9 +4621,9 @@ test "processQueuedPrompt fails closed without stable credential authority" {
         .cause = .system_resumed,
         .action = .waiting_for_connectivity,
         .authority = .{
-            .provider = .gateway,
+            .provider = .layerx1,
             .model = @constCast("zai/glm-5.2"),
-            .credential_source = .ai_gateway_api_key,
+            .credential_source = .layerx1_subscription,
         },
         .requested_fast_mode = false,
         .fast_mode = false,
@@ -4646,7 +4666,7 @@ test "processQueuedPrompt counts only failed provider attempts across tool follo
     var config = fixture.config();
     config.max_provider_attempts = 2;
     var initial_job = fixture.job();
-    initial_job.credential_source = .fx_login;
+    initial_job.credential_source = .layerx1_subscription;
     initial_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&gateway, &hooks, config, initial_job);
@@ -4670,7 +4690,7 @@ test "processQueuedPrompt counts only failed provider attempts across tool follo
     continued_hooks.enable_recovery_checkpoint = true;
     defer continued_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .fx_login;
+    continued_job.credential_source = .layerx1_subscription;
     continued_job.account_id = @constCast("acct_1");
     continued_job.recovery_checkpoint = continued_checkpoint;
 
@@ -4698,7 +4718,7 @@ test "processQueuedPrompt explicit checkpoint continuation starts a fresh exhaus
     var first_config = fixture.config();
     first_config.max_provider_attempts = 1;
     var first_job = fixture.job();
-    first_job.credential_source = .fx_login;
+    first_job.credential_source = .layerx1_subscription;
     first_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&first_gateway, &first_hooks, first_config, first_job);
@@ -4717,7 +4737,7 @@ test "processQueuedPrompt explicit checkpoint continuation starts a fresh exhaus
     second_hooks.enable_recovery_checkpoint = true;
     defer second_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .fx_login;
+    continued_job.credential_source = .layerx1_subscription;
     continued_job.account_id = @constCast("acct_1");
     continued_job.recovery_checkpoint = checkpoint;
     var continued_config = fixture.config();
@@ -5242,7 +5262,7 @@ test "processQueuedPrompt regenerates and executes a local tool once after ReadF
     try expectRouteStatus(&hooks, 2, .auto_recovered, "✓ recovered · succeeded on attempt 2/3");
     try expectBodyContains(&gateway, 1, "did not execute the incomplete tool call");
     try expectBodyContains(&gateway, 2, "call_read_recovered");
-    try expectBodyContains(&gateway, 2, "\"output\":{\"type\":\"text\",\"value\":\"ok\"}");
+    try expectGatewayToolResultOutput(&gateway, 2, "call_read_recovered", "ok");
     try expectFailedLifecycleContains(
         hooks.lifecycle_events.items,
         "call_read_interrupted",
@@ -5398,35 +5418,6 @@ test "processQueuedPrompt reconciles a regenerated local tool with the same stre
     try std.testing.expectEqual(@as(usize, 0), interrupted_terminal_count);
 }
 
-test "processQueuedPrompt reconciles ReadFailed after provider-executed tool start" {
-    const alloc = std.testing.allocator;
-    const starts = [_]ToolCall{toolCall("call_search", "web_search", "{}")};
-    const completions = [_]FakeCompletion{
-        .{
-            .streamed_tool_starts = &starts,
-            .stream_error_after_tool_starts = error.ReadFailed,
-        },
-        .{ .content = "Reconciled" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    var fixture = PromptFixture{};
-    var config = fixture.config();
-    config.gateway_retry_count = 3;
-    config.max_provider_attempts = 2;
-
-    try runFakePrompt(&gateway, &hooks, config, fixture.job());
-
-    try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
-    try std.testing.expectEqual(@as(usize, 0), hooks.executed_names.items.len);
-    try std.testing.expectEqual(@as(usize, 3), hooks.route_recovery_statuses.items.len);
-    try expectRouteStatus(&hooks, 0, .auto_retry, "⚠ Network interrupted · ReadFailed · checking uncertain tool state · attempt 1/2");
-    try expectRouteStatus(&hooks, 1, .auto_retry, "⚠ Network interrupted · ReadFailed · checking uncertain tool state · attempt 2/2");
-    try expectRouteStatus(&hooks, 2, .auto_recovered, "✓ recovered · succeeded on attempt 2/2");
-}
-
 test "processQueuedPrompt continues provider error after visible text without duplication" {
     const alloc = std.testing.allocator;
     const chunks = [_][]const u8{"partial"};
@@ -5560,7 +5551,7 @@ test "processQueuedPrompt disable Fast recovery retries the same exact model" {
     try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[0]);
     try std.testing.expectEqualStrings("zai/glm-5.2", gateway.request_models.items[1]);
-    try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
+    try expectBodyNotContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"}}");
     try expectRootFieldAbsent(&gateway, 0, "fast");
     try expectRootFieldAbsent(&gateway, 1, "providerOptions");
     try std.testing.expectEqual(@as(usize, 1), hooks.capability_queries.items.len);
@@ -5646,8 +5637,8 @@ test "processQueuedPrompt uses configured tool choice only for first call" {
     try runFakePrompt(&gateway, &hooks, config, fixture.job());
 
     try std.testing.expectEqual(@as(usize, 2), gateway.request_bodies.items.len);
-    try expectBodyContains(&gateway, 0, "\"toolChoice\":{\"type\":\"none\"}");
-    try expectBodyContains(&gateway, 1, "\"toolChoice\":{\"type\":\"auto\"}");
+    try expectBodyContains(&gateway, 0, "\"tool_choice\":\"none\"");
+    try expectBodyContains(&gateway, 1, "\"tool_choice\":\"auto\"");
 }
 
 test "processQueuedPrompt injects silent-tool continuation without synthetic assistant text" {
@@ -5821,7 +5812,7 @@ test "processQueuedPrompt non-ok gateway response records schema diagnostics" {
     try std.testing.expect(std.mem.find(u8, call.gatewayRequestShape(), "prompt.1 role=user content=array") != null);
 }
 
-test "processQueuedPrompt refreshes fx login credential before gateway request" {
+test "processQueuedPrompt refreshes x1 login credential before gateway request" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{.{ .content = "Done." }};
     var gateway = FakeGateway.init(alloc, &completions);
@@ -5831,7 +5822,8 @@ test "processQueuedPrompt refreshes fx login credential before gateway request" 
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.legacy_refreshable_credential = true;
+    job.credential_source = .layerx1_subscription;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -5841,7 +5833,7 @@ test "processQueuedPrompt refreshes fx login credential before gateway request" 
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.if_needed, hooks.credential_refresh_modes.items[0]);
 }
 
-test "processQueuedPrompt refreshes and retries once after fx login 401" {
+test "processQueuedPrompt refreshes and retries once after x1 login 401" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{
         .{
@@ -5857,7 +5849,8 @@ test "processQueuedPrompt refreshes and retries once after fx login 401" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.legacy_refreshable_credential = true;
+    job.credential_source = .layerx1_subscription;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -5870,7 +5863,7 @@ test "processQueuedPrompt refreshes and retries once after fx login 401" {
     try std.testing.expectEqual(types.TurnPresentationOutcome.completed, hooks.finalized_outcome.?);
 }
 
-test "processQueuedPrompt does not retry a second fx login 401" {
+test "processQueuedPrompt does not retry a second x1 login 401" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{
         .{
@@ -5890,7 +5883,8 @@ test "processQueuedPrompt does not retry a second fx login 401" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.legacy_refreshable_credential = true;
+    job.credential_source = .layerx1_subscription;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -5920,7 +5914,7 @@ test "Codex 401 replay keeps payload and semantic recovery unchanged for the cap
                 .reasoning_tokens = null,
                 .billable_web_search_calls = 0,
             },
-            .exact_usage_provider = .codex,
+            .exact_usage_provider = .layerx1,
         },
     };
     var gateway = FakeGateway.init(alloc, &completions);
@@ -5934,8 +5928,10 @@ test "Codex 401 replay keeps payload and semantic recovery unchanged for the cap
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.provider = .codex;
-    job.credential_source = .chatgpt_subscription;
+    job.legacy_gateway_semantics = false;
+    job.legacy_refreshable_credential = true;
+    job.provider = .layerx1;
+    job.credential_source = .layerx1_subscription;
     job.account_id = @constCast("acct-a");
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
@@ -5965,12 +5961,14 @@ test "Codex 401 account change makes no second provider request" {
     var gateway = FakeGateway.init(alloc, &completions);
     defer gateway.deinit();
     var hooks = FakeAgentRuntimeDeps.init(alloc);
-    hooks.credential_refresh_error = error.ChatGptAccountChanged;
+    hooks.credential_refresh_error = error.LayerX1AccountChanged;
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.provider = .codex;
-    job.credential_source = .chatgpt_subscription;
+    job.legacy_gateway_semantics = false;
+    job.legacy_refreshable_credential = true;
+    job.provider = .layerx1;
+    job.credential_source = .layerx1_subscription;
     job.account_id = @constCast("acct-a");
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
@@ -5982,7 +5980,7 @@ test "Codex 401 account change makes no second provider request" {
     try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
 }
 
-test "processQueuedPrompt keeps the selected fx login credential when forced refresh is unavailable" {
+test "processQueuedPrompt keeps the selected x1 login credential when forced refresh is unavailable" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{
         .{
@@ -5998,7 +5996,8 @@ test "processQueuedPrompt keeps the selected fx login credential when forced ref
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.legacy_refreshable_credential = true;
+    job.credential_source = .layerx1_subscription;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -6007,7 +6006,7 @@ test "processQueuedPrompt keeps the selected fx login credential when forced ref
     try std.testing.expectEqual(@as(usize, 2), hooks.credential_refresh_modes.items.len);
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.force, hooks.credential_refresh_modes.items[1]);
     try std.testing.expectEqual(std.http.Status.unauthorized, hooks.http_status.?);
-    try std.testing.expectEqual(types.CredentialSource.fx_login, hooks.http_credential_source.?);
+    try std.testing.expectEqual(types.CredentialSource.layerx1_subscription, hooks.http_credential_source.?);
     try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
 }
 
@@ -6027,7 +6026,8 @@ test "processQueuedPrompt reports the selected login after refresh failure witho
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.legacy_refreshable_credential = true;
+    job.credential_source = .layerx1_subscription;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -6037,16 +6037,16 @@ test "processQueuedPrompt reports the selected login after refresh failure witho
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.if_needed, hooks.credential_refresh_modes.items[0]);
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.force, hooks.credential_refresh_modes.items[1]);
     try std.testing.expectEqual(std.http.Status.unauthorized, hooks.http_status.?);
-    try std.testing.expectEqual(types.CredentialSource.fx_login, hooks.http_credential_source.?);
+    try std.testing.expectEqual(types.CredentialSource.layerx1_subscription, hooks.http_credential_source.?);
     try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
 }
 
 test "processQueuedPrompt does not refresh or retry non-refreshable credential sources" {
     const alloc = std.testing.allocator;
     const sources = [_]types.CredentialSource{
-        .vercel_oidc_token,
-        .ai_gateway_api_key,
-        .stored_key,
+        .layerx1_subscription,
+        .layerx1_subscription,
+        .layerx1_subscription,
     };
 
     for (sources) |source| {

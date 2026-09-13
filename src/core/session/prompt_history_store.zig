@@ -13,8 +13,8 @@ const max_record_bytes: usize = 256 * 1024;
 const compaction_threshold_bytes: u64 = 1024 * 1024;
 const compaction_record_limit: usize = 1000;
 const compaction_byte_limit: usize = 1024 * 1024;
-const private_dir_permissions = std.Io.File.Permissions.fromMode(0o700);
-const private_file_permissions = std.Io.File.Permissions.fromMode(0o600);
+const private_dir_permissions = io_mod.permissionsFromMode(0o700);
+const private_file_permissions = io_mod.permissionsFromMode(0o600);
 
 pub const LoadedPromptHistoryEntry = struct {
     text: []u8,
@@ -244,7 +244,7 @@ pub const Store = struct {
         ) catch return error.PrivateStatePermissionsUnsupported;
         const stat = try self.durable_home.?.dir.stat(io_mod.getIo());
         if (stat.kind != .directory) return error.DurablePathUnsafe;
-        if (stat.permissions.toMode() & 0o777 != 0o700) {
+        if (!io_mod.permissionsPrivateDirectory(stat.permissions)) {
             return error.PrivateStatePermissionsUnsupported;
         }
     }
@@ -300,7 +300,7 @@ pub const Store = struct {
             };
         }
         const verified = if (writable) try file.stat(zio) else initial;
-        if (verified.permissions.toMode() & 0o777 != 0o600) {
+        if (!io_mod.permissionsPrivateFile(verified.permissions)) {
             return error.PrivateStatePermissionsUnsupported;
         }
         if (created) {
@@ -875,12 +875,12 @@ fn historyPath(alloc: Allocator, home: []const u8) ![]u8 {
 }
 
 fn ensureFixtureHome(home: []const u8) !void {
-    const fx_dir = try profile_paths.rootDir(std.testing.allocator, home);
-    defer std.testing.allocator.free(fx_dir);
+    const x1_dir = try profile_paths.rootDir(std.testing.allocator, home);
+    defer std.testing.allocator.free(x1_dir);
     std.Io.Dir.createDirAbsolute(
         std.testing.io,
-        fx_dir,
-        std.Io.File.Permissions.fromMode(0o700),
+        x1_dir,
+        io_mod.permissionsFromMode(0o700),
     ) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
@@ -893,7 +893,7 @@ fn writeFixture(home: []const u8, bytes: []const u8) !void {
     defer std.testing.allocator.free(path);
     var file = try std.Io.Dir.createFileAbsolute(std.testing.io, path, .{
         .truncate = true,
-        .permissions = std.Io.File.Permissions.fromMode(0o600),
+        .permissions = io_mod.permissionsFromMode(0o600),
     });
     defer file.close(std.testing.io);
     try file.writeStreamingAll(std.testing.io, bytes);
@@ -1092,11 +1092,11 @@ test "oversized prompt history record is skipped without creating durable state"
         try store.append(alloc, 1, "/tmp/workspace", oversized),
     );
 
-    const fx_path = try profile_paths.rootDir(alloc, home);
-    defer alloc.free(fx_path);
+    const x1_path = try profile_paths.rootDir(alloc, home);
+    defer alloc.free(x1_path);
     try std.testing.expectError(
         error.FileNotFound,
-        std.Io.Dir.openDirAbsolute(std.testing.io, fx_path, .{}),
+        std.Io.Dir.openDirAbsolute(std.testing.io, x1_path, .{}),
     );
 }
 
@@ -1334,11 +1334,11 @@ test "read-only empty home load creates no prompt history state" {
     defer freeLoadedEntries(alloc, entries);
     try std.testing.expectEqual(@as(usize, 0), entries.len);
 
-    const fx_path = try profile_paths.rootDir(alloc, home);
-    defer alloc.free(fx_path);
+    const x1_path = try profile_paths.rootDir(alloc, home);
+    defer alloc.free(x1_path);
     try std.testing.expectError(
         error.FileNotFound,
-        std.Io.Dir.openDirAbsolute(std.testing.io, fx_path, .{}),
+        std.Io.Dir.openDirAbsolute(std.testing.io, x1_path, .{}),
     );
 }
 
@@ -1353,21 +1353,21 @@ test "first append creates only private prompt history layout and reports layout
     defer store.deinit(alloc);
     _ = try store.append(alloc, 1, "/tmp/workspace", "first");
 
-    const fx_path = try profile_paths.rootDir(alloc, home);
-    defer alloc.free(fx_path);
-    var fx_dir = try std.Io.Dir.openDirAbsolute(
+    const x1_path = try profile_paths.rootDir(alloc, home);
+    defer alloc.free(x1_path);
+    var x1_dir = try std.Io.Dir.openDirAbsolute(
         std.testing.io,
-        fx_path,
+        x1_path,
         .{ .iterate = true },
     );
-    defer fx_dir.close(std.testing.io);
-    const fx_stat = try fx_dir.stat(std.testing.io);
+    defer x1_dir.close(std.testing.io);
+    const x1_stat = try x1_dir.stat(std.testing.io);
     try std.testing.expectEqual(
         @as(std.posix.mode_t, 0o700),
-        fx_stat.permissions.toMode() & 0o777,
+        x1_stat.permissions.toMode() & 0o777,
     );
-    const history_stat = try fx_dir.statFile(std.testing.io, "history.jsonl", .{});
-    const lock_stat = try fx_dir.statFile(std.testing.io, "history.lock", .{});
+    const history_stat = try x1_dir.statFile(std.testing.io, "history.jsonl", .{});
+    const lock_stat = try x1_dir.statFile(std.testing.io, "history.lock", .{});
     try std.testing.expectEqual(
         @as(std.posix.mode_t, 0o600),
         history_stat.permissions.toMode() & 0o777,
@@ -1416,7 +1416,7 @@ test "symlinked durable home is rejected before prompt history reads or writes" 
     tmp.dir.symLink(
         io_mod.getIo(),
         "../outside",
-        "home/.fx",
+        "home/.x1",
         .{ .is_directory = true },
     ) catch |err| switch (err) {
         error.AccessDenied => return error.SkipZigTest,

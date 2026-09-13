@@ -1,5 +1,5 @@
 {
-  "name": "fx-wasm-sdk-node-tests",
+  "name": "x1-wasm-sdk-node-tests",
   "private": true,
   "type": "module",
   "scripts": {

@@ -3337,7 +3337,7 @@ fn relationshipRequestFingerprint(
     authorization: RelationshipAuthorization,
 ) [32]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.relationship-request.v1\x00");
+    hash.update("x1.subagent.relationship-request.v1\x00");
     hash.update(&command_fingerprint);
     switch (authorization) {
         .none => hash.update("none\x00"),
@@ -4842,7 +4842,7 @@ const TestEnvironment = struct {
     fn init(alloc: Allocator) !TestEnvironment {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
-        try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.x1");
         try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
         const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
         errdefer alloc.free(home);
@@ -10104,7 +10104,7 @@ test "exact relationship replay repairs a failed resume-index marker" {
     try sessions.dir.createDir(
         io_mod.getIo(),
         "index.pending",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     var blocker_present = true;
     defer if (blocker_present) {
@@ -10149,7 +10149,7 @@ test "exact relationship replay repairs a failed resume-index marker" {
     try sessions.dir.createDir(
         io_mod.getIo(),
         "index.pending",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     blocker_present = true;
     var detach = try domain.validateCommand(alloc, .{ .relationship = .{
@@ -10200,7 +10200,7 @@ test "exact relationship replay repairs a failed resume-index marker" {
     try sessions.dir.createDir(
         io_mod.getIo(),
         "index.pending",
-        std.Io.File.Permissions.fromMode(0o700),
+        io_mod.permissionsFromMode(0o700),
     );
     blocker_present = true;
     var reparent = try domain.validateCommand(alloc, .{ .relationship = .{

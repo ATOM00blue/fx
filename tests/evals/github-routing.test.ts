@@ -64,9 +64,9 @@ function seedV0ChangelogRepo(dir: string): void {
   execSync("git add . && git commit -m initial", { cwd: dir, stdio: "pipe" });
 }
 
-function seedFxHistoryRepo(dir: string): void {
-  seedGitRepo(dir, "https://github.com/vercel-labs/fx.git");
-  writeFileSync(join(dir, "README.md"), "# fx\n");
+function seedx1HistoryRepo(dir: string): void {
+  seedGitRepo(dir, "https://github.com/vercel-labs/x1.git");
+  writeFileSync(join(dir, "README.md"), "# x1\n");
   execSync("git add . && git commit -m initial", { cwd: dir, stdio: "pipe" });
 }
 
@@ -110,10 +110,10 @@ describe("eval: GitHub and repo routing", () => {
     "uses local git for current checkout history questions",
     async () => {
       workDir = createWorkDir();
-      seedFxHistoryRepo(workDir);
+      seedx1HistoryRepo(workDir);
 
       const result = await runEval(
-        "look for changes/last commits in the fx",
+        "look for changes/last commits in the x1",
         {
           cwd: workDir,
           timeoutSec: 180,
@@ -132,7 +132,7 @@ describe("eval: GitHub and repo routing", () => {
     "routes non-matching GitHub URL metadata through gh before web_search",
     async () => {
       workDir = createWorkDir();
-      seedGitRepo(workDir, "https://github.com/vercel-labs/fx.git");
+      seedGitRepo(workDir, "https://github.com/vercel-labs/x1.git");
 
       const result = await runEval(
         "For https://github.com/vercel/v0, use GitHub metadata to tell me how many open pull requests it currently has. Do not answer from the URL alone.",

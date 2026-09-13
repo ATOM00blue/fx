@@ -11,7 +11,7 @@ const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub const DurableSessionPreferences = struct {
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     model: []u8,
     effort: types.ReasoningEffort,
     fast_mode: bool,
@@ -822,7 +822,7 @@ fn decodeStateImpl(alloc: Allocator, source: *std.Io.Reader, limits: DecodeLimit
         return error.InvalidDurableField;
     try expectKey(&json_reader, alloc, "fast_mode");
     const fast_mode = try readBool(&json_reader);
-    var provider: model_provider.ProviderId = .gateway;
+    var provider: model_provider.ProviderId = .layerx1;
     if (try json_reader.peekNextTokenType() != .object_end) {
         try expectKey(&json_reader, alloc, "provider");
         const provider_raw = try readStringOwned(&json_reader, alloc, 16);
@@ -990,7 +990,7 @@ pub fn parseRecoveryCheckpoint(alloc: Allocator, value: std.json.Value) !Recover
             .provider = if (object.get("route_provider")) |provider_value| blk: {
                 if (provider_value != .string) return error.InvalidDurableField;
                 break :blk model_provider.parse(provider_value.string) orelse return error.InvalidDurableField;
-            } else .gateway,
+            } else .layerx1,
             .model = model,
         };
     } else try parseTurnAuthority(alloc, object.get("authority") orelse return error.InvalidSessionFormat);
@@ -2837,7 +2837,7 @@ test "execution memory codec preserves feedback and reads v1 results without it"
             },
         },
         .command_output_replay = .{ .available = .{
-            .handle = "fx-command-replay-private.bin",
+            .handle = "x1-command-replay-private.bin",
             .framed_bytes = 321,
         } },
         .command_process_presentation = .{ .exit_code = 7 },
@@ -2859,7 +2859,7 @@ test "execution memory codec preserves feedback and reads v1 results without it"
     try std.testing.expect(std.mem.find(u8, encoded.written(), "\"permission_feedback\"") != null);
     try std.testing.expect(std.mem.find(u8, encoded.written(), "\"committed_file_presentation\"") != null);
     try std.testing.expect(std.mem.find(u8, encoded.written(), "\"command_output_replay\"") != null);
-    try std.testing.expect(std.mem.find(u8, encoded.written(), "fx-command-replay-private.bin") != null);
+    try std.testing.expect(std.mem.find(u8, encoded.written(), "x1-command-replay-private.bin") != null);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, encoded.written(), .{});
     defer parsed.deinit();
@@ -2883,7 +2883,7 @@ test "execution memory codec preserves feedback and reads v1 results without it"
         .available => |value| value,
         .unavailable => return error.TestExpectedReplay,
     };
-    try std.testing.expectEqualStrings("fx-command-replay-private.bin", descriptor.handle);
+    try std.testing.expectEqualStrings("x1-command-replay-private.bin", descriptor.handle);
     try std.testing.expectEqual(@as(usize, 321), descriptor.framed_bytes);
     try std.testing.expectEqual(
         types.CommandProcessPresentation{ .exit_code = 7 },
@@ -3205,10 +3205,10 @@ test "interrupted command presentation is strict and round trips" {
         },
         .cancelled_command = .{
             .output_replay = .{ .available = .{
-                .handle = "fx-command-replay.bin",
+                .handle = "x1-command-replay.bin",
                 .framed_bytes = 42,
             } },
-            .command_artifact_handle = "fx-command.log",
+            .command_artifact_handle = "x1-command.log",
         },
     } };
     var encoded: std.Io.Writer.Allocating = .init(alloc);
@@ -3223,9 +3223,9 @@ test "interrupted command presentation is strict and round trips" {
         .available => |value| value,
         .unavailable => return error.TestExpectedReplay,
     };
-    try std.testing.expectEqualStrings("fx-command-replay.bin", descriptor.handle);
+    try std.testing.expectEqualStrings("x1-command-replay.bin", descriptor.handle);
     try std.testing.expectEqual(@as(usize, 42), descriptor.framed_bytes);
-    try std.testing.expectEqualStrings("fx-command.log", presentation.command_artifact_handle.?);
+    try std.testing.expectEqualStrings("x1-command.log", presentation.command_artifact_handle.?);
     try std.testing.expectEqual(types.InterruptedTerminalReason.cancelled, decoded.interrupted.terminal_reason);
 
     const failed_turn: session.HistoryTurn = .{ .interrupted = .{
@@ -3444,7 +3444,7 @@ test "durable image snapshots serialize as session-relative locators" {
         .id = 1,
         .path = @constCast("/Users/private/source.png"),
         .media_type = @constCast("image/png"),
-        .snapshot_path = @constCast("/tmp/fx/sessions/session-id/images/image-1-deadbeef.bin"),
+        .snapshot_path = @constCast("/tmp/x1/sessions/session-id/images/image-1-deadbeef.bin"),
         .snapshot_sha256 = @constCast("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
     }};
     const turn: session.HistoryTurn = .{ .assistant = .{
@@ -3459,7 +3459,7 @@ test "durable image snapshots serialize as session-relative locators" {
     try std.testing.expect(std.mem.find(
         u8,
         encoded.written(),
-        "/tmp/fx/sessions/session-id/images",
+        "/tmp/x1/sessions/session-id/images",
     ) == null);
     try std.testing.expect(std.mem.find(
         u8,
@@ -3517,11 +3517,11 @@ test "recovery checkpoint round trips while legacy state stays absent" {
         .action = .continuing_response,
         .tool_state = .confirmed,
         .authority = .{
-            .provider = .codex,
+            .provider = .layerx1,
             .model = @constCast("gpt-5.4-mini"),
-            .credential_source = .chatgpt_subscription,
+            .credential_source = .layerx1_subscription,
             .credential_identity = credential_authority.derive(
-                .chatgpt_subscription,
+                .layerx1_subscription,
                 "acct_1",
             ),
         },
@@ -3539,7 +3539,7 @@ test "recovery checkpoint round trips while legacy state stays absent" {
         .updated_at_ms = 2,
         .conversation_language = session.ConversationLanguage.literal("en"),
         .preferences = .{
-            .provider = .codex,
+            .provider = .layerx1,
             .model = @constCast("gpt-5.4-mini"),
             .effort = .auto,
             .fast_mode = false,
@@ -3564,11 +3564,11 @@ test "recovery checkpoint round trips while legacy state stays absent" {
     try std.testing.expectEqual(types.ModelRecoveryCause.response_interrupted, restored.cause);
     try std.testing.expectEqual(types.ModelRecoveryAction.continuing_response, restored.action);
     try std.testing.expectEqual(RecoveryToolState.confirmed, restored.tool_state);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, restored.authority.provider);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, restored.authority.provider);
     try std.testing.expectEqualStrings("gpt-5.4-mini", restored.authority.model);
-    try std.testing.expectEqual(types.CredentialSource.chatgpt_subscription, restored.authority.credential_source.?);
+    try std.testing.expectEqual(types.CredentialSource.layerx1_subscription, restored.authority.credential_source.?);
     try std.testing.expect(restored.authority.credential_identity != null);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, decoded.preferences.provider);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, decoded.preferences.provider);
     try std.testing.expect(restored.requested_fast_mode);
     try std.testing.expect(restored.fast_mode);
     try std.testing.expectEqual(@as(usize, 4), restored.consumed_provider_attempts);
@@ -3579,7 +3579,7 @@ test "recovery checkpoint round trips while legacy state stays absent" {
     var legacy_source = std.Io.Reader.fixed(legacy);
     var legacy_state = try decodeState(alloc, &legacy_source, .{});
     defer legacy_state.deinit(alloc);
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, legacy_state.preferences.provider);
+    try std.testing.expectEqual(model_provider.ProviderId.layerx1, legacy_state.preferences.provider);
     try std.testing.expectEqual(@as(?RecoveryCheckpoint, null), legacy_state.recovery_checkpoint);
 }
 
@@ -3663,7 +3663,7 @@ test "recovery checkpoint rejects an outstanding attempt beyond its budget" {
             .assistant_source = @constCast(""),
             .cause = .network_interrupted,
             .action = .retrying_request,
-            .authority = .{ .provider = .gateway, .model = @constCast("openai/gpt-test") },
+            .authority = .{ .provider = .layerx1, .model = @constCast("openai/gpt-test") },
             .requested_fast_mode = false,
             .fast_mode = false,
             .max_provider_attempts = 1,

@@ -1713,7 +1713,7 @@ fn streamReplaySafe(
 const read_failure_tool_recovery_instruction =
     \\<network_recovery>
     \\The previous response stream ended because the network connection was interrupted.
-    \\Fx did not execute the incomplete tool call from that stream. Recreate the tool call if it is still needed.
+    \\x1 did not execute the incomplete tool call from that stream. Recreate the tool call if it is still needed.
     \\</network_recovery>
 ;
 
@@ -1869,7 +1869,7 @@ fn shouldRejectRecoveryAuthority(
 
 test "potentially sent recovery rejects missing or changed credential authority" {
     const identity = credential_authority.derive(
-        .chatgpt_subscription,
+        .layerx1_subscription,
         "acct_1",
     ).?;
     const checkpoint = session_codec.RecoveryCheckpoint{
@@ -1879,9 +1879,9 @@ test "potentially sent recovery rejects missing or changed credential authority"
         .cause = .response_interrupted,
         .action = .continuing_response,
         .authority = .{
-            .provider = .codex,
+            .provider = .layerx1,
             .model = @constCast("gpt-5.4"),
-            .credential_source = .chatgpt_subscription,
+            .credential_source = .layerx1_subscription,
             .credential_identity = identity,
         },
         .requested_fast_mode = false,
@@ -1891,12 +1891,12 @@ test "potentially sent recovery rejects missing or changed credential authority"
     };
     try std.testing.expect(!shouldRejectRecoveryAuthority(
         checkpoint,
-        .chatgpt_subscription,
+        .layerx1_subscription,
         "acct_1",
     ));
     try std.testing.expect(shouldRejectRecoveryAuthority(
         checkpoint,
-        .chatgpt_subscription,
+        .layerx1_subscription,
         "acct_2",
     ));
 
@@ -1905,22 +1905,17 @@ test "potentially sent recovery rejects missing or changed credential authority"
     legacy.authority.credential_identity = null;
     try std.testing.expect(shouldRejectRecoveryAuthority(
         legacy,
-        .chatgpt_subscription,
+        .layerx1_subscription,
         "acct_1",
     ));
-    legacy.authority.credential_source = .ai_gateway_api_key;
+    legacy.authority.credential_source = .layerx1_subscription;
     legacy.authority.credential_identity = credential_authority.derive(
-        .ai_gateway_api_key,
+        .layerx1_subscription,
         null,
     );
-    try std.testing.expect(!shouldRejectRecoveryAuthority(
-        legacy,
-        .ai_gateway_api_key,
-        null,
-    ));
     try std.testing.expect(shouldRejectRecoveryAuthority(
         legacy,
-        .stored_key,
+        .layerx1_subscription,
         null,
     ));
     legacy.authority.credential_source = null;
@@ -1928,7 +1923,7 @@ test "potentially sent recovery rejects missing or changed credential authority"
     legacy.consumed_provider_attempts = 0;
     try std.testing.expect(!shouldRejectRecoveryAuthority(
         legacy,
-        .chatgpt_subscription,
+        .layerx1_subscription,
         "acct_1",
     ));
 }
@@ -2298,6 +2293,7 @@ fn refreshGatewayCredentialForJob(
     owned_api_key: *?[]u8,
     trace_ctx: TraceContext,
 ) !bool {
+    if (job.legacy_gateway_semantics and !job.legacy_refreshable_credential) return false;
     const source = job.credential_source orelse return false;
     if (!credentials.sourceRefreshable(source)) return false;
     const refresh = deps.refresh_gateway_credential orelse return false;
@@ -2313,18 +2309,15 @@ fn refreshGatewayCredentialForJob(
         );
         return false;
     } orelse return false;
-    const previous_api_key = active_api_key.*;
     if (comptime !host_target.is_wasm) {
         if (deps.usage) |usage| {
-            if (source == .chatgpt_subscription or source == .grok_subscription) {
-                usage.clearReconciliationCredential();
-            } else {
-                usage.refreshReconciliationCredential(
-                    deps.usage_allocator,
-                    previous_api_key,
-                    refreshed,
-                );
-            }
+            usage.replaceProviderReconciliationCredential(
+                deps.usage_allocator,
+                job.provider,
+                source,
+                job.account_id,
+                refreshed,
+            );
         }
     }
     if (owned_api_key.*) |old| secret.zeroAndFree(alloc, old);
@@ -2892,7 +2885,7 @@ fn appendAuthorizedVisionAttemptIds(
 ) !bool {
     if (!std.mem.eql(u8, call.name, "vision") or
         call.argument_integrity != .valid or
-        call.provenance != .fx_local)
+        call.provenance != .x1_local)
     {
         return false;
     }
@@ -3461,7 +3454,7 @@ fn processQueuedPromptLoop(
             else
                 .auto;
             var verified_images: std.ArrayList(image_attachments.VerifiedSnapshot) = .empty;
-            if (job.provider != .gateway and job.images.len > 0 and
+            if (!job.legacy_gateway_semantics and job.images.len > 0 and
                 request_capabilities.supports_vision and request_capabilities.supports_file_input)
             {
                 try verified_images.ensureTotalCapacity(overlay_arena, job.images.len);
@@ -3477,7 +3470,7 @@ fn processQueuedPromptLoop(
             runtime_assistant_stream.pushTokenProgressUpdate(&stream_ctx, .changed) catch |progress_err| {
                 debug_trace.logf("agent", "token progress publication failed source=gateway_prepare err={s}", .{@errorName(progress_err)});
             };
-            if (job.provider == .gateway) {
+            if (job.legacy_gateway_semantics) {
                 try persistRecoveryCheckpoint(
                     deps,
                     arena,
@@ -3500,7 +3493,6 @@ fn processQueuedPromptLoop(
                     step_ctx,
                 );
             }
-
             const gateway_wait_started_ms = io_mod.milliTimestamp();
             var gateway_delivery = runtime_gateway_step.DeliveryCertainty.init();
             var gateway_attempt_evidence: runtime_gateway_step.AttemptEvidence = .{};
@@ -3894,7 +3886,7 @@ fn processQueuedPromptLoop(
             );
             stream_result_set = true;
             const first_failure = streamFailure(stream_result);
-            if (job.provider != .gateway and
+            if (!job.legacy_gateway_semantics and
                 first_failure != null and first_failure.?.kind == .unauthorized and
                 !auth_retry_used and
                 stream_ctx.raw_text.items.len == 0 and
@@ -4015,7 +4007,7 @@ fn processQueuedPromptLoop(
                 );
             }
             const settled_attempts = semantic_attempt + 1;
-            if (job.provider == .gateway or
+            if (job.legacy_gateway_semantics or
                 response_failure == null or response_failure.?.kind != .unauthorized)
             {
                 try persistRecoveryCheckpoint(
@@ -4048,7 +4040,7 @@ fn processQueuedPromptLoop(
                 debug_trace.logf("agent", "token progress publication failed source=gateway_usage err={s}", .{@errorName(progress_err)});
             };
             if (response_failure != null and response_failure.?.kind == .unauthorized and
-                job.provider == .gateway and
+                job.legacy_gateway_semantics and
                 !auth_retry_used and
                 semantic_attempt + 1 < semantic_limit)
             {
@@ -4751,7 +4743,7 @@ fn processQueuedPromptLoop(
                 },
                 .reject_malformed_identity => |failure| {
                     try stream_ctx.provisional_statuses.finishRejectedCompletions(deps, arena, turn_id, completion.tool_calls, advertised_dynamic_tool_names);
-                    debug_trace.eventf("agent", "authoritative_tool_admission_rejected", step_ctx, "failure={s} provenance=fx_local", .{@tagName(failure)});
+                    debug_trace.eventf("agent", "authoritative_tool_admission_rejected", step_ctx, "failure={s} provenance=x1_local", .{@tagName(failure)});
                     finish_trace.finish("malformed_tool_identity");
                     return error.MalformedAuthoritativeToolIdentity;
                 },
@@ -5804,7 +5796,7 @@ fn processQueuedPromptLoop(
                             "tool",
                             "argument_integrity_rejected",
                             step_ctx,
-                            "call_id={s} name={s} failure=malformed_json provenance=fx_local",
+                            "call_id={s} name={s} failure=malformed_json provenance=x1_local",
                             .{ tool_call.id, tool_call.name },
                         );
                     } else if (blocked.kind == .route_unavailable) {
@@ -6165,7 +6157,7 @@ fn processQueuedPromptLoop(
                                     .{
                                         .increment_error = true,
                                         .record_completion = true,
-                                        .status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(
+                                        .status = runtime_execution_memory.persistedStatusForCurrentx1LocalResult(
                                             .failure,
                                             safe_output,
                                         ),
@@ -7326,7 +7318,7 @@ fn processQueuedPromptLoop(
                         .increment_error = execution.status == .failure or
                             tool_result_errors.isToolOutputError(safe_tool_output),
                         .record_completion = execution.status == .success,
-                        .status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(
+                        .status = runtime_execution_memory.persistedStatusForCurrentx1LocalResult(
                             execution.status,
                             safe_tool_output,
                         ),
@@ -7817,7 +7809,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .name = "vision",
         .arguments_json = "{\"image_ids\":[1]",
         .argument_integrity = .malformed_json,
-        .provenance = .fx_local,
+        .provenance = .x1_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -7830,7 +7822,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-duplicate",
         .name = "vision",
         .arguments_json = "{\"image_ids\":[1,1],\"focus\":\"inspect\"}",
-        .provenance = .fx_local,
+        .provenance = .x1_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -7843,7 +7835,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-unauthorized",
         .name = "vision",
         .arguments_json = "{\"image_ids\":[2],\"focus\":\"inspect\"}",
-        .provenance = .fx_local,
+        .provenance = .x1_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -7856,7 +7848,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-path",
         .name = "vision",
         .arguments_json = "{\"paths\":[\"photo.png\"],\"focus\":\"inspect\"}",
-        .provenance = .fx_local,
+        .provenance = .x1_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,

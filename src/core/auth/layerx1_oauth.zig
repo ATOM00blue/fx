@@ -1,6 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const browser_callback = @import("browser_callback.zig");
-const grok_session = @import("grok_session.zig");
+const layerx1_session = @import("layerx1_session.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const host = @import("../hosts/host.zig");
 const host_target = @import("../hosts/target.zig");
@@ -12,16 +13,16 @@ const secret = @import("secret.zig");
 
 const Allocator = std.mem.Allocator;
 
-const client_id = "b1a00492-073a-47ea-816f-4c329264a828";
-const token_url = "https://auth.x.ai/oauth2/token";
-const issuer_url = "https://auth.x.ai";
-const userinfo_url = "https://auth.x.ai/oauth2/userinfo";
-const revoke_url = "https://auth.x.ai/oauth2/revoke";
-const e2e_token_url_env = "FX_E2E_GROK_TOKEN_URL";
-const e2e_issuer_url_env = "FX_E2E_GROK_ISSUER_URL";
-const e2e_userinfo_url_env = "FX_E2E_GROK_USERINFO_URL";
-const e2e_revoke_url_env = "FX_E2E_GROK_REVOKE_URL";
-const browser_scope = "openid profile email offline_access grok-cli:access api:access";
+const client_id = "layerx1-cli-oauth";
+const token_url = "https://www.layerx1.com/oauth2/token";
+const issuer_url = "https://www.layerx1.com";
+const userinfo_url = "https://www.layerx1.com/oauth2/userinfo";
+const revoke_url = "https://www.layerx1.com/oauth2/revoke";
+const e2e_token_url_env = "X1_E2E_LAYERX1_TOKEN_URL";
+const e2e_issuer_url_env = "X1_E2E_LAYERX1_ISSUER_URL";
+const e2e_userinfo_url_env = "X1_E2E_LAYERX1_USERINFO_URL";
+const e2e_revoke_url_env = "X1_E2E_LAYERX1_REVOKE_URL";
+const browser_scope = "openid profile email offline_access";
 const browser_login_timeout_seconds: i64 = 5 * 60;
 
 pub const RefreshMode = enum {
@@ -75,10 +76,10 @@ const BrowserLoginContext = struct {
     fn submitManualCode(self: *BrowserLoginContext, alloc: Allocator, input: []const u8) !void {
         const code = std.mem.trim(u8, input, " \t\r\n");
         if (code.len == 0 or code.len > login_flow.max_manual_code_bytes) {
-            return error.InvalidGrokAuthorizationCode;
+            return error.InvalidLayerX1AuthorizationCode;
         }
         for (code) |byte| {
-            if (byte < 0x21 or byte > 0x7e) return error.InvalidGrokAuthorizationCode;
+            if (byte < 0x21 or byte > 0x7e) return error.InvalidLayerX1AuthorizationCode;
         }
         const owned = try alloc.dupe(u8, code);
         errdefer secret.zeroAndFree(alloc, owned);
@@ -108,6 +109,7 @@ pub fn startSignIn(
     alloc: Allocator,
     transport: oauth_transport.Provider,
 ) !bool {
+    if (comptime host_target.is_wasm) return error.LayerX1OAuthUnavailable;
     const browser = try prepareBrowserSignIn(alloc, transport);
     return runtime.startPrepared(
         alloc,
@@ -248,7 +250,7 @@ fn pollBrowserToken(
     cancel_flag: *std.atomic.Value(bool),
     deadline: std.Io.Clock.Timestamp,
 ) !oauth.PollResult {
-    if (comptime host_target.is_wasm) return error.GrokOAuthUnavailable;
+    if (comptime host_target.is_wasm) return error.LayerX1OAuthUnavailable;
     if (cancel_flag.load(.seq_cst)) return error.Cancelled;
     const context: *BrowserLoginContext = @ptrCast(@alignCast(raw.?));
     const manual_code = context.takeManualCode();
@@ -319,9 +321,9 @@ fn awaitBrowserCallback(
         listener,
         &parser_context,
         cancel_flag,
-        "https://accounts.x.ai",
+        "https://www.layerx1.com",
     ) catch |err| switch (err) {
-        error.OAuthCallbackListenerFailed => error.GrokOAuthCallbackListenerFailed,
+        error.OAuthCallbackListenerFailed => error.LayerX1OAuthCallbackListenerFailed,
         else => err,
     };
 }
@@ -333,7 +335,7 @@ fn classifyBrowserCallback(
 ) browser_callback.ParseResult(BrowserCallback) {
     const context: *BrowserCallbackParserContext = @ptrCast(@alignCast(raw.?));
     const callback = parseBrowserCallbackTarget(alloc, target, context.expected_state) catch |err| switch (err) {
-        error.InvalidGrokOAuthCallback => return .unrelated,
+        error.InvalidLayerX1OAuthCallback => return .unrelated,
         else => return .{ .failed = err },
     };
     return .{ .accepted = callback };
@@ -347,30 +349,28 @@ fn completeSignIn(
     token: *oauth.TokenSet,
 ) !login_flow.SignInCompletion {
     const context: *BrowserLoginContext = @ptrCast(@alignCast(raw.?));
-    const refresh_token = token.refresh_token orelse return error.GrokRefreshTokenMissing;
+    const refresh_token = token.refresh_token orelse return error.LayerX1RefreshTokenMissing;
     const account_id = try fetchAccountId(alloc, context.transport, token.access_token);
     errdefer alloc.free(account_id);
     const duration_ms = std.math.mul(i64, token.expires_in, std.time.ms_per_s) catch
-        return error.InvalidGrokOAuthResponse;
+        return error.InvalidLayerX1OAuthResponse;
     const expires_at_ms = std.math.add(i64, io_mod.milliTimestamp(), duration_ms) catch
-        return error.InvalidGrokOAuthResponse;
-    const completion: login_flow.SignInCompletion = .{ .grok = .{
-        .access_token = token.access_token,
-        .refresh_token = refresh_token,
-        .expires_at_ms = expires_at_ms,
-        .account_id = account_id,
-    } };
+        return error.InvalidLayerX1OAuthResponse;
+    const completion: login_flow.SignInCompletion = .{
+        .session = .{
+            .access_token = token.access_token,
+            .refresh_token = refresh_token,
+            .expires_at_ms = expires_at_ms,
+            .account_id = account_id,
+        },
+    };
     token.access_token = &.{};
     token.refresh_token = null;
     return completion;
 }
 
 fn saveSignIn(_: ?*anyopaque, alloc: Allocator, completion: login_flow.SignInCompletion) !void {
-    const session = switch (completion) {
-        .grok => |session| session,
-        .vercel, .chatgpt => return error.InvalidSignInCompletion,
-    };
-    try grok_session.saveNewSession(alloc, session);
+    try layerx1_session.saveNewSession(alloc, completion.session);
 }
 
 pub fn runLogin(
@@ -378,23 +378,31 @@ pub fn runLogin(
     transport: oauth_transport.Provider,
     url_opener: host.UrlOpener,
 ) !void {
+    if (comptime host_target.is_wasm) return error.LayerX1OAuthUnavailable;
     var runtime: login_flow.SignInRuntime = .{};
     defer runtime.deinit(alloc);
-    if (!try startSignIn(&runtime, alloc, transport)) return error.GrokLoginBusy;
+    if (!try startSignIn(&runtime, alloc, transport)) return error.LayerX1LoginBusy;
 
     const authorization_url = (try runtime.browserUrlAlloc(alloc)) orelse
-        return error.GrokAuthorizationUrlMissing;
+        return error.LayerX1AuthorizationUrlMissing;
     defer alloc.free(authorization_url);
-    try writeStdout("Open this URL to sign in with Grok:\n");
+    try writeStdout("Open this URL to sign in with X1:\n");
     try writeStdout(authorization_url);
     try writeStdout("\n\nWaiting for browser authorization...\n");
-    try writeStdout("Paste the code shown by xAI and press Enter if the browser doesn't return.\n");
-    if (io_mod.getenv("FX_NO_OPEN_BROWSER") == null) {
+    try writeStdout("Paste the code shown by X1 and press Enter if the browser doesn't return.\n");
+    if (io_mod.getenv("X1_NO_OPEN_BROWSER") == null) {
         _ = url_opener.open(alloc, authorization_url) catch false;
     }
 
-    var stdin_code: StdinManualCodeReader = .{};
-    defer stdin_code.deinit();
+    var stdin_storage: StdinManualCodeReader = .{};
+    const stdin_code: *StdinManualCodeReader = if (comptime builtin.os.tag == .windows) blk: {
+        // The Windows waiter thread may still be blocked on stdin after login
+        // succeeds, so this reader is process-lifetime.
+        const owned = try std.heap.page_allocator.create(StdinManualCodeReader);
+        owned.* = .{};
+        break :blk owned;
+    } else &stdin_storage;
+    defer if (comptime builtin.os.tag != .windows) stdin_code.deinit();
     while (true) {
         if (try stdin_code.poll()) |code| {
             _ = try runtime.submitManualCode(alloc, code);
@@ -417,8 +425,15 @@ const StdinManualCodeReader = struct {
     buffer: [login_flow.max_manual_code_bytes]u8 = undefined,
     len: usize = 0,
     closed: bool = false,
+    mutex: std.Io.Mutex = .init,
+    waiter_started: bool = false,
+    ready_line: bool = false,
 
     fn poll(self: *StdinManualCodeReader) !?[]const u8 {
+        if (comptime host_target.is_wasm) return null;
+        if (comptime builtin.os.tag == .windows) {
+            return self.pollWindows();
+        }
         if (self.closed) return null;
         var fds = [_]std.posix.pollfd{.{
             .fd = std.posix.STDIN_FILENO,
@@ -432,15 +447,63 @@ const StdinManualCodeReader = struct {
         var chunk: [512]u8 = undefined;
         defer @memset(&chunk, 0);
         const read_len = try std.posix.read(std.posix.STDIN_FILENO, &chunk);
-        if (read_len == 0) {
+        return self.ingest(chunk[0..read_len]);
+    }
+
+    fn pollWindows(self: *StdinManualCodeReader) !?[]const u8 {
+        self.startWindowsWaiter();
+        self.mutex.lockUncancelable(io_mod.getIo());
+        defer self.mutex.unlock(io_mod.getIo());
+        if (self.ready_line) {
+            self.ready_line = false;
+            return self.buffer[0..self.len];
+        }
+        return null;
+    }
+
+    fn startWindowsWaiter(self: *StdinManualCodeReader) void {
+        if (self.waiter_started) return;
+        self.waiter_started = true;
+        _ = std.Thread.spawn(.{}, windowsWaiter, .{self}) catch {
+            self.closed = true;
+        };
+    }
+
+    fn windowsWaiter(self: *StdinManualCodeReader) void {
+        while (true) {
+            var chunk: [512]u8 = undefined;
+            var dest: [1][]u8 = .{&chunk};
+            const n = std.Io.File.stdin().readStreaming(io_mod.getIo(), &dest) catch {
+                self.mutex.lockUncancelable(io_mod.getIo());
+                defer self.mutex.unlock(io_mod.getIo());
+                self.closed = true;
+                return;
+            };
+            self.mutex.lockUncancelable(io_mod.getIo());
+            const line = self.ingest(chunk[0..n]) catch {
+                self.closed = true;
+                self.mutex.unlock(io_mod.getIo());
+                return;
+            };
+            if (line != null) {
+                self.ready_line = true;
+                self.mutex.unlock(io_mod.getIo());
+                return;
+            }
+            self.mutex.unlock(io_mod.getIo());
+        }
+    }
+
+    fn ingest(self: *StdinManualCodeReader, chunk: []const u8) !?[]const u8 {
+        if (chunk.len == 0) {
             self.closed = true;
             return if (self.len == 0) null else self.buffer[0..self.len];
         }
-        const line_end = std.mem.findScalar(u8, chunk[0..read_len], '\n') orelse read_len;
-        if (line_end > self.buffer.len - self.len) return error.GrokAuthorizationCodeTooLong;
+        const line_end = std.mem.findScalar(u8, chunk, '\n') orelse chunk.len;
+        if (line_end > self.buffer.len - self.len) return error.LayerX1AuthorizationCodeTooLong;
         @memcpy(self.buffer[self.len..][0..line_end], chunk[0..line_end]);
         self.len += line_end;
-        if (line_end < read_len) {
+        if (line_end < chunk.len) {
             self.closed = true;
             return self.buffer[0..self.len];
         }
@@ -453,18 +516,18 @@ const StdinManualCodeReader = struct {
     }
 
     fn deinit(self: *StdinManualCodeReader) void {
-        @memset(&self.buffer, 0);
+        @memset(self.buffer[0..self.len], 0);
         self.* = undefined;
     }
 };
 
 pub const LogoutResult = struct {
-    deletion: grok_session.DeleteOutcome,
+    deletion: layerx1_session.DeleteOutcome,
     revocation_failed: bool,
 };
 
 pub fn logout(alloc: Allocator, transport: oauth_transport.Provider) !LogoutResult {
-    var mutation = (try grok_session.beginExistingMutation()) orelse return .{
+    var mutation = (try layerx1_session.beginExistingMutation()) orelse return .{
         .deletion = .missing,
         .revocation_failed = false,
     };
@@ -484,9 +547,29 @@ pub fn logout(alloc: Allocator, transport: oauth_transport.Provider) !LogoutResu
 }
 
 pub fn sourceExists(alloc: Allocator) !bool {
-    var session = (try grok_session.load(alloc)) orelse return false;
+    if (envApiKey()) |key| if (key.len > 0) return true;
+    var session = (try layerx1_session.load(alloc)) orelse return false;
     defer session.deinit(alloc);
     return true;
+}
+
+fn envApiKey() ?[]const u8 {
+    if (comptime !host_target.is_wasm) return null;
+    const key = io_mod.getenv("X1_API_KEY") orelse return null;
+    return if (key.len == 0) null else key;
+}
+
+fn loadEnvApiKeyAccess(alloc: Allocator) !?Access {
+    const key = envApiKey() orelse return null;
+    const token = try alloc.dupe(u8, key);
+    errdefer secret.zeroAndFree(alloc, token);
+    const account = io_mod.getenv("X1_ACCOUNT_ID") orelse "x1-api-key";
+    if (!layerx1_session.validAccountId(account)) return error.InvalidLayerX1SubscriptionAccount;
+    return .{
+        .access_token = token,
+        .account_id = try alloc.dupe(u8, account),
+        .refresh_after_ms = std.math.maxInt(i64),
+    };
 }
 
 pub fn loadAccess(
@@ -494,13 +577,14 @@ pub fn loadAccess(
     transport: oauth_transport.Provider,
     mode: RefreshMode,
 ) !?Access {
+    if (try loadEnvApiKeyAccess(alloc)) |access| return access;
     if (mode == .stored) {
-        var session = (try grok_session.load(alloc)) orelse return null;
+        var session = (try layerx1_session.load(alloc)) orelse return null;
         defer session.deinit(alloc);
         return takeAccess(&session);
     }
 
-    var mutation = (try grok_session.beginExistingMutation()) orelse return null;
+    var mutation = (try layerx1_session.beginExistingMutation()) orelse return null;
     defer mutation.deinit();
     var session = (try mutation.load(alloc)) orelse return null;
     defer session.deinit(alloc);
@@ -511,7 +595,7 @@ pub fn loadAccess(
     return takeAccess(&session);
 }
 
-fn takeAccess(session: *grok_session.Session) Access {
+fn takeAccess(session: *layerx1_session.Session) Access {
     const access_token = session.access_token;
     session.access_token = &.{};
     const account_id = session.account_id;
@@ -519,15 +603,15 @@ fn takeAccess(session: *grok_session.Session) Access {
     return .{
         .access_token = access_token,
         .account_id = account_id,
-        .refresh_after_ms = grok_session.refreshDeadlineMs(session.expires_at_ms),
+        .refresh_after_ms = layerx1_session.refreshDeadlineMs(session.expires_at_ms),
     };
 }
 
 fn refreshSession(
     alloc: Allocator,
     transport: oauth_transport.Provider,
-    mutation: *grok_session.Mutation,
-    session: *grok_session.Session,
+    mutation: *layerx1_session.Mutation,
+    session: *layerx1_session.Session,
 ) !void {
     var body: std.Io.Writer.Allocating = .init(alloc);
     defer body.deinit();
@@ -541,18 +625,18 @@ fn refreshSession(
     const account_id = try fetchAccountId(alloc, transport, token.access_token);
     errdefer alloc.free(account_id);
     if (!std.mem.eql(u8, account_id, session.account_id)) {
-        return error.GrokAccountChanged;
+        return error.LayerX1AccountChanged;
     }
     const refresh_token = if (token.refresh_token) |rotated| rotated else try alloc.dupe(u8, session.refresh_token);
     if (token.refresh_token != null) token.refresh_token = null;
     errdefer secret.zeroAndFree(alloc, refresh_token);
     const expires_at_ms = if (token.expires_in) |expires_in| blk: {
         const duration_ms = std.math.mul(i64, expires_in, std.time.ms_per_s) catch
-            return error.InvalidGrokOAuthResponse;
+            return error.InvalidLayerX1OAuthResponse;
         break :blk std.math.add(i64, io_mod.milliTimestamp(), duration_ms) catch
-            return error.InvalidGrokOAuthResponse;
-    } else return error.InvalidGrokOAuthResponse;
-    var replacement = grok_session.Session{
+            return error.InvalidLayerX1OAuthResponse;
+    } else return error.InvalidLayerX1OAuthResponse;
+    var replacement = layerx1_session.Session{
         .access_token = token.access_token,
         .refresh_token = refresh_token,
         .expires_at_ms = expires_at_ms,
@@ -598,17 +682,17 @@ fn requestRefreshToken(
     defer secret.zeroAndFree(alloc, bytes);
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
     defer parsed.deinit();
-    if (parsed.value != .object) return error.InvalidGrokOAuthResponse;
+    if (parsed.value != .object) return error.InvalidLayerX1OAuthResponse;
     const object = parsed.value.object;
     const access_token = try dupeRequiredString(alloc, object, "access_token");
     errdefer secret.zeroAndFree(alloc, access_token);
     const refresh_token = if (object.get("refresh_token")) |value| blk: {
-        if (value != .string or value.string.len == 0) return error.InvalidGrokOAuthResponse;
+        if (value != .string or value.string.len == 0) return error.InvalidLayerX1OAuthResponse;
         break :blk try alloc.dupe(u8, value.string);
     } else null;
     errdefer if (refresh_token) |token| secret.zeroAndFree(alloc, token);
     const expires_in = if (object.get("expires_in")) |value| blk: {
-        if (value != .integer or value.integer <= 0) return error.InvalidGrokOAuthResponse;
+        if (value != .integer or value.integer <= 0) return error.InvalidLayerX1OAuthResponse;
         break :blk value.integer;
     } else null;
     return .{
@@ -659,7 +743,7 @@ fn requestTokenAtWithBounds(
     defer secret.zeroAndFree(alloc, bytes);
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
     defer parsed.deinit();
-    if (parsed.value != .object) return error.InvalidGrokOAuthResponse;
+    if (parsed.value != .object) return error.InvalidLayerX1OAuthResponse;
     const object = parsed.value.object;
     const access_token = try dupeRequiredString(alloc, object, "access_token");
     errdefer secret.zeroAndFree(alloc, access_token);
@@ -675,7 +759,7 @@ fn requestTokenAtWithBounds(
 fn configuredEndpoint(alloc: Allocator, env_name: []const u8, default_url: []const u8) ![]u8 {
     const candidate = io_mod.getenv(env_name) orelse default_url;
     if (io_mod.getenv(env_name) != null and !isLoopbackHttpUrl(candidate)) {
-        return error.InvalidE2EGrokEndpoint;
+        return error.InvalidE2ELayerX1Endpoint;
     }
     return alloc.dupe(u8, candidate);
 }
@@ -722,15 +806,16 @@ fn fetchAccountId(
         .authorization = authorization,
     });
     defer response.deinit(alloc);
-    if (response.disposition != .accepted) return error.GrokUserInfoRequestFailed;
+    if (response.disposition != .accepted) return error.LayerX1UserInfoRequestFailed;
     var parsed = std.json.parseFromSlice(std.json.Value, alloc, response.body, .{}) catch
-        return error.InvalidGrokUserInfoResponse;
+        return error.InvalidLayerX1UserInfoResponse;
     defer parsed.deinit();
-    if (parsed.value != .object) return error.InvalidGrokUserInfoResponse;
+    if (parsed.value != .object) return error.InvalidLayerX1UserInfoResponse;
     const account_id = dupeRequiredString(alloc, parsed.value.object, "sub") catch
-        return error.InvalidGrokUserInfoResponse;
+        dupeRequiredString(alloc, parsed.value.object, "customer_id") catch
+        return error.InvalidLayerX1UserInfoResponse;
     errdefer alloc.free(account_id);
-    if (!grok_session.validAccountId(account_id)) return error.InvalidGrokUserInfoResponse;
+    if (!layerx1_session.validAccountId(account_id)) return error.InvalidLayerX1UserInfoResponse;
     return account_id;
 }
 
@@ -769,21 +854,21 @@ fn requestAcceptedWithBounds(
     });
     defer response.deinit(alloc);
     if (response.disposition != .accepted) {
-        debug_trace.logf("auth", "Grok OAuth request rejected url={s}", .{url});
-        return error.GrokOAuthRequestFailed;
+        debug_trace.logf("auth", "LayerX1 OAuth request rejected url={s}", .{url});
+        return error.LayerX1OAuthRequestFailed;
     }
     return response.takeBody();
 }
 
 fn dupeRequiredString(alloc: Allocator, object: std.json.ObjectMap, key: []const u8) ![]u8 {
-    const value = object.get(key) orelse return error.InvalidGrokOAuthResponse;
-    if (value != .string or value.string.len == 0) return error.InvalidGrokOAuthResponse;
+    const value = object.get(key) orelse return error.InvalidLayerX1OAuthResponse;
+    if (value != .string or value.string.len == 0) return error.InvalidLayerX1OAuthResponse;
     return alloc.dupe(u8, value.string);
 }
 
 fn requiredPositiveInteger(object: std.json.ObjectMap, key: []const u8) !i64 {
-    const value = object.get(key) orelse return error.InvalidGrokOAuthResponse;
-    if (value != .integer or value.integer <= 0) return error.InvalidGrokOAuthResponse;
+    const value = object.get(key) orelse return error.InvalidLayerX1OAuthResponse;
+    if (value != .integer or value.integer <= 0) return error.InvalidLayerX1OAuthResponse;
     return value.integer;
 }
 
@@ -814,7 +899,7 @@ fn buildBrowserAuthorizationUrl(
     try form.append(&out.writer, "code_challenge", code_challenge);
     try form.append(&out.writer, "code_challenge_method", "S256");
     try form.append(&out.writer, "state", state);
-    try form.append(&out.writer, "referrer", "fx");
+    try form.append(&out.writer, "referrer", "layerx1");
     return out.toOwnedSlice();
 }
 
@@ -825,22 +910,22 @@ fn parseBrowserCallbackTarget(
 ) !BrowserCallback {
     const prefix = "/callback?";
     if (!std.mem.startsWith(u8, target, prefix) or std.mem.findScalar(u8, target, '#') != null) {
-        return error.InvalidGrokOAuthCallback;
+        return error.InvalidLayerX1OAuthCallback;
     }
     const query = target[prefix.len..];
     if (queryValueAlloc(alloc, query, "error")) |denial| {
         alloc.free(denial);
         const denial_state = queryValueAlloc(alloc, query, "state") catch
-            return error.InvalidGrokOAuthCallback;
+            return error.InvalidLayerX1OAuthCallback;
         defer secret.zeroAndFree(alloc, denial_state);
-        if (!std.mem.eql(u8, denial_state, expected_state)) return error.GrokOAuthStateMismatch;
-        return error.GrokAuthorizationFailed;
+        if (!std.mem.eql(u8, denial_state, expected_state)) return error.LayerX1OAuthStateMismatch;
+        return error.LayerX1AuthorizationFailed;
     } else |_| {}
     const code = try queryValueAlloc(alloc, query, "code");
     errdefer secret.zeroAndFree(alloc, code);
     const state = try queryValueAlloc(alloc, query, "state");
     defer secret.zeroAndFree(alloc, state);
-    if (!std.mem.eql(u8, state, expected_state)) return error.GrokOAuthStateMismatch;
+    if (!std.mem.eql(u8, state, expected_state)) return error.LayerX1OAuthStateMismatch;
     return .{ .code = code };
 }
 
@@ -851,7 +936,7 @@ fn queryValueAlloc(alloc: Allocator, query: []const u8, key: []const u8) ![]u8 {
         if (!std.mem.eql(u8, pair[0..equals], key)) continue;
         return percentDecodeAlloc(alloc, pair[equals + 1 ..]);
     }
-    return error.InvalidGrokOAuthCallback;
+    return error.InvalidLayerX1OAuthCallback;
 }
 
 fn percentDecodeAlloc(alloc: Allocator, value: []const u8) ![]u8 {
@@ -861,11 +946,11 @@ fn percentDecodeAlloc(alloc: Allocator, value: []const u8) ![]u8 {
     var write_index: usize = 0;
     while (read_index < value.len) {
         if (value[read_index] == '%') {
-            if (read_index + 2 >= value.len) return error.InvalidGrokOAuthCallback;
+            if (read_index + 2 >= value.len) return error.InvalidLayerX1OAuthCallback;
             const high = std.fmt.charToDigit(value[read_index + 1], 16) catch
-                return error.InvalidGrokOAuthCallback;
+                return error.InvalidLayerX1OAuthCallback;
             const low = std.fmt.charToDigit(value[read_index + 2], 16) catch
-                return error.InvalidGrokOAuthCallback;
+                return error.InvalidLayerX1OAuthCallback;
             out[write_index] = @as(u8, @intCast(high * 16 + low));
             read_index += 3;
         } else {
@@ -874,7 +959,7 @@ fn percentDecodeAlloc(alloc: Allocator, value: []const u8) ![]u8 {
         }
         write_index += 1;
     }
-    if (write_index == 0) return error.InvalidGrokOAuthCallback;
+    if (write_index == 0) return error.InvalidLayerX1OAuthCallback;
     return alloc.realloc(out, write_index);
 }
 
@@ -908,14 +993,14 @@ fn writeStdout(text: []const u8) !void {
     try std.Io.File.stdout().writeStreamingAll(io_mod.getIo(), text);
 }
 
-test "Grok E2E OAuth endpoint overrides accept only loopback HTTP" {
+test "LayerX1 E2E OAuth endpoint overrides accept only loopback HTTP" {
     try std.testing.expect(isLoopbackHttpUrl("http://127.0.0.1:1234/token"));
     try std.testing.expect(isLoopbackHttpUrl("http://localhost:1234/token"));
     try std.testing.expect(!isLoopbackHttpUrl("https://127.0.0.1:1234/token"));
     try std.testing.expect(!isLoopbackHttpUrl("http://example.com:1234/token"));
 }
 
-test "Grok account identity comes from authenticated userinfo" {
+test "LayerX1 account identity comes from authenticated userinfo" {
     const State = struct {
         authorization_seen: bool = false,
 
@@ -936,14 +1021,29 @@ test "Grok account identity comes from authenticated userinfo" {
     try std.testing.expectEqualStrings("acct_test", account_id);
 }
 
-test "Grok account identity rejects unsafe userinfo bytes" {
+test "LayerX1 account identity accepts the full profile customer id" {
+    const Transport = struct {
+        fn execute(_: ?*anyopaque, alloc: Allocator, _: oauth_transport.Request) !oauth_transport.Response {
+            return .{ .disposition = .accepted, .body = try alloc.dupe(u8, "{\"customer_id\":\"acct_profile\",\"plan\":\"pro\"}") };
+        }
+    };
+    const account_id = try fetchAccountId(
+        std.testing.allocator,
+        .{ .execute_fn = Transport.execute },
+        "token",
+    );
+    defer std.testing.allocator.free(account_id);
+    try std.testing.expectEqualStrings("acct_profile", account_id);
+}
+
+test "LayerX1 account identity rejects unsafe userinfo bytes" {
     const State = struct {
         fn execute(_: ?*anyopaque, alloc: Allocator, _: oauth_transport.Request) !oauth_transport.Response {
             return .{ .disposition = .accepted, .body = try alloc.dupe(u8, "{\"sub\":\"acct\\ninjected\"}") };
         }
     };
     try std.testing.expectError(
-        error.InvalidGrokUserInfoResponse,
+        error.InvalidLayerX1UserInfoResponse,
         fetchAccountId(
             std.testing.allocator,
             .{ .execute_fn = State.execute },
@@ -952,7 +1052,7 @@ test "Grok account identity rejects unsafe userinfo bytes" {
     );
 }
 
-test "Grok refresh uses form encoding and accepts omitted token rotation" {
+test "LayerX1 refresh uses form encoding and accepts omitted token rotation" {
     const State = struct {
         method: ?oauth_transport.Method = null,
         payload: [512]u8 = undefined,
@@ -978,7 +1078,7 @@ test "Grok refresh uses form encoding and accepts omitted token rotation" {
     var response = try requestRefreshToken(
         std.testing.allocator,
         .{ .context = &state, .execute_fn = State.execute },
-        "client_id=client&grant_type=refresh_token&refresh_token=refresh",
+        "client_id=client&grant_type=refresh_token&refresh_token=[redacted]",
     );
     defer response.deinit(std.testing.allocator);
 
@@ -988,27 +1088,27 @@ test "Grok refresh uses form encoding and accepts omitted token rotation" {
     try std.testing.expectEqual(@as(?i64, 3600), response.expires_in);
 }
 
-test "Grok browser authorization URL uses PKCE without device authentication" {
+test "LayerX1 browser authorization URL uses PKCE without device authentication" {
     const url = try buildBrowserAuthorizationUrl(
         std.testing.allocator,
-        "https://auth.x.ai",
+        "https://www.layerx1.com",
         "http://127.0.0.1:1455/callback",
         "challenge-value",
         "state-value",
     );
     defer std.testing.allocator.free(url);
 
-    try std.testing.expect(std.mem.startsWith(u8, url, "https://auth.x.ai/oauth2/authorize?"));
+    try std.testing.expect(std.mem.startsWith(u8, url, "https://www.layerx1.com/oauth2/authorize?"));
     try std.testing.expect(std.mem.find(u8, url, "response_type=code") != null);
     try std.testing.expect(std.mem.find(u8, url, "code_challenge=challenge-value") != null);
     try std.testing.expect(std.mem.find(u8, url, "code_challenge_method=S256") != null);
     try std.testing.expect(std.mem.find(u8, url, "state=state-value") != null);
-    try std.testing.expect(std.mem.find(u8, url, "referrer=fx") != null);
+    try std.testing.expect(std.mem.find(u8, url, "referrer=layerx1") != null);
     try std.testing.expect(std.mem.find(u8, url, "nonce") == null);
     try std.testing.expect(std.mem.find(u8, url, "device") == null);
 }
 
-test "Grok browser callback uses an ephemeral port" {
+test "LayerX1 browser callback uses an ephemeral port" {
     var listener = try bindBrowserCallback();
     defer listener.deinit(io_mod.getIo());
 
@@ -1016,7 +1116,7 @@ test "Grok browser callback uses an ephemeral port" {
     try std.testing.expect(port != 8976 and port != 8977);
 }
 
-test "Grok browser callback classifier rejects mismatched state" {
+test "LayerX1 browser callback classifier rejects mismatched state" {
     var context = BrowserCallbackParserContext{ .expected_state = "expected" };
 
     const stale_success = classifyBrowserCallback(
@@ -1025,7 +1125,7 @@ test "Grok browser callback classifier rejects mismatched state" {
         "/callback?code=stale&state=other",
     );
     switch (stale_success) {
-        .failed => |err| try std.testing.expectEqual(error.GrokOAuthStateMismatch, err),
+        .failed => |err| try std.testing.expectEqual(error.LayerX1OAuthStateMismatch, err),
         else => return error.ExpectedFailedCallback,
     }
 
@@ -1035,12 +1135,12 @@ test "Grok browser callback classifier rejects mismatched state" {
         "/callback?error=access_denied&state=other",
     );
     switch (stale_denial) {
-        .failed => |err| try std.testing.expectEqual(error.GrokOAuthStateMismatch, err),
+        .failed => |err| try std.testing.expectEqual(error.LayerX1OAuthStateMismatch, err),
         else => return error.ExpectedFailedCallback,
     }
 }
 
-test "Grok browser callback classifier reports a current denial" {
+test "LayerX1 browser callback classifier reports a current denial" {
     var context = BrowserCallbackParserContext{ .expected_state = "expected" };
     const denied = classifyBrowserCallback(
         &context,
@@ -1048,12 +1148,12 @@ test "Grok browser callback classifier reports a current denial" {
         "/callback?error=access_denied&state=expected",
     );
     switch (denied) {
-        .failed => |err| try std.testing.expectEqual(error.GrokAuthorizationFailed, err),
+        .failed => |err| try std.testing.expectEqual(error.LayerX1AuthorizationFailed, err),
         else => return error.ExpectedFailedCallback,
     }
 }
 
-test "Grok browser callback requires the exact path and state" {
+test "LayerX1 browser callback requires the exact path and state" {
     var callback = try parseBrowserCallbackTarget(
         std.testing.allocator,
         "/callback?code=auth%20code&state=expected",
@@ -1063,7 +1163,7 @@ test "Grok browser callback requires the exact path and state" {
     try std.testing.expectEqualStrings("auth code", callback.code);
 
     try std.testing.expectError(
-        error.GrokOAuthStateMismatch,
+        error.LayerX1OAuthStateMismatch,
         parseBrowserCallbackTarget(
             std.testing.allocator,
             "/callback?code=auth&state=other",
@@ -1071,7 +1171,7 @@ test "Grok browser callback requires the exact path and state" {
         ),
     );
     try std.testing.expectError(
-        error.InvalidGrokOAuthCallback,
+        error.InvalidLayerX1OAuthCallback,
         parseBrowserCallbackTarget(
             std.testing.allocator,
             "/other?code=auth&state=expected",

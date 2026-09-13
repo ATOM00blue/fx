@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HAS_API_KEY, runFx } from "../evals/eval-helpers";
+import { HAS_API_KEY, runx1 } from "../evals/eval-helpers";
 
 const TIMEOUT = 180_000;
 const OUTER_MODEL = "anthropic/claude-sonnet-4.6";
@@ -12,13 +12,13 @@ const BACKENDS = [
 ] as const;
 
 function createIsolatedRoot() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-web-search-live-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "x1-web-search-live-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".x1"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".x1", "settings.json"),
     JSON.stringify({
       model: OUTER_MODEL,
       permission: { web_search: { "*": "allow" } },
@@ -42,7 +42,7 @@ describe.skipIf(!HAS_API_KEY)("live web_search private backends", () => {
         const root = createIsolatedRoot();
         const traceLog = join(root.root, "trace.log");
         try {
-          const result = await runFx(
+          const result = await runx1(
             [
               "ask",
               "--auto",
@@ -56,10 +56,10 @@ describe.skipIf(!HAS_API_KEY)("live web_search private backends", () => {
               cwd: root.workspace,
               env: {
                 HOME: root.home,
-                FX_AUTO_UPGRADE: "0",
-                FX_TRACE_LOG: traceLog,
-                FX_TRACE_SCOPES: "agent,gateway,stream,web_search",
-                FX_WEB_SEARCH_BACKEND: backend,
+                X1_AUTO_UPGRADE: "0",
+                X1_TRACE_LOG: traceLog,
+                X1_TRACE_SCOPES: "agent,gateway,stream,web_search",
+                X1_WEB_SEARCH_BACKEND: backend,
               },
               timeoutMs: TIMEOUT,
             },
@@ -67,7 +67,7 @@ describe.skipIf(!HAS_API_KEY)("live web_search private backends", () => {
 
           if (result.code !== 0) {
             throw new Error(
-              `fx exited with code ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(0, 8000)}`,
+              `x1 exited with code ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(0, 8000)}`,
             );
           }
           const json = JSON.parse(result.stdout.trim()) as {

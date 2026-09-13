@@ -151,8 +151,8 @@ test "skills screen preserves the final cell of an exact-width row" {
 test "skills screen places the unchanged composer above the catalog without transcript chrome" {
     const alloc = std.testing.allocator;
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "pure-core", .description = "Keep data transformations pure.", .path = "/skills/pure-core/SKILL.md", .source = .global_fx },
-        .{ .name = "fx-guide", .description = "Route Fx work to the right skill.", .path = "/skills/fx-guide/SKILL.md", .source = .global_codex },
+        .{ .name = "pure-core", .description = "Keep data transformations pure.", .path = "/skills/pure-core/SKILL.md", .source = .global_x1 },
+        .{ .name = "x1-guide", .description = "Route x1 work to the right skill.", .path = "/skills/x1-guide/SKILL.md", .source = .global_codex },
     };
     const projection: render_input.SkillsMenuProjection = .{
         .active = true,
@@ -192,7 +192,7 @@ test "skills screen places the unchanged composer above the catalog without tran
     row.clearRetainingCapacity();
     try grid.rowTextTrimmed(14, &row);
     try std.testing.expect(std.mem.find(u8, row.items, "Navigate") != null);
-    try std.testing.expect(std.mem.find(u8, screen.bytes, "Run /help for commands") == null);
+    try std.testing.expect(std.mem.find(u8, screen.bytes, "layerx1.com") == null);
 }
 
 test "skills screen keeps the armed Ctrl-C exit warning visible" {

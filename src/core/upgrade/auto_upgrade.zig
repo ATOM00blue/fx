@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const io_mod = @import("../shared/io.zig");
 const helpers = @import("upgrade_helpers.zig");
 const update_target = @import("update_target.zig");
@@ -8,6 +9,13 @@ const Allocator = std.mem.Allocator;
 const check_interval_ms: u64 = 30 * 60 * 1000;
 const initial_delay_ms: u64 = 10_000;
 const sleep_increment_ms: u64 = 50;
+
+// Release tarballs carry the bare binary name on POSIX and an `.exe` on
+// Windows (see the release packaging matrix).
+pub const extracted_binary_name = switch (builtin.os.tag) {
+    .windows => "x1.exe",
+    else => "x1",
+};
 
 pub const State = enum(u8) {
     idle = 0,
@@ -208,27 +216,27 @@ pub const AutoUpgrade = struct {
         var client: std.http.Client = .{ .allocator = alloc, .io = io_mod.getIo() };
         defer client.deinit();
 
-        const tmp_base: []const u8 = io_mod.getenv("TMPDIR") orelse "/tmp";
+        const tmp_base: []const u8 = io_mod.tempDir();
         var rand_buf: [8]u8 = undefined;
         io_mod.getIo().random(&rand_buf);
         const rand_hex = std.fmt.bytesToHex(rand_buf, .lower);
-        const tmp_dir = std.fmt.allocPrint(alloc, "{s}/fx-auto-upgrade-{s}", .{ tmp_base, rand_hex }) catch return error.AllocFailed;
+        const tmp_dir = std.fmt.allocPrint(alloc, "{s}/x1-auto-upgrade-{s}", .{ tmp_base, rand_hex }) catch return error.AllocFailed;
         defer alloc.free(tmp_dir);
         defer std.Io.Dir.cwd().deleteTree(io_mod.getIo(), tmp_dir) catch {};
 
         std.Io.Dir.createDirAbsolute(io_mod.getIo(), tmp_dir, .default_dir) catch return error.ExtractionFailed;
 
-        const archive_path = std.fmt.allocPrint(alloc, "{s}/fx.tar.gz", .{tmp_dir}) catch return error.AllocFailed;
+        const archive_path = std.fmt.allocPrint(alloc, "{s}/x1.tar.gz", .{tmp_dir}) catch return error.AllocFailed;
         defer alloc.free(archive_path);
 
-        const archive_url = std.fmt.allocPrint(alloc, "{s}/{s}/fx-{s}.tar.gz", .{ cdn_base, target.artifactRef(), helpers.platform }) catch return error.AllocFailed;
+        const archive_url = std.fmt.allocPrint(alloc, "{s}/{s}/x1-{s}.tar.gz", .{ cdn_base, target.artifactRef(), helpers.platform }) catch return error.AllocFailed;
         defer alloc.free(archive_url);
 
         helpers.downloadFileStreaming(&client, archive_url, archive_path) catch return error.DownloadFailed;
 
         if (self.should_stop.load(.acquire)) return error.Cancelled;
 
-        const checksum_url = std.fmt.allocPrint(alloc, "{s}/{s}/fx-{s}.tar.gz.sha256", .{ cdn_base, target.artifactRef(), helpers.platform }) catch return error.AllocFailed;
+        const checksum_url = std.fmt.allocPrint(alloc, "{s}/{s}/x1-{s}.tar.gz.sha256", .{ cdn_base, target.artifactRef(), helpers.platform }) catch return error.AllocFailed;
         defer alloc.free(checksum_url);
 
         helpers.verifyChecksum(&client, archive_path, checksum_url) catch return error.ChecksumFailed;
@@ -239,12 +247,18 @@ pub const AutoUpgrade = struct {
 
         if (self.should_stop.load(.acquire)) return error.Cancelled;
 
-        const extracted_bin = std.fmt.allocPrint(alloc, "{s}/fx", .{tmp_dir}) catch return error.AllocFailed;
+        const extracted_bin = std.fmt.allocPrint(alloc, "{s}/" ++ extracted_binary_name, .{tmp_dir}) catch return error.AllocFailed;
         defer alloc.free(extracted_bin);
 
         var self_exe_buf: [std.fs.max_path_bytes]u8 = undefined;
         const self_exe = helpers.currentExecutablePath(&self_exe_buf) catch return error.SelfExeNotFound;
-        io_mod.copyFileAtomic(alloc, extracted_bin, self_exe) catch return error.InstallFailed;
+        if (comptime builtin.os.tag == .windows) {
+            // The running exe cannot be overwritten in place; replaceBinary
+            // renames it aside first (see replaceBinaryWindows).
+            helpers.replaceBinary(extracted_bin, self_exe) catch return error.InstallFailed;
+        } else {
+            io_mod.copyFileAtomic(alloc, extracted_bin, self_exe) catch return error.InstallFailed;
+        }
     }
 
     fn sleepInterruptible(self: *AutoUpgrade, total_ms: u64) void {
@@ -273,9 +287,17 @@ test "selected release channel is owned by the upgrade runtime" {
 }
 
 test "development build paths disable auto upgrade" {
-    try std.testing.expect(isDevelopmentBuildPath("/repo/zig-out/bin/fx"));
-    try std.testing.expect(isDevelopmentBuildPath("C:\\repo\\zig-out\\bin\\fx.exe"));
-    try std.testing.expect(!isDevelopmentBuildPath("/Users/me/.local/bin/fx"));
+    try std.testing.expect(isDevelopmentBuildPath("/repo/zig-out/bin/x1"));
+    try std.testing.expect(isDevelopmentBuildPath("C:\\repo\\zig-out\\bin\\x1.exe"));
+    try std.testing.expect(!isDevelopmentBuildPath("/Users/me/.local/bin/x1"));
+}
+
+test "extracted binary name matches the release tarball layout" {
+    if (comptime builtin.os.tag == .windows) {
+        try std.testing.expectEqualStrings("x1.exe", extracted_binary_name);
+    } else {
+        try std.testing.expectEqualStrings("x1", extracted_binary_name);
+    }
 }
 
 test "statusLabel downloading shows ellipsis" {
@@ -306,13 +328,13 @@ test "setLatestVersion stores normalized version" {
 
 test "relaunch request owns the executable path and is consumed once" {
     var au = AutoUpgrade{};
-    var source = [_]u8{ '/', 't', 'm', 'p', '/', 'f', 'x' };
+    var source = [_]u8{ '/', 't', 'm', 'p', '/', 'x', '1' };
     try au.requestRelaunch(&source);
     source[1] = 'x';
 
     const request = au.takeRelaunchRequest() orelse
         return error.TestExpectedRelaunchRequest;
-    try std.testing.expectEqualStrings("/tmp/fx", request.executablePath());
+    try std.testing.expectEqualStrings("/tmp/x1", request.executablePath());
     try std.testing.expect(au.takeRelaunchRequest() == null);
 }
 

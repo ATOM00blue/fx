@@ -270,12 +270,23 @@ pub const EntryRenderOverride = struct {
     bytes: []const u8,
 };
 
+/// Semantic color/blink for a tool-group header override. Stored on the
+/// relationship payload so rematerialize, theme, and width changes paint from
+/// tool state instead of parsing child verbs.
+pub const GroupMarkerKind = enum {
+    none,
+    running,
+    success,
+    failure,
+};
+
 pub const EntryRenderAction = union(enum) {
     keep,
     hide,
     override: struct {
         kind: TranscriptBlockKind,
         bytes: []const u8,
+        group_marker: GroupMarkerKind = .none,
     },
 };
 
@@ -2754,7 +2765,7 @@ test "semantic notice renders every tone and resets before following content" {
 
 test "semantic notice keeps an OSC 8 target hidden and clickable" {
     const alloc = std.testing.allocator;
-    const url = "https://fx.sh/feedback";
+    const url = "https://layerx1.com/feedback";
     const body = try std.fmt.allocPrint(
         alloc,
         "\x1b]8;;{s}\x1b\\Open feedback form\x1b]8;;\x1b\\.",
@@ -3797,13 +3808,13 @@ test "renderEntriesToBytes keeps the assistant gutter outside an OSC 8 link" {
         &entries,
         alloc,
         1,
-        "\x1b]8;id=fx-1;https://example.com\x1b\\\x1b[4mabcdef\x1b[24m\x1b]8;;\x1b\\",
+        "\x1b]8;id=x1-1;https://example.com\x1b\\\x1b[4mabcdef\x1b[24m\x1b]8;;\x1b\\",
     );
 
     const out = try renderEntriesToBytes(alloc, entries.items, 5, .{});
     defer alloc.free(out);
-    try std.testing.expect(std.mem.startsWith(u8, out, "  \x1b[4m\x1b]8;id=fx-1;https://example.com\x1b\\abc"));
-    try std.testing.expect(std.mem.find(u8, out, "\x1b[0m\x1b]8;;\x1b\\\n  \x1b[4m\x1b]8;id=fx-1") != null);
+    try std.testing.expect(std.mem.startsWith(u8, out, "  \x1b[4m\x1b]8;id=x1-1;https://example.com\x1b\\abc"));
+    try std.testing.expect(std.mem.find(u8, out, "\x1b[0m\x1b]8;;\x1b\\\n  \x1b[4m\x1b]8;id=x1-1") != null);
 }
 
 test "renderEntriesToBytes reflows an inline image label at narrow widths" {

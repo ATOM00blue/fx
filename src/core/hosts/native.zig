@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const host = @import("host.zig");
-const native_secret_store = @import("native_secret_store.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const io_mod = @import("../shared/io.zig");
 
@@ -10,7 +9,7 @@ pub const clipboard = host.Clipboard{
     .copy_file_fn = copy_file_to_clipboard,
 };
 
-pub const secret_store = native_secret_store.provider;
+pub const secret_store = host.unavailable_secret_store;
 
 fn copyToClipboard(_: ?*anyopaque, text: []const u8) host.ClipboardError!bool {
     const argv = clipboardCommand(builtin.os.tag) orelse return false;
@@ -230,6 +229,9 @@ fn clipboardCommand(os_tag: std.Target.Os.Tag) ?[]const []const u8 {
     return switch (os_tag) {
         .macos => &.{"pbcopy"},
         .linux => &.{ "xclip", "-selection", "clipboard" },
+        // clip.exe reads stdin into the clipboard exactly like pbcopy; the
+        // Windows spawner resolves it through PATH/PATHEXT.
+        .windows => &.{"clip"},
         else => null,
     };
 }
@@ -257,7 +259,11 @@ test "native clipboard selects the platform command" {
         &.{ "xclip", "-selection", "clipboard" },
         clipboardCommand(.linux).?,
     );
-    try std.testing.expect(clipboardCommand(.windows) == null);
+    try std.testing.expectEqualSlices(
+        []const u8,
+        &.{"clip"},
+        clipboardCommand(.windows).?,
+    );
     try std.testing.expect(clipboardCommand(.wasi) == null);
 }
 

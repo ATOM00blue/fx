@@ -53,7 +53,7 @@ pub const web_fetch_unavailable_message = "web_fetch is unavailable: no local We
 pub const terminal_unavailable_message =
     "{\"error\":{\"tool\":\"terminal\",\"code\":\"unsupported_host\",\"retryable\":false}}";
 const terminal_saved_session_required_message =
-    "Durable terminal actions require a saved fx session.";
+    "Durable terminal actions require a saved x1 session.";
 const terminal_saved_session_required_suggestion =
     "Use terminal.exec, or rerun without --no-save.";
 
@@ -431,7 +431,7 @@ pub const Tool = struct {
     model_schema: model_tool_schema.FunctionSchema,
     model_visible: bool = true,
     write_provider_advertisement_fn: ?WriteProviderAdvertisementFn = null,
-    /// Set when the provider runs the tool instead of fx dispatch. Such a tool
+    /// Set when the provider runs the tool instead of x1 dispatch. Such a tool
     /// never reaches a call-time permission check, so advertisement is its only
     /// enforcement point and requires an already-settled allow.
     provider_executed: bool = false,

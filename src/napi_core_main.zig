@@ -5,15 +5,17 @@ const jsonrpc = @import("acp/jsonrpc.zig");
 const background_process_provider = @import("core/execution/background_process_provider.zig");
 const gateway_provider = @import("core/gateway/gateway_provider.zig");
 const provider_set = @import("core/gateway/provider_set.zig");
+const provider_catalog = @import("core/auth/provider_catalog.zig");
 const host = @import("core/hosts/host.zig");
 const debug_trace = @import("core/shared/debug_trace.zig");
 const io_mod = @import("core/shared/io.zig");
 const fetch_state = @import("napi_fetch_state.zig");
 const streamable_http = @import("core/mcp/streamable_http.zig");
 const host_stream_provider = @import("gateway/host_stream_provider.zig");
+const layerx1 = @import("gateway/layerx1.zig");
 const oauth_transport = @import("core/auth/oauth_transport.zig");
 const builtin_context = @import("builtins/context.zig");
-const builtin_gateway = @import("builtins/gateway.zig");
+const builtin_x1 = @import("builtins/x1.zig");
 const builtin_modes = @import("builtins/modes.zig");
 
 const c = @cImport({
@@ -32,13 +34,13 @@ const max_path_bytes = 16 * 1024;
 const max_url_bytes = 16 * 1024;
 const max_active_runtimes = 64;
 const runtime_handle_type_tag = c.napi_type_tag{
-    .lower = 0x4c4942465852544d,
+    .lower = 0x4c4942583152544d,
     .upper = 0xa71d7c52e9314b08,
 };
 
 comptime {
     if (build_options.napi_surface != .core) {
-        @compileError("libfx N-API core requires -Dnapi-surface=core");
+        @compileError("libx1 N-API core requires -Dnapi-surface=core");
     }
 }
 
@@ -434,20 +436,21 @@ const Runtime = struct {
     fn run(self: *Runtime) void {
         const provider = gateway_provider.Provider{
             .oauth_transport = oauth_transport.unavailable_provider,
-            .chat_url = builtin_gateway.provider.chat_url,
+            .chat_url = builtin_x1.provider.chat_url,
         };
-        var gateway = builtin_gateway.provider_bundle;
-        gateway.agent_stream = host_stream_provider.provider(&self.stream_context);
-        gateway.permission_reviewer = null;
-        const providers = provider_set.gateway_only(gateway);
+        const providers = provider_set.x1Only(.{
+            .presentation = provider_catalog.find(.layerx1),
+            .auth_strategy = .layerx1,
+            .agent_stream = host_stream_provider.provider(&self.stream_context),
+        });
         acp_server.runWithTransport(
             self.alloc,
             .{
-                .default_model = builtin_gateway.default_model,
+                .default_model = builtin_x1.default_model,
                 .default_agent_step_limit = 64,
                 .gateway_retry_count = 0,
                 .gateway_chat_url = self.gateway_chat_url,
-                .gateway_models_path = builtin_gateway.models_path,
+                .gateway_models_path = builtin_x1.models_path,
                 .gateway_provider = provider,
                 .provider_set = providers,
                 .background_process_provider = background_process_provider.unavailable_provider,
@@ -558,7 +561,7 @@ fn throw(env: c.napi_env, code: [*:0]const u8, message: [*:0]const u8) c.napi_va
 
 fn statusOk(env: c.napi_env, status: c.napi_status, message: [*:0]const u8) bool {
     if (status == c.napi_ok) return true;
-    _ = c.napi_throw_error(env, "LIBFX_NAPI", message);
+    _ = c.napi_throw_error(env, "LIBX1_NAPI", message);
     return false;
 }
 
@@ -566,7 +569,7 @@ fn callbackArgs(env: c.napi_env, info: c.napi_callback_info, argv: []c.napi_valu
     var argc = argv.len;
     if (!statusOk(env, c.napi_get_cb_info(env, info, &argc, argv.ptr, null, null), "could not read arguments")) return false;
     if (argc == argv.len) return true;
-    _ = c.napi_throw_type_error(env, "LIBFX_INVALID_ARGUMENT", "missing required argument");
+    _ = c.napi_throw_type_error(env, "LIBX1_INVALID_ARGUMENT", "missing required argument");
     return false;
 }
 
@@ -633,13 +636,22 @@ fn createRuntime(env: c.napi_env, options: c.napi_value) CreateError!*Runtime {
         else => return error.InvalidWorkspaceRoot,
     }) orelse return error.InvalidWorkspaceRoot;
     errdefer alloc.free(workspace_root);
-    const gateway_chat_url = (getNamedString(env, options, "gatewayChatUrl", alloc, max_url_bytes) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidGatewayUrl,
-    }) orelse (alloc.dupe(u8, builtin_gateway.default_chat_url) catch return error.OutOfMemory);
+    const gateway_chat_url = blk: {
+        const named = getNamedString(env, options, "responsesUrl", alloc, max_url_bytes) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.InvalidGatewayUrl,
+        };
+        if (named) |value| break :blk value;
+        const legacy = getNamedString(env, options, "gatewayChatUrl", alloc, max_url_bytes) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.InvalidGatewayUrl,
+        };
+        if (legacy) |value| break :blk value;
+        break :blk alloc.dupe(u8, builtin_x1.default_chat_url) catch return error.OutOfMemory;
+    };
     errdefer alloc.free(gateway_chat_url);
     streamable_http.validateEndpoint(gateway_chat_url) catch return error.InvalidGatewayUrl;
-    if (!std.mem.eql(u8, gateway_chat_url, builtin_gateway.default_chat_url)) {
+    if (!std.mem.eql(u8, gateway_chat_url, builtin_x1.default_chat_url)) {
         const uri = std.Uri.parse(gateway_chat_url) catch return error.InvalidGatewayUrl;
         if (!std.ascii.eqlIgnoreCase(uri.scheme, "http")) return error.InvalidGatewayUrl;
     }
@@ -655,7 +667,7 @@ fn createRuntime(env: c.napi_env, options: c.napi_value) CreateError!*Runtime {
         .gateway_chat_url = gateway_chat_url,
         .thread = undefined,
     };
-    runtime.stream_context = host_stream_provider.initContext(builtin_gateway.buildAgentRequest, .{ .fixed = runtime.gateway_chat_url }, .{
+    runtime.stream_context = host_stream_provider.initContext(layerx1.buildRequest, .{ .fixed = runtime.gateway_chat_url }, .{
         .context = &runtime.fetch,
         .open_fn = FetchBridge.open,
         .status_fn = FetchBridge.statusFn,
@@ -668,14 +680,14 @@ fn createRuntime(env: c.napi_env, options: c.napi_value) CreateError!*Runtime {
 
 fn throwCreateError(env: c.napi_env, err: CreateError) c.napi_value {
     return switch (err) {
-        error.TooManyRuntimes => throw(env, "LIBFX_NATIVE_LIMIT", "too many active native runtimes"),
-        error.InvalidApiKey => throw(env, "LIBFX_INVALID_ARGUMENT", "apiKey is required and must be a bounded string"),
-        error.InvalidModel => throw(env, "LIBFX_INVALID_ARGUMENT", "model must be a bounded string"),
-        error.InvalidHome => throw(env, "LIBFX_INVALID_ARGUMENT", "home is required and must be a bounded string"),
-        error.InvalidWorkspaceRoot => throw(env, "LIBFX_INVALID_ARGUMENT", "workspaceRoot is required and must be a bounded string"),
-        error.InvalidGatewayUrl => throw(env, "LIBFX_INVALID_ARGUMENT", "gatewayChatUrl must be a bounded string"),
-        error.OutOfMemory => throw(env, "LIBFX_NATIVE_OOM", "could not allocate native runtime"),
-        error.ThreadFailed => throw(env, "LIBFX_NATIVE_THREAD", "could not start native runtime thread"),
+        error.TooManyRuntimes => throw(env, "LIBX1_NATIVE_LIMIT", "too many active native runtimes"),
+        error.InvalidApiKey => throw(env, "LIBX1_INVALID_ARGUMENT", "apiKey is required and must be a bounded string"),
+        error.InvalidModel => throw(env, "LIBX1_INVALID_ARGUMENT", "model must be a bounded string"),
+        error.InvalidHome => throw(env, "LIBX1_INVALID_ARGUMENT", "home is required and must be a bounded string"),
+        error.InvalidWorkspaceRoot => throw(env, "LIBX1_INVALID_ARGUMENT", "workspaceRoot is required and must be a bounded string"),
+        error.InvalidGatewayUrl => throw(env, "LIBX1_INVALID_ARGUMENT", "responsesUrl must be a bounded LayerX1 Responses URL"),
+        error.OutOfMemory => throw(env, "LIBX1_NATIVE_OOM", "could not allocate native runtime"),
+        error.ThreadFailed => throw(env, "LIBX1_NATIVE_THREAD", "could not start native runtime thread"),
     };
 }
 
@@ -693,7 +705,7 @@ fn createCore(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_v
     var runtime_owned = true;
     defer if (runtime_owned) runtime.deinit();
     const handle = std.heap.c_allocator.create(RuntimeHandle) catch
-        return throw(env, "LIBFX_NATIVE_OOM", "could not allocate runtime handle");
+        return throw(env, "LIBX1_NATIVE_OOM", "could not allocate runtime handle");
     var handle_owned = true;
     defer if (handle_owned) std.heap.c_allocator.destroy(handle);
     handle.* = .{ .runtime = runtime };
@@ -724,7 +736,7 @@ fn runtimeHandleArg(env: c.napi_env, info: c.napi_callback_info, argv: []c.napi_
         "could not validate runtime handle",
     )) return null;
     if (!branded) {
-        _ = c.napi_throw_type_error(env, "LIBFX_INVALID_ARGUMENT", "invalid runtime handle");
+        _ = c.napi_throw_type_error(env, "LIBX1_INVALID_ARGUMENT", "invalid runtime handle");
         return null;
     }
     var context: ?*anyopaque = null;
@@ -736,7 +748,7 @@ fn lockRuntime(env: c.napi_env, handle: *RuntimeHandle) ?*Runtime {
     handle.mutex.lockUncancelable(io_mod.getIo());
     const runtime = handle.runtime orelse {
         handle.mutex.unlock(io_mod.getIo());
-        _ = c.napi_throw_error(env, "LIBFX_NATIVE_CLOSED", "native runtime is closed");
+        _ = c.napi_throw_error(env, "LIBX1_NATIVE_CLOSED", "native runtime is closed");
         return null;
     };
     return runtime;
@@ -754,7 +766,7 @@ fn fetch_handle_arg(env: c.napi_env, value: c.napi_value) ?fetch_state.Handle {
         number > @as(f64, @floatFromInt(std.math.maxInt(fetch_state.Handle))) or
         @floor(number) != number)
     {
-        _ = c.napi_throw_type_error(env, "LIBFX_INVALID_ARGUMENT", "fetch handle must be a positive int32");
+        _ = c.napi_throw_type_error(env, "LIBX1_INVALID_ARGUMENT", "fetch handle must be a positive int32");
         return null;
     }
     return @intFromFloat(number);
@@ -774,11 +786,11 @@ fn writeCore(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_va
     var data: ?*anyopaque = null;
     var len: usize = 0;
     if (!statusOk(env, c.napi_get_buffer_info(env, argv[1], &data, &len), "write() requires a Buffer")) return null;
-    const bytes = if (len == 0) &.{} else @as([*]const u8, @ptrCast(data orelse return throw(env, "LIBFX_NATIVE_IO", "Buffer data is unavailable")))[0..len];
+    const bytes = if (len == 0) &.{} else @as([*]const u8, @ptrCast(data orelse return throw(env, "LIBX1_NATIVE_IO", "Buffer data is unavailable")))[0..len];
     runtime.input.write(runtime.alloc, bytes) catch |err| return switch (err) {
-        error.InputClosed => throw(env, "LIBFX_NATIVE_CLOSED", "native runtime input is closed"),
-        error.InputQueueFull => throw(env, "LIBFX_NATIVE_BACKPRESSURE", "native runtime input queue is full"),
-        error.OutOfMemory => throw(env, "LIBFX_NATIVE_OOM", "could not queue native input"),
+        error.InputClosed => throw(env, "LIBX1_NATIVE_CLOSED", "native runtime input is closed"),
+        error.InputQueueFull => throw(env, "LIBX1_NATIVE_BACKPRESSURE", "native runtime input queue is full"),
+        error.OutOfMemory => throw(env, "LIBX1_NATIVE_OOM", "could not queue native input"),
     };
     var value: c.napi_value = undefined;
     _ = c.napi_get_undefined(env, &value);
@@ -807,7 +819,7 @@ fn drainCore(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_va
     if (!statusOk(env, c.napi_create_buffer(env, len, &data, &value), "could not allocate output Buffer")) return null;
     if (len == 0) return value;
     const written = runtime.output.drain(@as([*]u8, @ptrCast(data.?))[0..len]);
-    if (written != len) return throw(env, "LIBFX_NATIVE_IO", "native output changed while draining");
+    if (written != len) return throw(env, "LIBX1_NATIVE_IO", "native output changed while draining");
     return value;
 }
 
@@ -854,7 +866,7 @@ fn startCoreFetchResponse(env: c.napi_env, info: c.napi_callback_info) callconv(
     defer unlockRuntime(runtime_handle);
     var status: u32 = 0;
     if (c.napi_get_value_uint32(env, argv[2], &status) != c.napi_ok or status > std.math.maxInt(u16))
-        return throw(env, "LIBFX_INVALID_ARGUMENT", "fetch response status must be a uint16");
+        return throw(env, "LIBX1_INVALID_ARGUMENT", "fetch response status must be a uint16");
     return fetch_operation_value(env, runtime.fetch.startResponse(fetch_handle, @intCast(status)));
 }
 
@@ -869,7 +881,7 @@ fn pushCoreFetchResponse(env: c.napi_env, info: c.napi_callback_info) callconv(.
     if (!statusOk(env, c.napi_get_buffer_info(env, argv[2], &data, &len), "fetch response chunk requires a Buffer")) return null;
     const bytes = if (len == 0) &.{} else @as([*]const u8, @ptrCast(data.?))[0..len];
     const result = runtime.fetch.pushResponse(fetch_handle, bytes) catch
-        return throw(env, "LIBFX_NATIVE_OOM", "could not queue fetch response");
+        return throw(env, "LIBX1_NATIVE_OOM", "could not queue fetch response");
     return fetch_operation_value(env, result);
 }
 
@@ -941,7 +953,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) callco
     ensureThreadedIo();
     var api_version: c.napi_value = undefined;
     if (!statusOk(env, c.napi_create_uint32(env, 2, &api_version), "could not create API version")) return null;
-    if (!statusOk(env, c.napi_set_named_property(env, exports, "libfxApiVersion", api_version), "could not export API version")) return null;
+    if (!statusOk(env, c.napi_set_named_property(env, exports, "libx1ApiVersion", api_version), "could not export API version")) return null;
     if (!exportFunction(env, exports, "createCore", createCore)) return null;
     if (!exportFunction(env, exports, "writeCore", writeCore)) return null;
     if (!exportFunction(env, exports, "closeCore", closeCore)) return null;

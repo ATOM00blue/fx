@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>fx core debugger</title>
+  <title>x1 core debugger</title>
   <style>
     @import url("https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-mono/style.css");
     :root { color-scheme: dark; --bg: #000; --panel: #050505; --line: #242424; --muted: #777; --dim: #aaa; --text: #f2f2f2; }
@@ -43,7 +43,7 @@
   </style>
 </head>
 <body>
-  <header><h1>fx-core debugger</h1><span id="status">booting</span></header>
+  <header><h1>x1-core debugger</h1><span id="status">booting</span></header>
   <section id="controls" aria-label="Session controls">
     <label>Model<input id="model" class="model" list="models" disabled><datalist id="models"></datalist></label>
     <label>Mode<select id="mode" disabled></select></label>
@@ -56,9 +56,9 @@
     <button type="button" id="cancel" disabled>Cancel</button>
   </form>
   <script type="module">
-    import { createFxAgent, supportsJspi } from "./browser.js";
+    import { createX1Agent, supportsJspi } from "./browser.js";
 
-    const configPrefix = "fx.core.config.";
+    const configPrefix = "x1.core.config.";
     const configStore = {
       get(configId) { return localStorage.getItem(`${configPrefix}${configId}`); },
       set(configId, value) { localStorage.setItem(`${configPrefix}${configId}`, value); },
@@ -85,7 +85,7 @@
     const transportSelect = document.querySelector("#transport");
     transportSelect.value = transport;
     const startedAt = performance.now();
-    const test = window.__fxCoreTest = {
+    const test = window.__x1CoreTest = {
       state: "booting",
       transport,
       events: [],
@@ -169,11 +169,11 @@
       }
       return new Response(new ReadableStream({
         async start(controller) {
-          controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":"hello"}\n'));
+          controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":"hello"}\n'));
           await sleep(chunkDelay);
-          controller.enqueue(encoded.encode('data: {"type":"text-delta","delta":" world"}\n'));
-          controller.enqueue(encoded.encode('data: {"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":3},"outputTokens":{"total":2}}}\n'));
-          controller.enqueue(encoded.encode("data: [DONE]\n"));
+          controller.enqueue(encoded.encode('data: {"type":"response.output_text.delta","delta":" world"}\n'));
+          controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n\n'));
+          controller.enqueue(encoded.encode('data: {"type":"response.completed","response":{"id":"resp_sdk","status":"completed"}}\n'));
           controller.close();
         },
       }), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -281,11 +281,11 @@
       setState("unsupported");
     } else {
       try {
-        const agent = await createFxAgent({
+        const agent = await createX1Agent({
           wasm: location.hostname === "localhost" || location.hostname === "127.0.0.1"
-            ? "../zig-out/bin/fx-core.wasm"
-            : "./fx-core.wasm",
-          env: { AI_GATEWAY_API_KEY: localStorage.getItem("FX_API_KEY") || "sdk-test-key" },
+            ? "../zig-out/bin/x1-core.wasm"
+            : "./x1-core.wasm",
+          env: { X1_API_KEY: localStorage.getItem("X1_API_KEY") || "sdk-test-key" },
           fetch: dispatchFetch,
           onEvent: observe,
           onPermission: resolvePermission,

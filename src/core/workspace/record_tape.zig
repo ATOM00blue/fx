@@ -1,4 +1,4 @@
-//! FX_RECORD tape writer and replay reader.
+//! X1_RECORD tape writer and replay reader.
 
 const std = @import("std");
 const debug_trace = @import("../shared/debug_trace.zig");
@@ -56,27 +56,27 @@ pub fn configureFromEnv(
     workspace_root: []const u8,
     initial_cols: u16,
     initial_rows: u16,
-    fx_version: []const u8,
+    x1_version: []const u8,
     record_requested: bool,
 ) !void {
     _ = workspace_root;
 
-    const configured_path = if (io_mod.getenv("FX_RECORD")) |raw_path|
+    const configured_path = if (io_mod.getenv("X1_RECORD")) |raw_path|
         std.mem.trim(u8, raw_path, " \t\r\n")
     else
         "";
     if (configured_path.len > 0) {
-        configure(alloc, configured_path, initial_cols, initial_rows, fx_version) catch |err| {
+        configure(alloc, configured_path, initial_cols, initial_rows, x1_version) catch |err| {
             if (record_requested) return err;
             return;
         };
     } else if (record_requested) {
-        try configureAutomatic(alloc, initial_cols, initial_rows, fx_version);
+        try configureAutomatic(alloc, initial_cols, initial_rows, x1_version);
     } else {
         return;
     }
 
-    if (io_mod.getenv("FX_RECORD_INPUT")) |raw_value| {
+    if (io_mod.getenv("X1_RECORD_INPUT")) |raw_value| {
         const value = std.mem.trim(u8, raw_value, " \t\r\n");
         if (std.ascii.eqlIgnoreCase(value, "1") or
             std.ascii.eqlIgnoreCase(value, "true") or
@@ -95,25 +95,25 @@ pub fn configure(
     path: []const u8,
     initial_cols: u16,
     initial_rows: u16,
-    fx_version: []const u8,
+    x1_version: []const u8,
 ) !void {
-    try configureWithOptions(alloc, path, initial_cols, initial_rows, fx_version, false, false);
+    try configureWithOptions(alloc, path, initial_cols, initial_rows, x1_version, false, false);
 }
 
 fn configureAutomatic(
     alloc: Allocator,
     initial_cols: u16,
     initial_rows: u16,
-    fx_version: []const u8,
+    x1_version: []const u8,
 ) !void {
-    const home = if (io_mod.getenv("HOME")) |value| blk: {
+    const home = if (io_mod.homeDir()) |value| blk: {
         const trimmed = std.mem.trim(u8, value, " \t\r\n");
         break :blk if (trimmed.len > 0) trimmed else null;
     } else null;
     const root = if (home) |value|
         try profile_paths.recordingsDir(alloc, value)
     else
-        try std.fs.path.join(alloc, &.{ io_mod.getenv("TMPDIR") orelse "/tmp", "fx-recordings" });
+        try std.fs.path.join(alloc, &.{ io_mod.tempDir(), "x1-recordings" });
     defer alloc.free(root);
     try io_mod.makeDirRecursive(root);
 
@@ -122,10 +122,12 @@ fn configureAutomatic(
         var random_bytes: [6]u8 = undefined;
         io_mod.getIo().random(&random_bytes);
         const random_hex = std.fmt.bytesToHex(random_bytes, .lower);
-        const path = try std.fmt.allocPrint(alloc, "{s}/fx-record-{d}-{s}.fxtape", .{ root, nowMs(), random_hex });
+        // Compatibility exception: replay tapes keep the `.fxtape` extension so
+        // existing recordings remain openable after the FX to X1 rename.
+        const path = try std.fmt.allocPrint(alloc, "{s}/x1-record-{d}-{s}.fxtape", .{ root, nowMs(), random_hex });
         defer alloc.free(path);
 
-        configureWithOptions(alloc, path, initial_cols, initial_rows, fx_version, true, true) catch |err| switch (err) {
+        configureWithOptions(alloc, path, initial_cols, initial_rows, x1_version, true, true) catch |err| switch (err) {
             error.PathAlreadyExists => continue,
             else => return err,
         };
@@ -139,7 +141,7 @@ fn configureWithOptions(
     path: []const u8,
     initial_cols: u16,
     initial_rows: u16,
-    fx_version: []const u8,
+    x1_version: []const u8,
     exclusive: bool,
     private: bool,
 ) !void {
@@ -157,7 +159,7 @@ fn configureWithOptions(
     const owned_path = try alloc.dupe(u8, path);
     errdefer alloc.free(owned_path);
 
-    const header = buildHeader(initial_cols, initial_rows, fx_version);
+    const header = buildHeader(initial_cols, initial_rows, x1_version);
     try file.writeStreamingAll(zio, &header.fixed);
     if (header.version_tail.len > 0) {
         try file.writeStreamingAll(zio, header.version_tail);
@@ -181,7 +183,7 @@ fn openTape(path: []const u8, exclusive: bool, private: bool) !std.Io.File {
             return std.Io.Dir.createFileAbsolute(zio, path, .{
                 .truncate = !exclusive,
                 .exclusive = exclusive,
-                .permissions = .fromMode(0o600),
+                .permissions = io_mod.permissionsFromMode(0o600),
             });
         }
         return std.Io.Dir.createFileAbsolute(zio, path, .{ .truncate = !exclusive, .exclusive = exclusive });
@@ -190,7 +192,7 @@ fn openTape(path: []const u8, exclusive: bool, private: bool) !std.Io.File {
         return std.Io.Dir.cwd().createFile(zio, path, .{
             .truncate = !exclusive,
             .exclusive = exclusive,
-            .permissions = .fromMode(0o600),
+            .permissions = io_mod.permissionsFromMode(0o600),
         });
     }
     return std.Io.Dir.cwd().createFile(zio, path, .{ .truncate = !exclusive, .exclusive = exclusive });
@@ -201,10 +203,10 @@ const Header = struct {
     version_tail: []const u8,
 };
 
-fn buildHeader(initial_cols: u16, initial_rows: u16, fx_version: []const u8) Header {
+fn buildHeader(initial_cols: u16, initial_rows: u16, x1_version: []const u8) Header {
     var header: Header = .{
         .fixed = undefined,
-        .version_tail = fx_version,
+        .version_tail = x1_version,
     };
     @memcpy(header.fixed[0..magic.len], magic);
     var idx: usize = magic.len;
@@ -214,7 +216,7 @@ fn buildHeader(initial_cols: u16, initial_rows: u16, fx_version: []const u8) Hea
     idx += 2;
     std.mem.writeInt(i64, header.fixed[idx..][0..8], nowMs(), .little);
     idx += 8;
-    header.fixed[idx] = @intCast(@min(fx_version.len, @as(usize, 255)));
+    header.fixed[idx] = @intCast(@min(x1_version.len, @as(usize, 255)));
     return header;
 }
 
@@ -699,7 +701,7 @@ test "requested recording uses the temporary fallback when HOME is empty" {
     defer status.deinit(alloc);
     switch (status) {
         .active => |path| {
-            try testing.expect(std.mem.startsWith(u8, path, "/tmp/fx-recordings/"));
+            try testing.expect(std.mem.startsWith(u8, path, "/tmp/x1-recordings/"));
             shutdown();
             if (std.fs.path.isAbsolute(path)) {
                 std.Io.Dir.deleteFileAbsolute(io_mod.getIo(), path) catch {};
@@ -728,8 +730,8 @@ test "configureFromEnv enables stdin for the accepted truthy values only" {
 
         var env = std.process.Environ.Map.init(alloc);
         defer env.deinit();
-        try env.put("FX_RECORD", path);
-        try env.put("FX_RECORD_INPUT", value);
+        try env.put("X1_RECORD", path);
+        try env.put("X1_RECORD_INPUT", value);
 
         shutdown();
         io_mod.setEnvironMap(&env);
@@ -753,8 +755,8 @@ test "configureFromEnv enables stdin for the accepted truthy values only" {
     defer alloc.free(path);
     var env = std.process.Environ.Map.init(alloc);
     defer env.deinit();
-    try env.put("FX_RECORD", path);
-    try env.put("FX_RECORD_INPUT", "yes");
+    try env.put("X1_RECORD", path);
+    try env.put("X1_RECORD_INPUT", "yes");
 
     shutdown();
     io_mod.setEnvironMap(&env);

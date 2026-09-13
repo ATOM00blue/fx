@@ -322,19 +322,13 @@ fn authPickerInteractionHint(view: auth_runtime.PickerView, width: u16) ?[]const
         "↑↓ Move  Enter  Esc",
         "Enter Esc",
     };
-    const codex_sign_in_variants = [_][]const u8{
-        "Enter reopens browser · Esc cancels",
-        "Enter reopens  Esc cancels",
-        "Enter  Esc",
-        "Enter Esc",
-    };
-    const grok_browser_variants = [_][]const u8{
+    const subscription_browser_variants = [_][]const u8{
         "Enter reopens browser · Tab enters code · Esc cancels",
         "Enter reopens  Tab code  Esc cancels",
         "Enter  Tab  Esc",
         "Enter Tab Esc",
     };
-    const grok_manual_variants = [_][]const u8{
+    const subscription_manual_variants = [_][]const u8{
         "Enter submits code · Tab returns to browser · Esc cancels",
         "Enter submits  Tab browser  Esc cancels",
         "Enter  Tab  Esc",
@@ -346,12 +340,10 @@ fn authPickerInteractionHint(view: auth_runtime.PickerView, width: u16) ?[]const
         .provider, .switch_credential => selection_variants,
         .change_team => team_variants,
         .sign_in => switch (view.sign_in_source) {
-            .chatgpt_subscription => codex_sign_in_variants,
-            .grok_subscription => if (view.sign_in_code_visible)
-                grok_manual_variants
+            .layerx1_subscription => if (view.sign_in_code_visible)
+                subscription_manual_variants
             else
-                grok_browser_variants,
-            else => return null,
+                subscription_browser_variants,
         },
         .api_key => return null,
     };
@@ -812,7 +804,7 @@ fn startComposedInputRow(
     if (started.*) return;
     started.* = true;
     const prefix = visual_layout.inputPrefix(row_index);
-    try row.appendSlice(alloc, ui_render.hint_style);
+    try row.appendSlice(alloc, ui_render.x1_accent_style);
     try row_text.appendClipped(alloc, row, if (hidden_above) "┃↑" else "┃", width);
     try row.appendSlice(alloc, ui_render.reset_style);
     if (!hidden_above and width > 1) try row_text.appendClipped(alloc, row, " ", width - 1);
@@ -1139,6 +1131,36 @@ test "queued prompt card wears composer chrome without a card background" {
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, card, "\n"));
 }
 
+test "composer identity mark uses the x1 accent without coloring input text" {
+    const alloc = std.testing.allocator;
+    ui_render.initTheme(false, null);
+    defer ui_render.initTheme(false, null);
+
+    const source = visual_layout.Source{
+        .input = "hello",
+        .cursor = 5,
+        .terminal_cols = 40,
+    };
+    const summary = visual_layout.summarize(source, null);
+    const window = visual_layout.visibleWindow(summary.cursor.row_index, summary.total_rows, 1);
+    var rows = try composeVisibleInputRows(alloc, source, window);
+    defer rows.deinit(alloc);
+
+    try std.testing.expectEqual(@as(usize, 1), rows.rows.items.len);
+    const row = rows.rows.items[0].items;
+    const accent_mark = try std.mem.concat(alloc, u8, &.{ ui_render.x1_accent_style, "┃" });
+    defer alloc.free(accent_mark);
+    const accent_hello = try std.mem.concat(alloc, u8, &.{ ui_render.x1_accent_style, "hello" });
+    defer alloc.free(accent_hello);
+    const hint_mark = try std.mem.concat(alloc, u8, &.{ ui_render.hint_style, "┃" });
+    defer alloc.free(hint_mark);
+    try std.testing.expect(std.mem.find(u8, row, accent_mark) != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, row, ui_render.x1_accent_style));
+    try std.testing.expect(std.mem.find(u8, row, accent_hello) == null);
+    try std.testing.expect(std.mem.find(u8, row, "hello") != null);
+    try std.testing.expect(std.mem.find(u8, row, hint_mark) == null);
+}
+
 test "footer raw input row composition matches hard newlines and soft wraps" {
     const alloc = std.testing.allocator;
     var hard_input = InputRuntime{};
@@ -1402,7 +1424,7 @@ test "footer suppresses slash rows for streaming model-shaped input" {
         .name = "model-helper",
         .description = "model helper",
         .path = "/tmp/model-helper/SKILL.md",
-        .source = .global_fx,
+        .source = .global_x1,
     }};
 
     for ([_][]const u8{ "/model", "/model " }) |text| {
@@ -1492,17 +1514,12 @@ test "compose hint row replaces model status with subscription sign-in controls"
         expected: []const u8,
     }{
         .{
-            .source = .chatgpt_subscription,
-            .manual_code_visible = false,
-            .expected = "Enter reopens browser · Esc cancels",
-        },
-        .{
-            .source = .grok_subscription,
+            .source = .layerx1_subscription,
             .manual_code_visible = false,
             .expected = "Enter reopens browser · Tab enters code · Esc cancels",
         },
         .{
-            .source = .grok_subscription,
+            .source = .layerx1_subscription,
             .manual_code_visible = true,
             .expected = "Enter submits code · Tab returns to browser · Esc cancels",
         },
@@ -1673,7 +1690,7 @@ test "compose hint row prioritizes red yolo warning with compact fallback" {
     var input = InputRuntime{};
     defer input.deinit(std.testing.allocator);
     var ctx = testRenderContext(&input);
-    ctx.danger_status = "YOLO enabled: fx permission checks disabled";
+    ctx.danger_status = "YOLO enabled: x1 permission checks disabled";
     ctx.danger_status_compact = "YOLO: unrestricted";
 
     var full = try composeHintRow(std.testing.allocator, false, null, ctx, 80);
@@ -1697,7 +1714,7 @@ test "compose hint row yields the yolo warning to a pending ctrl+c quit hint" {
     var input = InputRuntime{};
     defer input.deinit(std.testing.allocator);
     var ctx = testRenderContext(&input);
-    ctx.danger_status = "YOLO enabled: fx permission checks disabled";
+    ctx.danger_status = "YOLO enabled: x1 permission checks disabled";
     ctx.danger_status_compact = "YOLO: unrestricted";
     ctx.ctrl_c_pending = true;
 

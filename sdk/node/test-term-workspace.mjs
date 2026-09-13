@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import xtermHeadless from "@xterm/headless";
-import { createFxTerminal, supportsJspi, xtermAdapter } from "../node.js";
+import { createX1Terminal, supportsJspi, xtermAdapter } from "../node.js";
 
 const { Terminal } = xtermHeadless;
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
-const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/fx-term.wasm"));
+const wasmPath = resolve(process.argv[2] || resolve(scriptDir, "../../zig-out/bin/x1-term.wasm"));
 if (!supportsJspi()) process.exit(2);
 
 const terminal = new Terminal({ cols: 100, rows: 34, allowProposedApi: true, scrollback: 3000 });
@@ -66,71 +66,68 @@ const workspace = {
 
 function sse(events) {
   return new Response(
-    `${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`,
+    `${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}`,
     { headers: { "content-type": "text/event-stream" } },
   );
 }
 
 function toolCall(id, command) {
   return sse([
-    { type: "tool-call", toolCallId: id, toolName: "terminal", input: { action: "exec", command } },
-    { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" } },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { type: "function_call", call_id: id, name: "terminal", arguments: "" },
+    },
+    {
+      type: "response.function_call_arguments.done",
+      output_index: 0,
+      arguments: JSON.stringify({ action: "exec", command }),
+    },
+    { type: "response.completed", response: { id: "resp_sdk", status: "completed" } },
   ]);
 }
 
 function terminalToolCalls(calls) {
-  const events = calls.flatMap(({ id, input }) => {
-    const serialized = JSON.stringify(input);
-    const deltas = [];
-    for (let offset = 0; offset < serialized.length; offset += 4096) {
-      deltas.push({ type: "tool-input-delta", id, delta: serialized.slice(offset, offset + 4096) });
-    }
-    return [
-      { type: "tool-input-start", id, toolName: "terminal" },
-      ...deltas,
-      { type: "tool-input-end", id },
-      { type: "tool-call", toolCallId: id, toolName: "terminal" },
-    ];
-  });
-  const responseEvents = [
-    ...events,
-    { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" } },
-  ];
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const event of responseEvents) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-      }
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      controller.close();
+  const events = calls.flatMap(({ id, input }, outputIndex) => [
+    {
+      type: "response.output_item.added",
+      output_index: outputIndex,
+      item: { type: "function_call", call_id: id, name: "terminal", arguments: "" },
     },
-  }), { headers: { "content-type": "text/event-stream" } });
+    {
+      type: "response.function_call_arguments.done",
+      output_index: outputIndex,
+      arguments: JSON.stringify(input),
+    },
+  ]);
+  events.push({ type: "response.completed", response: { id: "resp_sdk", status: "completed" } });
+  return sse(events);
 }
 
 function textResponse(value) {
   return sse([
-    { type: "text-delta", delta: value },
-    { type: "finish", finishReason: { unified: "stop", raw: "stop" } },
+    { type: "response.output_text.delta", delta: value },
+    { type: "response.completed", response: { id: "resp_sdk", status: "completed" } },
   ]);
 }
 
-function toolResult(body, id) {
-  const prompt = body.prompt || [];
+function itemsAfterLastUser(body) {
+  const input = body.input || [];
   let lastUser = -1;
-  for (let index = prompt.length - 1; index >= 0; index -= 1) {
-    if (prompt[index].role === "user") {
-      lastUser = index;
-      break;
-    }
+  for (let index = 0; index < input.length; index += 1) {
+    if (input[index].role === "user") lastUser = index;
   }
-  return prompt.slice(lastUser + 1)
-    .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-    .find((part) => part.type === "tool-result" && part.toolCallId === id);
+  return lastUser < 0 ? input : input.slice(lastUser + 1);
+}
+
+function toolResult(body, id) {
+  return itemsAfterLastUser(body).find((item) => item.type === "function_call_output" && item.call_id === id);
 }
 
 function latestUserText(body) {
-  for (let index = (body.prompt || []).length - 1; index >= 0; index -= 1) {
-    const message = body.prompt[index];
+  const input = body.input || [];
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const message = input[index];
     if (message.role === "user") return JSON.stringify(message.content);
   }
   return "";
@@ -152,12 +149,12 @@ const fetch = async (_url, init = {}) => {
   }
   const body = JSON.parse(requestDecoder.decode(init.body));
   if (!checkedBrowserCapabilityContext) {
-    const serializedPrompt = JSON.stringify(body.prompt || []);
+    const serializedPrompt = `${body.instructions || ""}${JSON.stringify(body.input || [])}`;
     for (const guidance of [
-      "embedded browser version of fx",
+      "embedded browser version of x1",
       "Public web fetch, web search, and general outbound network access are unavailable",
       "Do not attempt curl, wget",
-      "locally installed fx provides the full tool suite",
+      "locally installed x1 provides the full tool suite",
     ]) {
       if (!serializedPrompt.includes(guidance)) {
         throw new Error(`browser capability context omitted ${guidance}: ${serializedPrompt}`);
@@ -169,7 +166,7 @@ const fetch = async (_url, init = {}) => {
     if (body.tools?.length !== 1 || body.tools[0]?.name !== "terminal") {
       throw new Error(`workspace advertised unexpected tools: ${JSON.stringify(body.tools)}`);
     }
-    const schema = body.tools[0]?.inputSchema;
+    const schema = body.tools[0]?.parameters;
     if (JSON.stringify(schema?.required) !== JSON.stringify(["action", "command"]) ||
         schema?.properties?.action?.enum?.[0] !== "exec" ||
         schema?.properties?.command?.maxLength !== 65_536 ||
@@ -219,18 +216,18 @@ const fetch = async (_url, init = {}) => {
     ]);
   }
   if (prompt.includes("unsupported web request")) {
-    return textResponse("This embedded browser cannot access the public web. Install fx locally for the full tool suite.");
+    return textResponse("This embedded browser cannot access the public web. Install x1 locally for the full tool suite.");
   }
   if (prompt.includes("workspace recovery")) return textResponse("session stayed alive");
   throw new Error(`unexpected gateway request: ${JSON.stringify(body)}`);
 };
 
 let stderr = "";
-const runtime = await createFxTerminal({
+const runtime = await createX1Terminal({
   backend: "wasm",
   wasm: await readFile(wasmPath),
   terminal: xtermAdapter(terminal),
-  env: { AI_GATEWAY_API_KEY: "workspace-key" },
+  env: { X1_API_KEY: "workspace-key" },
   fetch,
   configStore: { get(id) { return config.get(id) ?? null; }, set(id, value) { config.set(id, value); } },
   stderr(chunk) { stderr += stderrDecoder.decode(chunk, { stream: true }); },
@@ -257,7 +254,7 @@ async function prompt(value, expected) {
   await waitFor(() => grid().includes(expected), expected);
 }
 
-await waitFor(() => grid().includes("𝒇x"), "startup");
+await waitFor(() => grid().includes("layerx1.com"), "startup");
 await prompt("workspace success", "success record checked");
 await prompt("workspace truncation", "truncation record checked");
 await prompt("workspace timeout", "timeout mapping checked");
@@ -275,7 +272,7 @@ const exitCode = await Promise.race([
   runtime.exited,
   new Promise((_, reject) => setTimeout(() => reject(new Error("workspace runtime exit timeout")), 5000)),
 ]);
-if (exitCode !== 0) throw new Error(`fx-term exited with ${exitCode}`);
+if (exitCode !== 0) throw new Error(`x1-term exited with ${exitCode}`);
 if (!checkedToolProjection) throw new Error("workspace tool projection was not checked");
 if (!checkedBrowserCapabilityContext) throw new Error("browser capability context was not checked");
 if (execCalls.join(",") !== "printf adapter-success,generate-truncated-output,timeout-command,hold-command") {

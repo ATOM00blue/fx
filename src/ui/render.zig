@@ -17,8 +17,8 @@ pub const input_prefix = "❯ ";
 pub const TerminalRgb = user_message_card.Rgb;
 pub const reset_style = "\x1b[0m";
 pub const bold_style = "\x1b[1m";
-pub const app_name = "fx";
-pub const right_tag = "/fx";
+pub const app_name = "x1";
+pub const right_tag = "/x1";
 pub const ask_activity_label = "⏺ Asking";
 
 const user_message_card = @import("assistant/user_message_card.zig");
@@ -37,16 +37,21 @@ pub var dim_style: []const u8 = "\x1b[38;5;245m";
 pub var warning_style: []const u8 = "\x1b[38;5;252m";
 pub var green_style: []const u8 = "\x1b[38;5;252m";
 pub var red_style: []const u8 = "\x1b[38;5;252m";
-pub var diff_added_style: []const u8 = "\x1b[38;5;252m";
-pub var diff_removed_style: []const u8 = "\x1b[38;5;252m";
-// The line number and +/- sign carry the only color in an otherwise
-// monochrome diff: green for additions (#30A46C), red for deletions
-// (#E5484D). The line text stays neutral. Truecolor when the terminal
+pub var diff_added_style: []const u8 = diff_added_line_fallback;
+pub var diff_removed_style: []const u8 = diff_removed_line_fallback;
+// Diff rows carry full-line color like a git diff: green text for added
+// rows, red for removed rows, with the line number and sign in the same
+// hue. The same colors read well on light and dark backgrounds, so they
+// are set once rather than per-theme. Truecolor when the terminal
 // supports it, 256-color fallback otherwise.
+const diff_added_line_truecolor = "\x1b[38;2;48;164;108m";
+const diff_removed_line_truecolor = "\x1b[38;2;229;72;77m";
+const diff_added_line_fallback = "\x1b[38;5;71m";
+const diff_removed_line_fallback = "\x1b[38;5;167m";
 const diff_added_marker_truecolor = "\x1b[38;2;48;164;108m";
 const diff_removed_marker_truecolor = "\x1b[38;2;229;72;77m";
-const diff_added_marker_fallback = "\x1b[38;5;71m";
-const diff_removed_marker_fallback = "\x1b[38;5;167m";
+pub const diff_added_marker_fallback = "\x1b[38;5;71m";
+pub const diff_removed_marker_fallback = "\x1b[38;5;167m";
 pub var diff_added_marker_style: []const u8 = diff_added_marker_fallback;
 pub var diff_removed_marker_style: []const u8 = diff_removed_marker_fallback;
 pub var approval_button_active_style: []const u8 = "\x1b[48;5;255m\x1b[38;5;235m\x1b[1m";
@@ -54,12 +59,43 @@ pub var approval_button_inactive_style: []const u8 = "\x1b[48;5;239m\x1b[38;5;25
 pub var selected_completion_style: []const u8 = "\x1b[1;38;5;255m";
 // Statusbar permissions "auto": a step brighter than the statusline gray.
 pub var permission_auto_style: []const u8 = "\x1b[38;5;252m";
+// Restrained X1 blue. Color only (no bold). Reuse for the Thinking dot.
+// Dark #2EB8E6 / light #177FA6, with 256-color fallbacks of equal SGR width
+// so transcript theme retint can swap them without shifting geometry.
+pub const x1_accent_dark_rgb: TerminalRgb = .{ .r = 46, .g = 184, .b = 230 };
+pub const x1_accent_light_rgb: TerminalRgb = .{ .r = 23, .g = 127, .b = 166 };
+pub const x1_accent_truecolor_dark = "\x1b[38;2;46;184;230m";
+pub const x1_accent_truecolor_light = "\x1b[38;2;23;127;166m";
+pub const x1_accent_fallback_dark = "\x1b[38;5;74m";
+pub const x1_accent_fallback_light = "\x1b[38;5;31m";
+pub var x1_accent_style: []const u8 = x1_accent_truecolor_dark;
 var active_terminal_background: ?TerminalRgb = null;
 
 var truecolor_enabled: bool = true;
+var color_enabled: bool = true;
 
 pub fn setTruecolorSupport(enabled: bool) void {
     truecolor_enabled = enabled;
+}
+
+pub fn setColorSupport(enabled: bool) void {
+    color_enabled = enabled;
+}
+
+fn applyAccentStyle() void {
+    if (!color_enabled) {
+        x1_accent_style = "";
+        return;
+    }
+    if (is_light) {
+        x1_accent_style = if (truecolor_enabled) x1_accent_truecolor_light else x1_accent_fallback_light;
+    } else {
+        x1_accent_style = if (truecolor_enabled) x1_accent_truecolor_dark else x1_accent_fallback_dark;
+    }
+}
+
+pub fn pickerSelectionStyle(selected: bool) []const u8 {
+    return if (selected) x1_accent_style else dim_style;
 }
 
 pub fn initTheme(light: bool, terminal_bg: ?TerminalRgb) void {
@@ -78,8 +114,6 @@ pub fn initTheme(light: bool, terminal_bg: ?TerminalRgb) void {
         warning_style = "\x1b[38;5;238m";
         green_style = "\x1b[38;5;238m";
         red_style = "\x1b[38;5;238m";
-        diff_added_style = "\x1b[38;5;238m";
-        diff_removed_style = "\x1b[38;5;238m";
         approval_button_active_style = "\x1b[48;5;236m\x1b[38;5;255m\x1b[1m";
         approval_button_inactive_style = "\x1b[48;5;251m\x1b[38;5;237m";
         selected_completion_style = "\x1b[1;38;5;235m";
@@ -96,24 +130,27 @@ pub fn initTheme(light: bool, terminal_bg: ?TerminalRgb) void {
         warning_style = "\x1b[38;5;252m";
         green_style = "\x1b[38;5;252m";
         red_style = "\x1b[38;5;252m";
-        diff_added_style = "\x1b[38;5;252m";
-        diff_removed_style = "\x1b[38;5;252m";
         approval_button_active_style = "\x1b[48;5;255m\x1b[38;5;235m\x1b[1m";
         approval_button_inactive_style = "\x1b[48;5;239m\x1b[38;5;255m";
         selected_completion_style = "\x1b[1;38;5;255m";
         permission_auto_style = "\x1b[38;5;252m";
     }
 
-    // The diff marker green/red reads the same on light and dark, so it is set
-    // once here rather than per-theme.
+    // Full-line diff green/red reads the same on light and dark, so it is
+    // set once here rather than per-theme, alongside the marker accents.
     if (truecolor_enabled) {
+        diff_added_style = diff_added_line_truecolor;
+        diff_removed_style = diff_removed_line_truecolor;
         diff_added_marker_style = diff_added_marker_truecolor;
         diff_removed_marker_style = diff_removed_marker_truecolor;
     } else {
+        diff_added_style = diff_added_line_fallback;
+        diff_removed_style = diff_removed_line_fallback;
         diff_added_marker_style = diff_added_marker_fallback;
         diff_removed_marker_style = diff_removed_marker_fallback;
     }
 
+    applyAccentStyle();
     user_message_card.setStyle(light, terminal_bg);
 }
 
@@ -168,9 +205,12 @@ pub fn buildInputLineForRow(input: []const u8, cursor: usize, line_index: usize,
 const build_channel = update_target.Channel.parse(build_options.update_channel) orelse .stable;
 const welcome_build_label_bytes: usize = 96;
 const dev_revision_bytes: usize = 7;
+const welcome_mark = "X1";
+const welcome_url = "layerx1.com";
+const welcome_box_pad: usize = 1;
 
 /// Dev builds ship on every merged PR, so the version alone cannot identify the
-/// binary: the header carries the commit and a brighter `[dev]` tag.
+/// binary: the header carries the commit and a `[dev]` tag.
 fn writeBuildLabel(
     out: []u8,
     channel: update_target.Channel,
@@ -179,14 +219,42 @@ fn writeBuildLabel(
 ) ![]const u8 {
     if (channel != .dev) return std.fmt.bufPrint(out, "v{s}", .{version_text});
     if (revision.len < dev_revision_bytes or std.mem.eql(u8, revision, "unknown")) {
-        return std.fmt.bufPrint(out, "v{s} {s}[dev]{s}", .{ version_text, hint_style, dim_style });
+        return std.fmt.bufPrint(out, "v{s} [dev]", .{version_text});
     }
-    return std.fmt.bufPrint(out, "v{s}-{s} {s}[dev]{s}", .{
+    return std.fmt.bufPrint(out, "v{s}-{s} [dev]", .{
         version_text,
         revision[0..dev_revision_bytes],
-        hint_style,
-        dim_style,
     });
+}
+
+fn writeRepeated(writer: *std.Io.Writer, piece: []const u8, count: usize) !void {
+    var i: usize = 0;
+    while (i < count) : (i += 1) try writer.writeAll(piece);
+}
+
+fn writeBoxRule(writer: *std.Io.Writer, left: []const u8, right: []const u8, inner: usize) !void {
+    try writer.writeAll(left);
+    try writeRepeated(writer, "─", inner);
+    try writer.writeAll(right);
+    try writer.writeByte('\n');
+}
+
+fn writeBoxLine(writer: *std.Io.Writer, text: []const u8, inner: usize, emphasize: bool) !void {
+    const leftover = inner - text.len;
+    const left = leftover / 2;
+    try writer.writeAll("│");
+    try writeRepeated(writer, " ", left);
+    if (emphasize) {
+        try writer.writeAll(bold_style);
+        try writer.writeAll(x1_accent_style);
+        try writer.writeAll(text);
+        try writer.writeAll(reset_style);
+        try writer.writeAll(hint_style);
+    } else {
+        try writer.writeAll(text);
+    }
+    try writeRepeated(writer, " ", leftover - left);
+    try writer.writeAll("│\n");
 }
 
 pub fn welcomeMessage(alloc: std.mem.Allocator) ![]u8 {
@@ -197,11 +265,21 @@ pub fn welcomeMessage(alloc: std.mem.Allocator) ![]u8 {
         main.version,
         build_options.git_commit,
     );
-    return std.fmt.allocPrint(
-        alloc,
-        "{s}𝒇x{s}{s} {s} · Run /help for commands" ++ reset_style ++ "\n\n",
-        .{ subtitle_style, reset_style, dim_style, build_label },
-    );
+    const inner = @max(welcome_mark.len, @max(build_label.len, welcome_url.len)) + (welcome_box_pad * 2);
+
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    errdefer out.deinit();
+    const writer = &out.writer;
+
+    try writer.writeAll(hint_style);
+    try writeBoxRule(writer, "┌", "┐", inner);
+    try writeBoxLine(writer, welcome_mark, inner, true);
+    try writeBoxLine(writer, build_label, inner, false);
+    try writeBoxLine(writer, welcome_url, inner, false);
+    try writeBoxRule(writer, "└", "┘", inner);
+    try writer.writeAll(reset_style);
+    try writer.writeAll("\n");
+    return out.toOwnedSlice();
 }
 
 pub const StatuslineItems = struct {
@@ -685,7 +763,7 @@ fn titleOutput(raw: ?*anyopaque) std.Io.File {
 }
 
 const terminal_title_osc_prefix = "\x1b]2;";
-const terminal_title_display_prefix = "fx · ";
+const terminal_title_display_prefix = "x1 · ";
 const terminal_title_max_content_bytes: usize = 128;
 const terminal_title_max_label_bytes = terminal_title_max_content_bytes - terminal_title_display_prefix.len;
 
@@ -751,7 +829,7 @@ test "terminal title writes the label to the caller's output file" {
     defer written_file.close(io_mod.getIo());
     const written = try io_mod.readFileToEnd(alloc, &written_file, 128);
     defer alloc.free(written);
-    try std.testing.expectEqualStrings("\x1b]2;fx · release notes\x07", written);
+    try std.testing.expectEqualStrings("\x1b]2;x1 · release notes\x07", written);
 }
 
 test "terminal title sanitizes and bounds untrusted labels" {
@@ -768,7 +846,7 @@ test "terminal title sanitizes and bounds untrusted labels" {
     const written = try io_mod.readFileToEnd(alloc, &written_file, 512);
     defer alloc.free(written);
     try std.testing.expect(written.len <= terminal_title_osc_prefix.len + terminal_title_max_content_bytes + 1);
-    try std.testing.expect(std.mem.startsWith(u8, written, "\x1b]2;fx · safe]2;owned"));
+    try std.testing.expect(std.mem.startsWith(u8, written, "\x1b]2;x1 · safe]2;owned"));
     try std.testing.expect(std.mem.endsWith(u8, written, "...\x07"));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, written, "\x07"));
     try std.testing.expect(std.mem.find(u8, written[terminal_title_osc_prefix.len..], "\x1b") == null);
@@ -797,7 +875,7 @@ pub fn formatResumeHandoff(
     terminal_cols: u16,
 ) ![]const u8 {
     const label = "Continue session with:";
-    const command = "fx --resume ";
+    const command = "x1 --resume ";
     const single_row_width = label.len + 1 + command.len + session_id.len;
     const separator = if (single_row_width <= terminal_cols) " " else "\n  ";
     return std.fmt.bufPrint(
@@ -821,18 +899,18 @@ test "resume handoff uses one row only when the full instruction fits" {
     initTheme(false, null);
     defer initTheme(false, null);
 
-    const single_row = "Continue session with: fx --resume session-123";
+    const single_row = "Continue session with: x1 --resume session-123";
     var exact_buffer: [128]u8 = undefined;
     const exact = try formatResumeHandoff(&exact_buffer, "session-123", single_row.len);
     try std.testing.expectEqualStrings(
-        "\x1b[38;5;245mContinue session with: fx --resume session-123\x1b[0m\n",
+        "\x1b[38;5;245mContinue session with: x1 --resume session-123\x1b[0m\n",
         exact,
     );
 
     var narrow_buffer: [128]u8 = undefined;
     const narrow = try formatResumeHandoff(&narrow_buffer, "session-123", single_row.len - 1);
     try std.testing.expectEqualStrings(
-        "\x1b[38;5;245mContinue session with:\n  fx --resume session-123\x1b[0m\n",
+        "\x1b[38;5;245mContinue session with:\n  x1 --resume session-123\x1b[0m\n",
         narrow,
     );
 }
@@ -844,7 +922,7 @@ test "resume handoff follows the active muted theme shade" {
     var buffer: [128]u8 = undefined;
     const message = try formatResumeHandoff(&buffer, "session-123", 80);
     try std.testing.expectEqualStrings(
-        "\x1b[38;5;247mContinue session with: fx --resume session-123\x1b[0m\n",
+        "\x1b[38;5;247mContinue session with: x1 --resume session-123\x1b[0m\n",
         message,
     );
 }
@@ -875,16 +953,19 @@ test "initTheme selects the light inline code foreground" {
     try std.testing.expectEqualStrings("run \x1b[38;5;247mzig build\x1b[39m now\n", out.items);
 }
 
-test "welcomeMessage shows version and help hint" {
+test "welcomeMessage shows boxed mark, version, and company url" {
     const message = try welcomeMessage(std.testing.allocator);
     defer std.testing.allocator.free(message);
 
-    try std.testing.expect(std.mem.find(u8, message, "𝒇x") != null);
+    try std.testing.expect(std.mem.find(u8, message, "┌") != null);
+    try std.testing.expect(std.mem.find(u8, message, "└") != null);
+    try std.testing.expect(std.mem.find(u8, message, welcome_mark) != null);
     try std.testing.expect(std.mem.find(u8, message, main.version) != null);
-    try std.testing.expect(std.mem.find(u8, message, "/help") != null);
+    try std.testing.expect(std.mem.find(u8, message, welcome_url) != null);
+    try std.testing.expect(std.mem.find(u8, message, "/help") == null);
 }
 
-test "welcomeMessage keeps only the app name bright" {
+test "welcomeMessage keeps only the mark bright" {
     initTheme(false, null);
     const message = try welcomeMessage(std.testing.allocator);
     defer std.testing.allocator.free(message);
@@ -896,14 +977,23 @@ test "welcomeMessage keeps only the app name bright" {
         main.version,
         build_options.git_commit,
     );
-    const expected = try std.fmt.allocPrint(
-        std.testing.allocator,
-        "{s}𝒇x{s}{s} {s} · Run /help for commands" ++ reset_style ++ "\n\n",
-        .{ subtitle_style, reset_style, dim_style, build_label },
-    );
-    defer std.testing.allocator.free(expected);
+    const inner = @max(welcome_mark.len, @max(build_label.len, welcome_url.len)) + (welcome_box_pad * 2);
 
-    try std.testing.expectEqualStrings(expected, message);
+    var expected_out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer expected_out.deinit();
+    const writer = &expected_out.writer;
+    try writer.writeAll(hint_style);
+    try writeBoxRule(writer, "┌", "┐", inner);
+    try writeBoxLine(writer, welcome_mark, inner, true);
+    try writeBoxLine(writer, build_label, inner, false);
+    try writeBoxLine(writer, welcome_url, inner, false);
+    try writeBoxRule(writer, "└", "┘", inner);
+    try writer.writeAll(reset_style);
+    try writer.writeAll("\n");
+
+    try std.testing.expectEqualStrings(expected_out.written(), message);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, message, x1_accent_style));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, message, bold_style));
 }
 
 test "build label stays bare on the stable channel" {
@@ -912,20 +1002,12 @@ test "build label stays bare on the stable channel" {
     try std.testing.expectEqualStrings("v0.0.4", label);
 }
 
-test "dev build label carries the commit and restores the dim run after the tag" {
+test "dev build label carries the commit and a plain dev tag" {
     initTheme(false, null);
 
     var buf: [welcome_build_label_bytes]u8 = undefined;
     const label = try writeBuildLabel(&buf, .dev, "0.0.5", "abcdef123456");
-
-    const expected = try std.fmt.allocPrint(
-        std.testing.allocator,
-        "v0.0.5-abcdef1 {s}[dev]{s}",
-        .{ hint_style, dim_style },
-    );
-    defer std.testing.allocator.free(expected);
-
-    try std.testing.expectEqualStrings(expected, label);
+    try std.testing.expectEqualStrings("v0.0.5-abcdef1 [dev]", label);
 }
 
 test "dev build label drops an unresolved revision" {
@@ -933,15 +1015,7 @@ test "dev build label drops an unresolved revision" {
 
     var buf: [welcome_build_label_bytes]u8 = undefined;
     const label = try writeBuildLabel(&buf, .dev, "0.0.5", "unknown");
-
-    const expected = try std.fmt.allocPrint(
-        std.testing.allocator,
-        "v0.0.5 {s}[dev]{s}",
-        .{ hint_style, dim_style },
-    );
-    defer std.testing.allocator.free(expected);
-
-    try std.testing.expectEqualStrings(expected, label);
+    try std.testing.expectEqualStrings("v0.0.5 [dev]", label);
 }
 
 test "buildHintLine hides effort when it is auto" {
@@ -1014,11 +1088,11 @@ test "buildHintLine omits the session segment when no title is cached" {
 test "buildHintLine shows the workspace and Git branch" {
     var buf: [256]u8 = undefined;
     const line = buildHintLine(false, false, true, "openai/gpt-5", .ask, 0, null, false, false, .auto, false, .{
-        .workspace_label = "/workspace/code/fx",
+        .workspace_label = "/workspace/code/x1",
         .git_branch = "feature/statusline",
     }, 100, &buf);
     try std.testing.expectEqualStrings(
-        "ask · gpt-5 · /workspace/code/fx (feature/statusline)",
+        "ask · gpt-5 · /workspace/code/x1 (feature/statusline)",
         line,
     );
 }
@@ -1026,12 +1100,12 @@ test "buildHintLine shows the workspace and Git branch" {
 test "buildHintLine keeps workspace and branch readable at narrow widths" {
     var buf: [256]u8 = undefined;
     const line = buildHintLine(false, false, true, "openai/gpt-5", .ask, 0, null, false, false, .auto, false, .{
-        .workspace_label = "/a/very/long/path/to/fx-repo",
+        .workspace_label = "/a/very/long/path/to/x1-repo",
         .git_branch = "feature/statusline",
     }, 36, &buf);
     try std.testing.expectEqual(@as(usize, 36), display_width.visibleWidthIgnoringAnsi(line));
     try std.testing.expect(std.mem.startsWith(u8, line, "ask · gpt-5 · "));
-    try std.testing.expect(std.mem.find(u8, line, "fx-repo") != null);
+    try std.testing.expect(std.mem.find(u8, line, "x1-repo") != null);
     try std.testing.expect(std.mem.find(u8, line, "feature/") != null);
     try std.testing.expect(std.mem.endsWith(u8, line, "…)"));
 }
@@ -1063,11 +1137,11 @@ test "buildHintLine shows a non-Git workspace without branch punctuation" {
 test "buildHintLine labels detached HEAD" {
     var buf: [128]u8 = undefined;
     const line = buildHintLine(false, false, true, "openai/gpt-5", .ask, 0, null, false, false, .auto, false, .{
-        .workspace_label = "/tmp/fx",
+        .workspace_label = "/tmp/x1",
         .git_branch = "detached:0123456789ab",
     }, 80, &buf);
     try std.testing.expectEqualStrings(
-        "ask · gpt-5 · /tmp/fx (detached:0123456789ab)",
+        "ask · gpt-5 · /tmp/x1 (detached:0123456789ab)",
         line,
     );
 }
@@ -1142,4 +1216,111 @@ test "buildHintLine clips styled auto mode by visible width" {
     try std.testing.expectEqualStrings(expected, line);
     try std.testing.expectEqual(@as(usize, 13), display_width.visibleWidthIgnoringAnsi(line));
     try std.testing.expect(std.mem.endsWith(u8, line, "gpt-4o"));
+}
+
+fn restoreDefaultPalette() void {
+    color_enabled = true;
+    truecolor_enabled = true;
+    initTheme(false, null);
+}
+
+test "x1 accent has equal-width dark and light sequences for theme retint" {
+    try std.testing.expectEqual(x1_accent_truecolor_dark.len, x1_accent_truecolor_light.len);
+    try std.testing.expectEqual(x1_accent_fallback_dark.len, x1_accent_fallback_light.len);
+    try std.testing.expectEqual(x1_accent_dark_rgb.r, @as(u8, 46));
+    try std.testing.expectEqual(x1_accent_dark_rgb.g, @as(u8, 184));
+    try std.testing.expectEqual(x1_accent_dark_rgb.b, @as(u8, 230));
+    try std.testing.expectEqual(x1_accent_light_rgb.r, @as(u8, 23));
+    try std.testing.expectEqual(x1_accent_light_rgb.g, @as(u8, 127));
+    try std.testing.expectEqual(x1_accent_light_rgb.b, @as(u8, 166));
+}
+
+test "initTheme selects the dark truecolor x1 accent" {
+    restoreDefaultPalette();
+    defer restoreDefaultPalette();
+
+    setTruecolorSupport(true);
+    initTheme(false, null);
+    try std.testing.expectEqualStrings(x1_accent_truecolor_dark, x1_accent_style);
+    try std.testing.expectEqualStrings(x1_accent_truecolor_dark, pickerSelectionStyle(true));
+    try std.testing.expectEqualStrings(dim_style, pickerSelectionStyle(false));
+}
+
+test "initTheme selects the light truecolor x1 accent" {
+    restoreDefaultPalette();
+    defer restoreDefaultPalette();
+
+    setTruecolorSupport(true);
+    initTheme(true, null);
+    try std.testing.expectEqualStrings(x1_accent_truecolor_light, x1_accent_style);
+}
+
+test "initTheme selects 256-color x1 accent fallbacks" {
+    restoreDefaultPalette();
+    defer restoreDefaultPalette();
+
+    setTruecolorSupport(false);
+    initTheme(false, null);
+    try std.testing.expectEqualStrings(x1_accent_fallback_dark, x1_accent_style);
+
+    initTheme(true, null);
+    try std.testing.expectEqualStrings(x1_accent_fallback_light, x1_accent_style);
+}
+
+test "initTheme omits the x1 accent when color is disabled" {
+    restoreDefaultPalette();
+    defer restoreDefaultPalette();
+
+    setColorSupport(false);
+    initTheme(false, null);
+    try std.testing.expectEqualStrings("", x1_accent_style);
+    try std.testing.expectEqualStrings("", pickerSelectionStyle(true));
+}
+
+test "welcomeMessage colors only the X1 identity mark" {
+    restoreDefaultPalette();
+    defer restoreDefaultPalette();
+
+    const message = try welcomeMessage(std.testing.allocator);
+    defer std.testing.allocator.free(message);
+
+    var label_buf: [welcome_build_label_bytes]u8 = undefined;
+    const build_label = try writeBuildLabel(
+        &label_buf,
+        build_channel,
+        main.version,
+        build_options.git_commit,
+    );
+
+    const accent_mark = try std.mem.concat(std.testing.allocator, u8, &.{ x1_accent_style, welcome_mark });
+    defer std.testing.allocator.free(accent_mark);
+    const accent_label = try std.mem.concat(std.testing.allocator, u8, &.{ x1_accent_style, build_label });
+    defer std.testing.allocator.free(accent_label);
+    const accent_url = try std.mem.concat(std.testing.allocator, u8, &.{ x1_accent_style, welcome_url });
+    defer std.testing.allocator.free(accent_url);
+    try std.testing.expect(std.mem.find(u8, message, accent_mark) != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, message, x1_accent_style));
+    try std.testing.expect(std.mem.find(u8, message, accent_label) == null);
+    try std.testing.expect(std.mem.find(u8, message, accent_url) == null);
+    try std.testing.expect(std.mem.find(u8, message, welcome_url) != null);
+    try std.testing.expect(std.mem.find(u8, message, build_label) != null);
+}
+
+test "welcomeMessage keeps identity text when color is disabled" {
+    restoreDefaultPalette();
+    defer restoreDefaultPalette();
+
+    setColorSupport(false);
+    initTheme(false, null);
+
+    const message = try welcomeMessage(std.testing.allocator);
+    defer std.testing.allocator.free(message);
+
+    try std.testing.expectEqualStrings("", x1_accent_style);
+    try std.testing.expect(std.mem.find(u8, message, welcome_mark) != null);
+    try std.testing.expect(std.mem.find(u8, message, welcome_url) != null);
+    try std.testing.expect(std.mem.find(u8, message, x1_accent_truecolor_dark) == null);
+    try std.testing.expect(std.mem.find(u8, message, x1_accent_truecolor_light) == null);
+    try std.testing.expect(std.mem.find(u8, message, x1_accent_fallback_dark) == null);
+    try std.testing.expect(std.mem.find(u8, message, x1_accent_fallback_light) == null);
 }

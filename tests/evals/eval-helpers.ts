@@ -1,7 +1,8 @@
-// Model-backed eval helpers. Requires a built binary and AI_GATEWAY_API_KEY.
+// Isolated TUI fixtures. Requires a built binary.
 import { expect } from "bun:test";
 import { execFileSync, execSync, spawn as nodeSpawn } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,12 +13,71 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-export const FX_BIN = resolve(import.meta.dirname, "../../zig-out/bin/fx");
+export const X1_BIN = resolve(import.meta.dirname, "../../zig-out/bin/x1");
 export const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
+export function writeLayerX1Auth(
+  home: string,
+  options: {
+    accessToken?: string;
+    refreshToken?: string;
+    accountId?: string;
+    expiresAtMs?: number;
+  } = {},
+): string {
+  const x1Dir = join(home, ".x1");
+  mkdirSync(x1Dir, { recursive: true, mode: 0o700 });
+  chmodSync(x1Dir, 0o700);
+  const authPath = join(x1Dir, "layerx1-auth.json");
+  writeFileSync(
+    authPath,
+    JSON.stringify({
+      version: 1,
+      access_token: options.accessToken ?? "seeded-access-token",
+      refresh_token: options.refreshToken ?? "seeded-refresh-token",
+      expires_at_ms: options.expiresAtMs ?? Date.now() + 60 * 60 * 1000,
+      account_id: options.accountId ?? "acct_e2e",
+    }) + "\n",
+    { mode: 0o600 },
+  );
+  chmodSync(authPath, 0o600);
+  return authPath;
+}
+
+export function applyLayerX1E2EEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const next: Record<string, string | undefined> = { ...env };
+  if (next.X1_E2E_LAYERX1_RESPONSES_URL == null) {
+    next.X1_E2E_LAYERX1_RESPONSES_URL =
+      next.X1_E2E_GATEWAY_CHAT_URL ?? next.X1_GATEWAY_CHAT_URL;
+  }
+  if (next.X1_E2E_LAYERX1_MODELS_URL == null) {
+    next.X1_E2E_LAYERX1_MODELS_URL =
+      next.X1_E2E_GATEWAY_MODELS_URL ?? next.X1_GATEWAY_MODELS_URL;
+  }
+  if (next.X1_E2E_LAYERX1_ACCOUNT_URL == null) {
+    next.X1_E2E_LAYERX1_ACCOUNT_URL =
+      next.X1_E2E_GATEWAY_CREDITS_URL ??
+      next.X1_GATEWAY_CREDITS_URL ??
+      next.X1_GATEWAY_ACCOUNT_URL;
+  }
+  const home = next.HOME;
+  const accessToken = next.AI_GATEWAY_API_KEY;
+  if (
+    home &&
+    accessToken &&
+    !existsSync(join(home, ".x1", "layerx1-auth.json"))
+  ) {
+    writeLayerX1Auth(home, { accessToken });
+  }
+  if (next.AI_GATEWAY_API_KEY !== undefined) next.AI_GATEWAY_API_KEY = undefined;
+  if (next.VERCEL_OIDC_TOKEN !== undefined) next.VERCEL_OIDC_TOKEN = undefined;
+  return next;
+}
+
 export const EVAL_MODELS = [
-  "anthropic/claude-sonnet-4.6",
-  "xai/grok-4.20-multi-agent-beta",
+  "lx1-deepseek-v4-flash",
 ] as const;
 
 export const EVAL_MODEL: string = process.env.EVAL_MODEL ?? EVAL_MODELS[0];
@@ -50,7 +110,7 @@ function loadDotEnv(): Record<string, string> {
 export function shouldLoadDotEnv(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return environment.FX_E2E_DISABLE_DOTENV !== "1";
+  return environment.X1_E2E_DISABLE_DOTENV !== "1";
 }
 
 const dotEnvVars = shouldLoadDotEnv() ? loadDotEnv() : {};
@@ -99,9 +159,9 @@ export interface EvalOptions {
   setup?: (dir: string) => Promise<void>;
 }
 
-const PREFIX = "fx-eval-";
-const HOME_PREFIX = "fx-eval-home-";
-const TEST_HOME_PREFIX = "fx-test-home-";
+const PREFIX = "x1-eval-";
+const HOME_PREFIX = "x1-eval-home-";
+const TEST_HOME_PREFIX = "x1-test-home-";
 
 export function createWorkDir(): string {
   return mkdtempSync(join(tmpdir(), PREFIX));
@@ -123,9 +183,9 @@ export function cleanupIsolatedTestHome(home: string): void {
 
 function createEvalHome(): string {
   const home = mkdtempSync(join(tmpdir(), HOME_PREFIX));
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".x1"), { recursive: true, mode: 0o700 });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".x1", "settings.json"),
     JSON.stringify({
       permission_mode: "auto",
       permission: {
@@ -157,7 +217,7 @@ export function buildEvalProcessEnv(
     NO_COLOR: "1",
     HOME: home,
     PATH: process.env.PATH ?? "",
-    FX_MODEL: model,
+    X1_MODEL: model,
   };
 }
 
@@ -175,9 +235,9 @@ export async function runEval(
       await setup(workDir);
     }
 
-    if (!existsSync(FX_BIN)) {
+    if (!existsSync(X1_BIN)) {
       throw new Error(
-        `fx binary not found at ${FX_BIN}. Run 'zig build' first.`,
+        `x1 binary not found at ${X1_BIN}. Run 'zig build' first.`,
       );
     }
 
@@ -197,7 +257,7 @@ export async function runEval(
       code: number | null;
     }>((resolvePromise) => {
       const env = buildEvalProcessEnv(home, model);
-      const child = nodeSpawn(FX_BIN, args, {
+      const child = nodeSpawn(X1_BIN, args, {
         env,
         cwd: workDir,
         stdio: ["pipe", "pipe", "pipe"],
@@ -223,7 +283,7 @@ export async function runEval(
       json = JSON.parse(result.stdout.trim());
     } catch {
       throw new Error(
-        `Failed to parse fx JSON output.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+        `Failed to parse x1 JSON output.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
       );
     }
 
@@ -245,7 +305,7 @@ export async function runEval(
 
     if (json.error) {
       throw new Error(
-        `fx returned error: ${json.error}\nstderr: ${result.stderr.slice(-1000)}`,
+        `x1 returned error: ${json.error}\nstderr: ${result.stderr.slice(-1000)}`,
       );
     }
 
@@ -426,9 +486,9 @@ export function assertFirstTerminalExecMatches(
   expect(pattern.test(first?.command_result?.command ?? "")).toBe(true);
 }
 
-// Generic fx CLI runner for deterministic command coverage.
+// Generic x1 CLI runner for deterministic command coverage.
 
-export interface FxRunResult {
+export interface x1RunResult {
   stdout: string;
   stderr: string;
   code: number | null;
@@ -441,12 +501,12 @@ export interface FxRunResult {
   processStateAfterClose: string;
 }
 
-function captureFxProcessState(): string {
+function capturex1ProcessState(): string {
   try {
     return execFileSync("ps", ["-axo", "pid,ppid,stat,etime,command"], {
       encoding: "utf8",
     }).split("\n").filter((line) =>
-      line.includes("/zig-out/bin/fx") ||
+      line.includes("/zig-out/bin/x1") ||
       line.includes("mcp-modern-") ||
       line.includes("mcp-legacy-") ||
       line.includes("bun test")
@@ -456,7 +516,7 @@ function captureFxProcessState(): string {
   }
 }
 
-export async function runFx(
+export async function runx1(
   args: string[],
   opts: {
     cwd?: string;
@@ -464,14 +524,14 @@ export async function runFx(
     stdin?: string | Uint8Array;
     timeoutMs?: number;
   } = {},
-): Promise<FxRunResult> {
-  if (!existsSync(FX_BIN)) {
-    throw new Error(`fx binary not found at ${FX_BIN}. Run 'zig build' first.`);
+): Promise<x1RunResult> {
+  if (!existsSync(X1_BIN)) {
+    throw new Error(`x1 binary not found at ${X1_BIN}. Run 'zig build' first.`);
   }
 
   const { cwd, timeoutMs = 15_000 } = opts;
 
-  return new Promise<FxRunResult>((resolvePromise) => {
+  return new Promise<x1RunResult>((resolvePromise) => {
     const env: Record<string, string | undefined> = {
       ...dotEnvVars,
       ...process.env,
@@ -479,14 +539,14 @@ export async function runFx(
       HOME: process.env.HOME ?? "",
       PATH: process.env.PATH ?? "",
     };
-    for (const [key, value] of Object.entries(opts.env ?? {})) {
+    for (const [key, value] of Object.entries(applyLayerX1E2EEnv(opts.env ?? {}))) {
       if (value === undefined) {
         delete env[key];
       } else {
         env[key] = value;
       }
     }
-    const child = nodeSpawn(FX_BIN, args, {
+    const child = nodeSpawn(X1_BIN, args, {
       env,
       cwd: cwd ?? REPO_ROOT,
       stdio: ["pipe", "pipe", "pipe"],
@@ -504,7 +564,7 @@ export async function runFx(
     let processStateAtTimeout = "";
     const timer = setTimeout(() => {
       timedOut = true;
-      processStateAtTimeout = captureFxProcessState();
+      processStateAtTimeout = capturex1ProcessState();
       killSent = child.kill("SIGKILL");
     }, timeoutMs);
 
@@ -520,12 +580,10 @@ export async function runFx(
         elapsedMs: performance.now() - startedAtMs,
         pid: child.pid ?? null,
         processStateAtTimeout,
-        processStateAfterClose: code === 0 && !timedOut ? "" : captureFxProcessState(),
+        processStateAfterClose: code === 0 && !timedOut ? "" : capturex1ProcessState(),
       });
     });
   });
 }
 
-export const HAS_API_KEY: boolean = !!(
-  process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN
-);
+export const HAS_API_KEY: boolean = !!process.env.X1_API_KEY;

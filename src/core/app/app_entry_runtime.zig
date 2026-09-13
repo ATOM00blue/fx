@@ -23,7 +23,7 @@ const mcp_runtime = @import("../mcp/mcp_runtime.zig");
 const tool_set_contract = @import("../tooling/tool_set.zig");
 const update_target = @import("../upgrade/update_target.zig");
 const test_builtin_gateway = if (builtin.is_test)
-    @import("../../builtins/gateway.zig")
+    @import("../../builtins/x1.zig")
 else
     struct {};
 const test_builtin_commands = if (builtin.is_test)
@@ -167,7 +167,7 @@ fn runBeforeInteractiveWithDeps(alloc: Allocator, args: []const [:0]const u8, cf
         },
     };
 
-    return beforeInteractiveResultFromRunResult(alloc, run_result, deps.getenv(deps.env_ctx, "FX_BENCH") != null);
+    return beforeInteractiveResultFromRunResult(alloc, run_result, deps.getenv(deps.env_ctx, "X1_BENCH") != null);
 }
 
 fn beforeInteractiveResultFromRunResult(alloc: Allocator, run_result: cli_surface.RunResult, bench: bool) BeforeInteractiveResult {
@@ -188,9 +188,9 @@ fn beforeInteractiveResultFromRunResult(alloc: Allocator, run_result: cli_surfac
 
 fn benchEnabled() bool {
     if (comptime builtin.link_libc) {
-        return std.c.getenv("FX_BENCH") != null;
+        return std.c.getenv("X1_BENCH") != null;
     }
-    return io_mod.getenv("FX_BENCH") != null;
+    return io_mod.getenv("X1_BENCH") != null;
 }
 
 pub fn runInteractive(comptime App: type, alloc: Allocator, launch: *cli_surface.InteractiveLaunch) !RunOutcome {
@@ -212,49 +212,49 @@ fn runInteractiveWithDeps(comptime App: type, comptime cooperative: bool, alloc:
     var app = App.init(alloc, launch) catch |err| {
         switch (err) {
             error.NotATerminal => {
-                writeStderr(deps, "fx requires an interactive terminal (TTY).\n");
+                writeStderr(deps, "x1 requires an interactive terminal (TTY).\n");
                 return .{ .exit = 1 };
             },
             error.TerminalTooSmall => {
-                writeStderr(deps, "fx needs at least 5 terminal rows.\n");
+                writeStderr(deps, "x1 needs at least 5 terminal rows.\n");
                 return .returned;
             },
             error.RecordingStartFailed => {
-                writeStderr(deps, "fx: unable to start terminal recording.\n");
+                writeStderr(deps, "x1: unable to start terminal recording.\n");
                 return .{ .exit = 1 };
             },
             error.NoSavedSessions => {
-                writeStderr(deps, "fx: no saved sessions for this workspace.\n");
+                writeStderr(deps, "x1: no saved sessions for this workspace.\n");
                 return .{ .exit = 1 };
             },
             error.SessionNotFound => {
-                writeStderr(deps, "fx: saved session not found.\n");
+                writeStderr(deps, "x1: saved session not found.\n");
                 return .{ .exit = 1 };
             },
             error.SessionBusy => {
-                writeStderr(deps, "fx: another Fx process may be using this session (running or suspended); check other terminals or run jobs, then use fg or quit that process\n");
+                writeStderr(deps, "x1: another x1 process may be using this session (running or suspended); check other terminals or run jobs, then use fg or quit that process\n");
                 return .{ .exit = 1 };
             },
             error.SessionLockUnsupported => {
-                writeStderr(deps, "fx: the filesystem cannot provide the required session lock\n");
+                writeStderr(deps, "x1: the filesystem cannot provide the required session lock\n");
                 return .{ .exit = 1 };
             },
             error.SessionAuthorityBoundaryUnavailable,
             error.SessionCommitBoundaryUnavailable,
             => {
-                writeStderr(deps, "fx: this session is being updated; wait a moment and retry\n");
+                writeStderr(deps, "x1: this session is being updated; wait a moment and retry\n");
                 return .{ .exit = 1 };
             },
             error.OneOffSessionNotResumable => {
-                writeStderr(deps, "fx: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n");
+                writeStderr(deps, "x1: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n");
                 return .{ .exit = 1 };
             },
             error.InvalidSessionFormat => {
-                writeStderr(deps, "fx: saved session is unreadable. Run `fx doctor`; if it is recoverable, use `fx session recover <id>`.\n");
+                writeStderr(deps, "x1: saved session is unreadable. Run `x1 doctor`; if it is recoverable, use `x1 session recover <id>`.\n");
                 return .{ .exit = 1 };
             },
             error.UnsupportedSessionSchema => {
-                writeStderr(deps, "fx: saved session uses an unsupported version and cannot be resumed by this fx build.\n");
+                writeStderr(deps, "x1: saved session uses an unsupported version and cannot be resumed by this x1 build.\n");
                 return .{ .exit = 1 };
             },
             else => {
@@ -330,7 +330,7 @@ fn runInteractiveWithDeps(comptime App: type, comptime cooperative: bool, alloc:
         } else {
             writeStderr(
                 deps,
-                "fx: upgrade installed, but no validated resume handoff was available. Your conversation remains on disk; run `fx doctor`.\n",
+                "x1: upgrade installed, but no validated resume handoff was available. Your conversation remains on disk; run `x1 doctor`.\n",
             );
         }
         return .{ .exit = 1 };
@@ -357,6 +357,22 @@ fn replaceProcessDefault(
     zio: std.Io,
     options: std.process.ReplaceOptions,
 ) std.process.ReplaceError {
+    if (comptime builtin.os.tag == .windows) {
+        // Windows has no exec(); spawn the upgraded binary with the inherited
+        // console streams and exit so it takes over this terminal.
+        _ = std.process.spawn(zio, .{
+            .argv = options.argv,
+            .stdin = .inherit,
+            .stdout = .inherit,
+            .stderr = .inherit,
+        }) catch |err| return switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            error.FileNotFound => error.FileNotFound,
+            error.InvalidExe => error.InvalidExe,
+            else => error.AccessDenied,
+        };
+        std.process.exit(0);
+    }
     return std.process.replace(zio, options);
 }
 
@@ -368,9 +384,9 @@ fn writeUpgradeRelaunchFailure(
     var buffer: [768]u8 = undefined;
     const message = std.fmt.bufPrint(
         &buffer,
-        "fx: upgrade installed, but relaunch failed: {s}\nContinue session with: fx --resume {s}\n",
+        "x1: upgrade installed, but relaunch failed: {s}\nContinue session with: x1 --resume {s}\n",
         .{ @errorName(err), session_id },
-    ) catch "fx: upgrade installed, but relaunch failed; run `fx doctor`.\n";
+    ) catch "x1: upgrade installed, but relaunch failed; run `x1 doctor`.\n";
     writeStderr(deps, message);
 }
 
@@ -439,13 +455,13 @@ fn writeRealStdout(_: ?*anyopaque, text: []const u8) !void {
 fn formatResumeHandoff(buffer: []u8, session_id: []const u8) ![]const u8 {
     return std.fmt.bufPrint(
         buffer,
-        "Continue session with: fx --resume {s}\n",
+        "Continue session with: x1 --resume {s}\n",
         .{session_id},
     );
 }
 
 fn formatUnexpectedError(buffer: []u8, err: anyerror) ![]const u8 {
-    return std.fmt.bufPrint(buffer, "fx: {s}\n", .{@errorName(err)});
+    return std.fmt.bufPrint(buffer, "x1: {s}\n", .{@errorName(err)});
 }
 
 fn reportUnexpectedInteractiveError(deps: RunDeps, err: anyerror) void {
@@ -459,7 +475,7 @@ fn writeStderr(deps: RunDeps, text: []const u8) void {
 }
 
 fn tryWriteErrorMessage(deps: RunDeps, err: anyerror) void {
-    writeStderr(deps, "fx: ");
+    writeStderr(deps, "x1: ");
     writeStderr(deps, @errorName(err));
     writeStderr(deps, "\n");
 }
@@ -504,11 +520,11 @@ fn testConfig() Config {
         .gateway_retry_count = 2,
         .gateway_chat_url = "https://gateway/chat",
         .gateway_provider = test_builtin_gateway.provider,
-        .provider_set = provider_set.gateway_only(test_builtin_gateway.provider_bundle),
+        .provider_set = provider_set.x1Only(test_builtin_gateway.provider_bundle),
         .url_opener = host.unavailable_url_opener,
         .secret_store = host.unavailable_secret_store,
         .prompt_policy = .{ .system_prompt = "system" },
-        .skill_root_policy = .{ .managed_root_source = .global_fx },
+        .skill_root_policy = .{ .managed_root_source = .global_x1 },
         .ignored_list_entries = &.{ ".git", "zig-out" },
         .max_list_entries = 100,
         .max_read_file_bytes = 1024,
@@ -639,7 +655,7 @@ fn runIfRequestedForTest(ctx: ?*anyopaque, _: Allocator, _: []const [:0]const u8
 
 fn getenvForTest(ctx: ?*anyopaque, key: []const u8) ?[]const u8 {
     const capture: *TestCapture = @ptrCast(@alignCast(ctx.?));
-    if (std.mem.eql(u8, key, "FX_BENCH")) return capture.bench_value;
+    if (std.mem.eql(u8, key, "X1_BENCH")) return capture.bench_value;
     return null;
 }
 
@@ -792,9 +808,8 @@ test "app entry returns after handled CLI success without initializing app" {
     try std.testing.expectEqualStrings("entry_test_tool", capture.seen_config.?.tool_set.order[0]);
     try std.testing.expectEqualStrings("skills", capture.seen_config.?.skill_root_policy.workspace_roots[0].path);
     try std.testing.expect(capture.seen_config.?.gateway_provider.chat_url.resolve_fn == test_builtin_gateway.chat_url_provider.resolve_fn);
-    try std.testing.expect(capture.seen_config.?.provider_set.gateway.cli_model_catalog.?.fetch_fn == test_builtin_gateway.cli_model_catalog_provider.fetch_fn);
-    try std.testing.expect(capture.seen_config.?.provider_set.gateway.fx_search.?.execute_fn == test_builtin_gateway.default_web_search_provider.execute_fn);
-    try std.testing.expect(capture.seen_config.?.provider_set.gateway.model_catalog.?.fetch_fn == test_builtin_gateway.model_catalog_provider.fetch_fn);
+    try std.testing.expect(capture.seen_config.?.provider_set.layerx1.cli_model_catalog.?.fetch_fn == test_builtin_gateway.cli_model_catalog_provider.fetch_fn);
+    try std.testing.expect(capture.seen_config.?.provider_set.layerx1.model_catalog.?.fetch_fn == test_builtin_gateway.model_catalog_provider.fetch_fn);
     try std.testing.expect(
         capture.seen_config.?.background_process_provider.spawn_prepared_fn ==
             cfg.background_process_provider.spawn_prepared_fn,
@@ -840,7 +855,7 @@ test "app entry returns after handled zero exit without initializing app" {
     try std.testing.expectEqual(@as(usize, 0), test_event_count);
 }
 
-test "app entry honors FX_BENCH before app initialization" {
+test "app entry honors X1_BENCH before app initialization" {
     const alloc = std.testing.allocator;
     var capture = TestCapture.init(.{ .interactive = .{} });
     defer capture.deinit();
@@ -874,7 +889,7 @@ test "app entry writes exact resume handoff after interactive teardown" {
 
     try std.testing.expectEqual(RunOutcome.returned, outcome);
     try std.testing.expectEqualStrings(
-        "Continue session with: fx --resume session-123\n",
+        "Continue session with: x1 --resume session-123\n",
         capture.stdout.written(),
     );
     try std.testing.expectEqual(@as(usize, 1), capture.stdout_calls);
@@ -899,7 +914,7 @@ test "app entry relaunches only after teardown with the validated handoff" {
     var capture = TestCapture.init(.{ .interactive = .{} });
     defer capture.deinit();
     capture.resume_handoff_id = "session-123";
-    capture.upgrade_relaunch_path = "/tmp/fx-upgraded";
+    capture.upgrade_relaunch_path = "/tmp/x1-upgraded";
     capture.record_stderr_event = true;
 
     const outcome = try runWithDeps(
@@ -913,7 +928,7 @@ test "app entry relaunches only after teardown with the validated handoff" {
     try std.testing.expectEqual(@as(u8, 1), outcome.exit);
     try std.testing.expectEqual(@as(usize, 1), capture.replace_calls);
     try std.testing.expectEqual(@as(usize, 4), capture.replace_arg_count);
-    try std.testing.expectEqualStrings("/tmp/fx-upgraded", capture.replaceArg(0));
+    try std.testing.expectEqualStrings("/tmp/x1-upgraded", capture.replaceArg(0));
     try std.testing.expectEqualStrings("resume", capture.replaceArg(1));
     try std.testing.expectEqualStrings("session-123", capture.replaceArg(2));
     try std.testing.expectEqualStrings("--upgrade-relaunch", capture.replaceArg(3));
@@ -925,7 +940,7 @@ test "app entry relaunches only after teardown with the validated handoff" {
     try std.testing.expect(std.mem.find(
         u8,
         capture.stderr.written(),
-        "fx --resume session-123",
+        "x1 --resume session-123",
     ) != null);
     try expectEvents(&.{
         "init:none",
@@ -946,7 +961,7 @@ test "app entry never relaunches without a validated handoff" {
     const alloc = std.testing.allocator;
     var capture = TestCapture.init(.{ .interactive = .{} });
     defer capture.deinit();
-    capture.upgrade_relaunch_path = "/tmp/fx-upgraded";
+    capture.upgrade_relaunch_path = "/tmp/x1-upgraded";
 
     const outcome = try runWithDeps(
         TestApp,
@@ -993,7 +1008,7 @@ test "app entry reports unexpected init errors once and preserves identity" {
     capture.record_stderr_event = true;
 
     try std.testing.expectError(error.TestInitFailed, runWithDeps(TestApp, alloc, &.{}, testConfig(), capture.deps()));
-    try std.testing.expectEqualStrings("fx: TestInitFailed\n", capture.stderr.written());
+    try std.testing.expectEqualStrings("x1: TestInitFailed\n", capture.stderr.written());
     try std.testing.expectEqual(@as(usize, 1), capture.stderr_calls);
     try expectEvents(&.{ "init:none", "stderr-attempt" });
 }
@@ -1006,7 +1021,7 @@ test "app entry releases terminal before reporting worker start errors" {
     capture.record_stderr_event = true;
 
     try std.testing.expectError(error.TestWorkerStartFailed, runWithDeps(TestApp, alloc, &.{}, testConfig(), capture.deps()));
-    try std.testing.expectEqualStrings("fx: TestWorkerStartFailed\n", capture.stderr.written());
+    try std.testing.expectEqualStrings("x1: TestWorkerStartFailed\n", capture.stderr.written());
     try std.testing.expectEqual(@as(usize, 1), capture.stderr_calls);
     try expectEvents(&.{ "init:none", "mcp-discovery", "rebind-after-init", "auto-upgrade", "file-index", "worker-thread", "terminal-release", "stderr-attempt", "deinit" });
 }
@@ -1032,7 +1047,7 @@ test "app entry releases terminal before reporting initial context failures exac
         var expected_stderr_buf: [64]u8 = undefined;
         const expected_stderr = try std.fmt.bufPrint(
             &expected_stderr_buf,
-            "fx: {s}\n",
+            "x1: {s}\n",
             .{@errorName(expected_error)},
         );
         try std.testing.expectEqualStrings(expected_stderr, capture.stderr.written());
@@ -1061,7 +1076,7 @@ test "app entry reports run errors before deinit and outer cleanup" {
     capture.record_stderr_event = true;
 
     try std.testing.expectError(error.TestRunFailed, runWithOuterCleanup(TestApp, alloc, &.{}, testConfig(), capture.deps()));
-    try std.testing.expectEqualStrings("fx: TestRunFailed\n", capture.stderr.written());
+    try std.testing.expectEqualStrings("x1: TestRunFailed\n", capture.stderr.written());
     try std.testing.expectEqual(@as(usize, 1), capture.stderr_calls);
     try std.testing.expectEqual(@as(usize, 0), capture.stdout_calls);
     try expectEvents(&.{ "init:none", "mcp-discovery", "rebind-after-init", "auto-upgrade", "file-index", "worker-thread", "model-cache", "run", "terminal-release", "stderr-attempt", "deinit", "outer-defer" });
@@ -1147,7 +1162,7 @@ test "app entry maps noninteractive terminal startup to exit one" {
     const outcome = try runWithDeps(TestApp, alloc, &.{}, testConfig(), capture.deps());
 
     try std.testing.expectEqual(@as(u8, 1), outcome.exit);
-    try std.testing.expectEqualStrings("fx requires an interactive terminal (TTY).\n", capture.stderr.written());
+    try std.testing.expectEqualStrings("x1 requires an interactive terminal (TTY).\n", capture.stderr.written());
     try expectEvents(&.{"init:none"});
 }
 
@@ -1159,7 +1174,7 @@ test "app entry maps missing saved sessions to exit one" {
     const outcome = try runWithDeps(TestApp, alloc, &.{}, testConfig(), capture.deps());
 
     try std.testing.expectEqual(@as(u8, 1), outcome.exit);
-    try std.testing.expectEqualStrings("fx: no saved sessions for this workspace.\n", capture.stderr.written());
+    try std.testing.expectEqualStrings("x1: no saved sessions for this workspace.\n", capture.stderr.written());
 }
 
 test "app entry maps unavailable session state to one expected startup failure" {
@@ -1170,23 +1185,23 @@ test "app entry maps unavailable session state to one expected startup failure" 
     }{
         .{
             .init_error = error.SessionBusy,
-            .message = "fx: another Fx process may be using this session (running or suspended); check other terminals or run jobs, then use fg or quit that process\n",
+            .message = "x1: another x1 process may be using this session (running or suspended); check other terminals or run jobs, then use fg or quit that process\n",
         },
         .{
             .init_error = error.SessionLockUnsupported,
-            .message = "fx: the filesystem cannot provide the required session lock\n",
+            .message = "x1: the filesystem cannot provide the required session lock\n",
         },
         .{
             .init_error = error.SessionAuthorityBoundaryUnavailable,
-            .message = "fx: this session is being updated; wait a moment and retry\n",
+            .message = "x1: this session is being updated; wait a moment and retry\n",
         },
         .{
             .init_error = error.SessionCommitBoundaryUnavailable,
-            .message = "fx: this session is being updated; wait a moment and retry\n",
+            .message = "x1: this session is being updated; wait a moment and retry\n",
         },
         .{
             .init_error = error.OneOffSessionNotResumable,
-            .message = "fx: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n",
+            .message = "x1: one-off child sessions cannot accept additional prompts; create a persistent child to continue the conversation\n",
         },
     };
 

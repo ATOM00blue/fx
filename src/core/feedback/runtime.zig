@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub const url = "https://fx.sh/feedback";
+pub const url = "https://layerx1.com/feedback";
 
-test "feedback URL stays on the fx.sh domain" {
-    try std.testing.expectEqualStrings("https://fx.sh/feedback", url);
+test "feedback URL stays on the LayerX1 domain" {
+    try std.testing.expectEqualStrings("https://layerx1.com/feedback", url);
 }

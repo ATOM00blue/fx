@@ -340,7 +340,7 @@ pub const AdmissionSnapshot = struct {
     parent_id: []u8,
     source_id: []u8,
     model: []u8,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     effort: types.ReasoningEffort,
     permission_mode: types.PermissionMode = .yolo,
     tool_names: [][]u8,
@@ -411,7 +411,7 @@ pub const AdmissionInput = struct {
     parent_id: []const u8,
     source_id: []const u8,
     model: []const u8,
-    provider: model_provider.ProviderId = .gateway,
+    provider: model_provider.ProviderId = .layerx1,
     effort: types.ReasoningEffort,
     permission_mode: types.PermissionMode = .yolo,
     tool_names: []const []const u8 = &.{},
@@ -1168,7 +1168,7 @@ pub const OperationRequestFingerprintInput = struct {
 
 pub fn operationRequestFingerprint(input: OperationRequestFingerprintInput) [32]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.operation-request.v1\x00");
+    hash.update("x1.subagent.operation-request.v1\x00");
     hashString(&hash, input.actor_id);
     hashString(&hash, input.target_id);
     hashOptionalString(&hash, input.source_id);
@@ -1250,7 +1250,7 @@ pub fn legacyImplicitAutoCreateRequestFingerprint(
     if (create.permission_mode_explicit) return null;
 
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.operation-request.v1\x00");
+    hash.update("x1.subagent.operation-request.v1\x00");
     hashString(&hash, input.actor_id);
     hashString(&hash, input.target_id);
     hashOptionalString(&hash, input.source_id);
@@ -1266,7 +1266,7 @@ pub fn legacyImplicitAutoCreateRequestFingerprint(
 
 pub fn operationFingerprint(input: OperationFingerprintInput) [32]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.operation-effect.v1\x00");
+    hash.update("x1.subagent.operation-effect.v1\x00");
     const request_fingerprint = operationRequestFingerprint(.{
         .command = input.command,
         .actor_id = input.actor_id,

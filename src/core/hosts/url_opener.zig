@@ -54,9 +54,12 @@ fn launchUrl(
 ) LaunchOutcome {
     var macos_argv = [_][]const u8{ "open", url };
     var linux_argv = [_][]const u8{ "xdg-open", url };
+    // `start` treats the first quoted argument as the window title.
+    var windows_argv = [_][]const u8{ "cmd", "/c", "start", "", url };
     const argv: []const []const u8 = switch (os_tag) {
         .macos => &macos_argv,
         .linux => &linux_argv,
+        .windows => &windows_argv,
         else => return .unsupported,
     };
 
@@ -116,13 +119,18 @@ test "url opener selects the platform launcher argv" {
     defer linux.deinit(alloc);
     try std.testing.expectEqual(LaunchOutcome.opened, launchUrl(alloc, "http://localhost:3000", .linux, linux.launcher()));
     try std.testing.expectEqualStrings("xdg-open http://localhost:3000", linux.argv_joined.items);
+
+    var windows = MockLauncher{};
+    defer windows.deinit(alloc);
+    try std.testing.expectEqual(LaunchOutcome.opened, launchUrl(alloc, "http://localhost:3000", .windows, windows.launcher()));
+    try std.testing.expectEqualStrings("cmd /c start  http://localhost:3000", windows.argv_joined.items);
 }
 
 test "url opener reports unsupported platforms without launching" {
     const alloc = std.testing.allocator;
     var mock = MockLauncher{};
     defer mock.deinit(alloc);
-    try std.testing.expectEqual(LaunchOutcome.unsupported, launchUrl(alloc, "http://x", .windows, mock.launcher()));
+    try std.testing.expectEqual(LaunchOutcome.unsupported, launchUrl(alloc, "http://x", .wasi, mock.launcher()));
     try std.testing.expectEqualStrings("", mock.argv_joined.items);
 }
 
