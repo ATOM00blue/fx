@@ -4,7 +4,6 @@ pub const prompt = @import("prompt.zig");
 pub const runtime = @import("runtime.zig");
 pub const tool = @import("tool.zig");
 
-pub const HookDefinition = definitions.HookDefinition;
 pub const HookKind = definitions.HookKind;
 pub const pre_tool_use = definitions.pre_tool_use;
 pub const stop = definitions.stop;

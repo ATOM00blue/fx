@@ -11282,10 +11282,6 @@ test "transcript runtime initializer preserves an empty compact source cache" {
     );
 }
 
-fn frameBandsEqual(a: render_engine.paint_plan.FrameBand, b: render_engine.paint_plan.FrameBand) bool {
-    return a.top == b.top and a.bottom == b.bottom and a.owner == b.owner;
-}
-
 fn totalVisualRows(line_rows: []const u16) u32 {
     var total: u32 = 0;
     for (line_rows) |rows| {

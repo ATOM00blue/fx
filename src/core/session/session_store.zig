@@ -127,7 +127,6 @@ pub const ResumeTarget = store_types.ResumeTarget;
 pub const SessionMigrationResult = store_types.SessionMigrationResult;
 pub const SessionMigrationStatus = store_types.SessionMigrationStatus;
 pub const SessionRecoveryResult = store_types.SessionRecoveryResult;
-pub const SessionRecoveryStatus = store_types.SessionRecoveryStatus;
 pub const SessionSummary = store_types.SessionSummary;
 pub const HistoryPage = store_types.HistoryPage;
 
@@ -335,7 +334,6 @@ const ResumableSessionScope = enum {
 };
 pub const StorageFormat = store_types.StorageFormat;
 const automatic_legacy_max_bytes = store_types.automatic_legacy_max_bytes;
-const max_session_bytes = store_types.max_session_bytes;
 const StoreContext = store_types.StoreContext;
 const freeSummaries = summary_codec.freeSummaries;
 const resumablePageFromSummaries = summary_codec.resumablePageFromSummaries;

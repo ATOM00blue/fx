@@ -1379,16 +1379,6 @@ fn parseOptionalBackgroundRecordId(
     return id;
 }
 
-fn writeHexString(writer: *std.Io.Writer, bytes: []const u8) !void {
-    try writer.writeByte('"');
-    const alphabet = "0123456789abcdef";
-    for (bytes) |byte| {
-        try writer.writeByte(alphabet[byte >> 4]);
-        try writer.writeByte(alphabet[byte & 0x0f]);
-    }
-    try writer.writeByte('"');
-}
-
 noinline fn requireObject(value: std.json.Value) !std.json.ObjectMap {
     if (value != .object) return error.InvalidSessionFormat;
     return value.object;

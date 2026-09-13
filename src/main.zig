@@ -131,7 +131,6 @@ const js_host_stream_provider = @import("gateway/js_host_stream_provider.zig");
 const js_host_model_catalog = @import("gateway/js_host_model_catalog.zig");
 const url_opener = @import("core/hosts/url_opener.zig");
 const event_loop = @import("ui/event_loop.zig");
-const wasm_terminal = if (host_target.is_wasm) @import("ui/terminal/wasm_terminal.zig") else struct {};
 const footer_runtime = @import("ui/footer/runtime.zig");
 const question_ui = @import("ui/footer/question_ui.zig");
 const ui_input = @import("ui/input/runtime.zig");

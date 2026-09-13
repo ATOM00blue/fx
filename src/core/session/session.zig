@@ -184,7 +184,6 @@ pub fn copyWorkIdToTurn(
 pub const freeHistoryTurn = core_types.freeHistoryTurn;
 pub const dupeToolCall = core_types.dupeToolCall;
 pub const freeToolCall = core_types.freeToolCall;
-pub const dupeCompletedToolNames = core_types.dupeCompletedToolNames;
 pub const freeCompletedToolNames = core_types.freeCompletedToolNames;
 pub const ExecutionMemory = core_types.ExecutionMemory;
 pub const ToolExecutionStep = core_types.ToolExecutionStep;

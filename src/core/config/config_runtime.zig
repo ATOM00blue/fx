@@ -758,12 +758,6 @@ fn diagnosticCauseForUserStoreError(err: anyerror) ConfigDiagnosticCause {
     };
 }
 
-pub fn loadStartupStatusSettings(alloc: Allocator, workspace_root: []const u8) !StartupStatusSettings {
-    var paths = try discoverPaths(alloc, workspace_root);
-    defer paths.deinit(alloc);
-    return loadStartupStatusSettingsFromPaths(alloc, paths);
-}
-
 pub fn loadStartupStatusSettingsFromHome(alloc: Allocator, home_dir: []const u8, workspace_root: []const u8) !StartupStatusSettings {
     var paths = try discoverPathsFromHome(alloc, home_dir, workspace_root);
     defer paths.deinit(alloc);

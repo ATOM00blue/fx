@@ -26,7 +26,6 @@ fn oauthAuthEnabled(comptime App: type) bool {
 
 const ProviderSwitchDecision = auth_transition.ProviderSwitchDecision;
 const ProviderSwitchIntent = auth_transition.ProviderSwitchIntent;
-const ProviderSwitchFacts = auth_transition.ProviderSwitchFacts;
 const decideProviderSwitch = auth_transition.decideProviderSwitch;
 const provider_busy_message = "Provider switching is unavailable until active and queued work finishes.";
 

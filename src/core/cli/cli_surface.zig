@@ -599,10 +599,6 @@ pub fn runIfRequested(alloc: Allocator, args: []const [:0]const u8, cfg: Config)
     return runIfRequestedWithDeps(alloc, args, cfg, .{});
 }
 
-pub fn runNoConfigIfRequested(alloc: Allocator, args: []const [:0]const u8, version: []const u8, command_catalog: CommandCatalog) !bool {
-    return runNoConfigIfRequestedWithDeps(alloc, args, version, command_catalog, .{});
-}
-
 fn runNoConfigIfRequestedWithDeps(
     alloc: Allocator,
     args: []const [:0]const u8,

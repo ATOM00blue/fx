@@ -3041,12 +3041,6 @@ fn gatewaySourceAtIndex(sources: SourceSet, wanted_index: usize) ?credentials.So
     return null;
 }
 
-fn optionalBytesEqual(a: ?[]const u8, b: ?[]const u8) bool {
-    if (a == null and b == null) return true;
-    if (a == null or b == null) return false;
-    return std.mem.eql(u8, a.?, b.?);
-}
-
 fn credentialAuthorityFacts(credential: credentials.Credential) auth_transition.CredentialAuthorityFacts {
     return .{
         .provider = switch (credential.source) {

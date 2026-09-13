@@ -122,7 +122,6 @@ pub fn themeNeedsUpdate(light: bool, terminal_bg: ?TerminalRgb) bool {
 }
 
 // Explicit theme overrides skip OSC 11, leaving `rgb` null for fallback shading.
-pub const TerminalBackground = theme_protocol.Background;
 pub const explicitThemeOverride = theme_detection.explicitThemeOverride;
 pub const detectTheme = theme_detection.detectTheme;
 pub const parseOsc11Response = theme_protocol.parseOsc11Response;

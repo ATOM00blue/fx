@@ -700,16 +700,6 @@ fn isLoopbackHttpUrl(url: []const u8) bool {
         std.mem.eql(u8, host_name, "[::1]");
 }
 
-fn requestAccepted(
-    alloc: Allocator,
-    transport: oauth_transport.Provider,
-    method: oauth_transport.Method,
-    url: []const u8,
-    payload: []const u8,
-) ![]u8 {
-    return requestAcceptedWithBounds(alloc, transport, method, url, payload, null, null);
-}
-
 fn requestAcceptedWithBounds(
     alloc: Allocator,
     transport: oauth_transport.Provider,

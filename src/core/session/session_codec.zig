@@ -2673,16 +2673,6 @@ fn writeOptionalU32(writer: *std.Io.Writer, value: ?u32) !void {
     }
 }
 
-fn writeHexString(writer: *std.Io.Writer, bytes: []const u8) !void {
-    try writer.writeByte('"');
-    const alphabet = "0123456789abcdef";
-    for (bytes) |byte| {
-        try writer.writeByte(alphabet[byte >> 4]);
-        try writer.writeByte(alphabet[byte & 0x0f]);
-    }
-    try writer.writeByte('"');
-}
-
 noinline fn writeJsonString(writer: *std.Io.Writer, bytes: []const u8) !void {
     try std.json.Stringify.value(bytes, .{}, writer);
 }

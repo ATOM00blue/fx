@@ -77,9 +77,7 @@ const PostEffectTerminalFailure = struct {
     }
 };
 
-const read_file_advertised_names = [_][]const u8{"read_file"};
 const terminal_advertised_names = [_][]const u8{"shell"};
-const read_file_advertised_functions = [_]model_tool_schema.FunctionSchema{builtin_tools.read_file.model_schema};
 const terminal_advertised_functions = [_]model_tool_schema.FunctionSchema{builtin_tools.shell.model_schema};
 
 fn makeOwnedVisionCatalog(

@@ -87,14 +87,12 @@ const ToolPermissionDecision = types.ToolPermissionDecision;
 const ToolExecutionResult = tool_contracts.ToolExecutionResult;
 const SessionRuntime = session_runtime.SessionRuntime;
 const WorkerRuntime = worker_runtime.WorkerRuntime;
-const max_file_mutation_success_bytes: usize = 8 * 1024;
 
 const helpers = struct {
     const requiredStringArg = tool_args.requiredStringArg;
     const parseToolArgsObject = tool_args.parseToolArgsObject;
 };
 
-const optionalIntArg = tool_args.optionalIntArg;
 const parseToolArgsObject = helpers.parseToolArgsObject;
 const context_limits = @import("../config/context_limits.zig");
 const workspace_access = @import("../workspace/workspace_access.zig");
@@ -2391,31 +2389,6 @@ const CancelTestCommandOnOutput = struct {
         if (std.mem.find(u8, chunk, self.needle) == null) return;
         self.seen = true;
         self.flag.store(true, .seq_cst);
-    }
-};
-
-const TestCommandOutputCapture = struct {
-    alloc: Allocator,
-    bytes: std.ArrayList(u8) = .empty,
-    stdout_chunks: usize = 0,
-    stderr_chunks: usize = 0,
-
-    fn deinit(self: *@This()) void {
-        self.bytes.deinit(self.alloc);
-    }
-
-    fn onChunk(
-        raw_ctx: *anyopaque,
-        _: ?types.ToolLifecycleId,
-        stream: command_contract.CommandOutputStream,
-        chunk: []const u8,
-    ) !void {
-        const self: *@This() = @ptrCast(@alignCast(raw_ctx));
-        try self.bytes.appendSlice(self.alloc, chunk);
-        switch (stream) {
-            .stdout => self.stdout_chunks += 1,
-            .stderr => self.stderr_chunks += 1,
-        }
     }
 };
 

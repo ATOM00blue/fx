@@ -11545,12 +11545,6 @@ const ApprovalOwnershipSubagents = struct {
     }
 };
 
-const ApprovalOwnershipApp = struct {
-    approval_prompt: approval_prompt.ApprovalPrompt = .{},
-    approval_screen: interaction_state.ApprovalScreenState = .{},
-    subagents: ApprovalOwnershipSubagents = .{},
-};
-
 test "app_input_runtime consumes legacy X10 reports during active file approval" {
     const alloc = std.testing.allocator;
 

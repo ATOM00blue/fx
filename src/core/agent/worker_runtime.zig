@@ -2763,11 +2763,6 @@ fn appendGrantToQueuedPrompt(alloc: std.mem.Allocator, prompt: *QueuedPrompt, to
     prompt.grants = next;
 }
 
-fn freeStringSlice(alloc: std.mem.Allocator, values: [][]u8) void {
-    for (values) |value| alloc.free(value);
-    if (values.len > 0) alloc.free(values);
-}
-
 fn appendHistoryTurnProjection(
     alloc: std.mem.Allocator,
     current: []const types.HistoryTurn,
